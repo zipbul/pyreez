@@ -533,10 +533,10 @@ Pyreez가 직접 HTTP로 LLM API 호출. Bun 내장 `fetch` 사용. SDK 없음.
 
 | 단위 | 내용 | 상태 |
 |---|---|---|
-| B1 | Agent/FeatureTeam 제거 (레거시 MVP 코드) | ❌ |
-| B2 | MCP 도구 5개 등록 (route, ask, ask_many, scores, report) | ❌ |
-| B3 | Report 모듈 (호출 기록, 비용 추적) | ❌ |
-| B4 | Score 갱신 워크플로우 (report → scores/models.json 반영) | ❌ |
+| B1 | Agent/FeatureTeam 제거 (레거시 MVP 코드) | ✅ |
+| B2 | MCP 도구 5개 등록 (route, ask, ask_many, scores, report) | ✅ |
+| B3 | Report 모듈 (호출 기록, 비용 추적) | ✅ |
+| B4 | Score 갱신 워크플로우 — FileReporter 영속화 + CallRecord 확장(context/team) + summary 모드 | ✅ |
 
 ### Phase C: 고도화
 
@@ -600,7 +600,8 @@ Pyreez가 직접 HTTP로 LLM API 호출. Bun 내장 `fetch` 사용. SDK 없음.
 
 #### ~~DR-018: Bayesian EMA α 감쇠 스케줄~~
 
-- **폐기 사유:** 자동 점수 갱신 폐기. scores/models.json을 에이전트/사람이 수동 갱신 → commit.
+- **폐기 사유:** 수학적 자동 점수 갱신 폐기. Orchestrator가 매 호출 후 AI 판단으로 갱신 여부 결정. scores/models.json 직접 수정 → commit.
+- **대체 설계:** 2-Layer 평가 — Team Leader(1차 quality) + Orchestrator(2차 갱신 판단). CallRecord에 context metrics + team metadata 포함. FileReporter로 `.pyreez/reports/{date}.jsonl` 영속화.
 
 ---
 

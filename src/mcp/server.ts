@@ -22,6 +22,7 @@ export interface PyreezMcpServerConfig {
   registry: ModelRegistry;
   reporter: Reporter;
   routeFn: (prompt: string, budget?: BudgetConfig) => RouteResult | null;
+  summaryFn?: () => Promise<import("../report/types").ReportSummary>;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -32,6 +33,7 @@ export class PyreezMcpServer {
   private readonly registry: ModelRegistry;
   private readonly reporter: Reporter;
   private readonly routeFn: PyreezMcpServerConfig["routeFn"];
+  private readonly summaryFn?: PyreezMcpServerConfig["summaryFn"];
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -55,6 +57,7 @@ export class PyreezMcpServer {
     this.registry = config.registry;
     this.reporter = config.reporter;
     this.routeFn = config.routeFn;
+    this.summaryFn = config.summaryFn;
 
     this.registerTools();
   }
@@ -154,18 +157,54 @@ export class PyreezMcpServer {
       "pyreez_report",
       {
         title: "Pyreez Report",
-        description: "Record an LLM call result for quality tracking",
+        description:
+          'Record an LLM call result for quality tracking, or retrieve summary (action="summary")',
         inputSchema: z.object({
-          model: z.string().describe("Model ID used"),
-          task_type: z.string().describe("Task type from classification"),
-          quality: z.number().describe("Quality score (0-10)"),
-          latency_ms: z.number().describe("Latency in milliseconds"),
+          action: z
+            .enum(["record", "summary"])
+            .optional()
+            .describe('Action: "record" (default) or "summary"'),
+          model: z.string().optional().describe("Model ID used"),
+          task_type: z
+            .string()
+            .optional()
+            .describe("Task type from classification"),
+          quality: z
+            .number()
+            .optional()
+            .describe("Quality score (0-10)"),
+          latency_ms: z
+            .number()
+            .optional()
+            .describe("Latency in milliseconds"),
           tokens: z
             .object({
               input: z.number().describe("Input token count"),
               output: z.number().describe("Output token count"),
             })
+            .optional()
             .describe("Token usage"),
+          context: z
+            .object({
+              window_size: z.number().describe("Model context window size"),
+              utilization: z
+                .number()
+                .describe("Input tokens / window size (0.0-1.0)"),
+              estimated_waste: z
+                .number()
+                .optional()
+                .describe("Estimated unnecessary token ratio"),
+            })
+            .optional()
+            .describe("Context utilization metrics"),
+          team_id: z
+            .string()
+            .optional()
+            .describe("Team identifier for team-level evaluation"),
+          leader_id: z
+            .string()
+            .optional()
+            .describe("Team Leader model ID"),
         }),
       },
       async (args) => this.handleReport(args),
@@ -315,14 +354,40 @@ export class PyreezMcpServer {
   }
 
   async handleReport(args: {
-    model: string;
-    task_type: string;
-    quality: number;
-    latency_ms: number;
-    tokens: { input: number; output: number };
+    action?: string;
+    model?: string;
+    task_type?: string;
+    quality?: number;
+    latency_ms?: number;
+    tokens?: { input: number; output: number };
+    context?: {
+      window_size: number;
+      utilization: number;
+      estimated_waste?: number;
+    };
+    team_id?: string;
+    leader_id?: string;
   }): Promise<CallToolResult> {
+    const action = args.action ?? "record";
+
+    if (action === "summary") {
+      if (!this.summaryFn) {
+        return this.errorResult("Error: summary not available");
+      }
+      try {
+        const summary = await this.summaryFn();
+        return this.textResult(JSON.stringify(summary, null, 2));
+      } catch (error) {
+        return this.errorResult(
+          `Error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     if (!args.model || !args.task_type || args.quality == null) {
-      return this.errorResult("Error: model, task_type, and quality are required");
+      return this.errorResult(
+        "Error: model, task_type, and quality are required",
+      );
     }
 
     try {
@@ -330,8 +395,17 @@ export class PyreezMcpServer {
         model: args.model,
         taskType: args.task_type,
         quality: args.quality,
-        latencyMs: args.latency_ms,
-        tokens: args.tokens,
+        latencyMs: args.latency_ms ?? 0,
+        tokens: args.tokens ?? { input: 0, output: 0 },
+        context: args.context
+          ? {
+              windowSize: args.context.window_size,
+              utilization: args.context.utilization,
+              estimatedWaste: args.context.estimated_waste,
+            }
+          : undefined,
+        teamId: args.team_id,
+        leaderId: args.leader_id,
       };
       await this.reporter.record(record);
       return this.textResult(JSON.stringify({ recorded: true }));

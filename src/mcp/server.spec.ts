@@ -674,6 +674,124 @@ describe("PyreezMcpServer", () => {
         "storage full",
       );
     });
+
+    it("should record call with context metrics when context provided", async () => {
+      const reporter = stubReporter();
+      const server = new PyreezMcpServer(validConfig({ reporter }));
+
+      const result = await server.handleReport({
+        model: "openai/gpt-4.1",
+        task_type: "CODE_WRITE",
+        quality: 8,
+        latency_ms: 1200,
+        tokens: { input: 100, output: 200 },
+        context: { window_size: 128000, utilization: 0.45, estimated_waste: 0.1 },
+      });
+
+      expect(result.isError).toBeUndefined();
+      const recordCall = (reporter.record as ReturnType<typeof mock>).mock
+        .calls[0][0];
+      expect(recordCall.context).toEqual({
+        windowSize: 128000,
+        utilization: 0.45,
+        estimatedWaste: 0.1,
+      });
+    });
+
+    it("should record call with team metadata when team_id and leader_id provided", async () => {
+      const reporter = stubReporter();
+      const server = new PyreezMcpServer(validConfig({ reporter }));
+
+      const result = await server.handleReport({
+        model: "openai/gpt-4.1",
+        task_type: "CODE_WRITE",
+        quality: 8,
+        latency_ms: 1200,
+        tokens: { input: 100, output: 200 },
+        team_id: "team-alpha",
+        leader_id: "openai/gpt-4.1",
+      });
+
+      expect(result.isError).toBeUndefined();
+      const recordCall = (reporter.record as ReturnType<typeof mock>).mock
+        .calls[0][0];
+      expect(recordCall.teamId).toBe("team-alpha");
+      expect(recordCall.leaderId).toBe("openai/gpt-4.1");
+    });
+
+    it("should return summary when action is summary", async () => {
+      const summaryData = {
+        totalRecords: 5,
+        models: {
+          "openai/gpt-4.1": {
+            count: 3,
+            avgQuality: 8.5,
+            avgLatencyMs: 1000,
+            avgTokens: { input: 100, output: 200 },
+            avgContextUtilization: 0.4,
+          },
+        },
+      };
+      const summaryFn = mock(() => Promise.resolve(summaryData));
+      const server = new PyreezMcpServer(validConfig({ summaryFn }));
+
+      const result = await server.handleReport({ action: "summary" });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.totalRecords).toBe(5);
+      expect(parsed.models["openai/gpt-4.1"].count).toBe(3);
+      expect(summaryFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("should return error when action is summary but summaryFn not configured", async () => {
+      const server = new PyreezMcpServer(validConfig());
+
+      const result = await server.handleReport({ action: "summary" });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain(
+        "summary not available",
+      );
+    });
+
+    it("should return error when summaryFn throws", async () => {
+      const summaryFn = mock(() =>
+        Promise.reject(new Error("read failed")),
+      );
+      const server = new PyreezMcpServer(validConfig({ summaryFn }));
+
+      const result = await server.handleReport({ action: "summary" });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain(
+        "read failed",
+      );
+    });
+
+    it("should record with partial optional fields mapping correctly", async () => {
+      const reporter = stubReporter();
+      const server = new PyreezMcpServer(validConfig({ reporter }));
+
+      const result = await server.handleReport({
+        model: "openai/gpt-4.1",
+        task_type: "CODE_WRITE",
+        quality: 7,
+        latency_ms: 800,
+        tokens: { input: 50, output: 100 },
+        context: { window_size: 128000, utilization: 0.3 },
+      });
+
+      expect(result.isError).toBeUndefined();
+      const recordCall = (reporter.record as ReturnType<typeof mock>).mock
+        .calls[0][0];
+      expect(recordCall.context).toEqual({
+        windowSize: 128000,
+        utilization: 0.3,
+      });
+      expect(recordCall.teamId).toBeUndefined();
+      expect(recordCall.leaderId).toBeUndefined();
+    });
   });
 
   // === Lifecycle ===
