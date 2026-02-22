@@ -12,14 +12,16 @@ import { loadConfigFromEnv } from "./config";
 import { LLMClient } from "./llm/client";
 import { PyreezMcpServer } from "./mcp/server";
 import { ModelRegistry } from "./model/registry";
-import { InMemoryReporter } from "./report/reporter";
+import { BunFileIO } from "./report/bun-file-io";
+import { FileReporter } from "./report/file-reporter";
 import { route } from "./router/router";
 
 async function main(): Promise<void> {
   const config = loadConfigFromEnv();
   const llmClient = new LLMClient(config.llm);
   const registry = new ModelRegistry();
-  const reporter = new InMemoryReporter();
+  const fileIO = new BunFileIO();
+  const reporter = new FileReporter(".pyreez/reports", fileIO);
 
   const mcpServer = new McpServer({ name: "pyreez", version: "1.0.0" });
   const server = new PyreezMcpServer({
@@ -28,6 +30,7 @@ async function main(): Promise<void> {
     registry,
     reporter,
     routeFn: route,
+    summaryFn: () => reporter.summary(),
   });
 
   const transport = new StdioServerTransport();
