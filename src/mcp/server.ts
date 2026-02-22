@@ -15,6 +15,7 @@ import type { ModelInfo } from "../model/types";
 import type { Reporter, CallRecord } from "../report/types";
 import type { RouteResult } from "../router/router";
 import type { BudgetConfig } from "../router/types";
+import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 
 export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
@@ -23,6 +24,7 @@ export interface PyreezMcpServerConfig {
   reporter: Reporter;
   routeFn: (prompt: string, budget?: BudgetConfig) => RouteResult | null;
   summaryFn?: () => Promise<import("../report/types").ReportSummary>;
+  deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -34,6 +36,7 @@ export class PyreezMcpServer {
   private readonly reporter: Reporter;
   private readonly routeFn: PyreezMcpServerConfig["routeFn"];
   private readonly summaryFn?: PyreezMcpServerConfig["summaryFn"];
+  private readonly deliberateFn?: PyreezMcpServerConfig["deliberateFn"];
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -58,6 +61,7 @@ export class PyreezMcpServer {
     this.reporter = config.reporter;
     this.routeFn = config.routeFn;
     this.summaryFn = config.summaryFn;
+    this.deliberateFn = config.deliberateFn;
 
     this.registerTools();
   }
@@ -208,6 +212,38 @@ export class PyreezMcpServer {
         }),
       },
       async (args) => this.handleReport(args),
+    );
+
+    this.mcpServer.registerTool(
+      "pyreez_deliberate",
+      {
+        title: "Pyreez Deliberate",
+        description:
+          "Run multi-model consensus-based deliberation on a task",
+        inputSchema: z.object({
+          task: z.string().describe("Task to deliberate on"),
+          perspectives: z
+            .array(z.string())
+            .describe("Review perspectives (e.g., ['코드 품질', '보안', '성능'])"),
+          producer_instructions: z
+            .string()
+            .optional()
+            .describe("Optional instructions for the producer"),
+          leader_instructions: z
+            .string()
+            .optional()
+            .describe("Optional instructions for the leader"),
+          max_rounds: z
+            .number()
+            .optional()
+            .describe("Maximum deliberation rounds (default: 3)"),
+          consensus: z
+            .enum(["leader_decides", "all_approve", "majority"])
+            .optional()
+            .describe("Consensus mode (default: leader_decides)"),
+        }),
+      },
+      async (args) => this.handleDeliberate(args),
     );
   }
 
@@ -417,6 +453,44 @@ export class PyreezMcpServer {
   }
 
   // --- Lifecycle ---
+
+  async handleDeliberate(args: {
+    task: string;
+    perspectives: string[];
+    producer_instructions?: string;
+    leader_instructions?: string;
+    max_rounds?: number;
+    consensus?: string;
+  }): Promise<CallToolResult> {
+    if (!args.task) {
+      return this.errorResult("Error: task is required");
+    }
+    if (!args.perspectives?.length) {
+      return this.errorResult("Error: perspectives must not be empty");
+    }
+    if (!this.deliberateFn) {
+      return this.errorResult("Error: deliberation not available");
+    }
+
+    try {
+      const input: DeliberateInput = {
+        task: args.task,
+        perspectives: args.perspectives,
+        producerInstructions: args.producer_instructions,
+        leaderInstructions: args.leader_instructions,
+        maxRounds: args.max_rounds,
+        consensus: args.consensus as DeliberateInput["consensus"],
+      };
+      const result = await this.deliberateFn(input);
+      return this.textResult(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return this.errorResult(
+        `Error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  // --- Lifecycle (server) ---
 
   async start(transport: Transport): Promise<void> {
     await this.mcpServer.connect(transport);

@@ -162,12 +162,12 @@ describe("PyreezMcpServer", () => {
   // === Constructor ===
 
   describe("constructor", () => {
-    it("should create instance and register 5 tools when config is valid", () => {
+    it("should create instance and register 6 tools when config is valid", () => {
       const mcp = stubMcpServer();
       const server = new PyreezMcpServer(validConfig({ mcpServer: mcp }));
 
       expect(server).toBeInstanceOf(PyreezMcpServer);
-      expect(mcp.registerTool).toHaveBeenCalledTimes(5);
+      expect(mcp.registerTool).toHaveBeenCalledTimes(6);
 
       const calls = (mcp.registerTool as ReturnType<typeof mock>).mock.calls;
       const toolNames = calls.map((c: unknown[]) => c[0]);
@@ -176,6 +176,7 @@ describe("PyreezMcpServer", () => {
       expect(toolNames).toContain("pyreez_ask_many");
       expect(toolNames).toContain("pyreez_scores");
       expect(toolNames).toContain("pyreez_report");
+      expect(toolNames).toContain("pyreez_deliberate");
     });
 
     it('should throw "mcpServer is required" when mcpServer is missing', () => {
@@ -791,6 +792,213 @@ describe("PyreezMcpServer", () => {
       });
       expect(recordCall.teamId).toBeUndefined();
       expect(recordCall.leaderId).toBeUndefined();
+    });
+  });
+
+  // === pyreez_deliberate ===
+
+  describe("pyreez_deliberate", () => {
+    const DELIBERATE_OUTPUT = {
+      result: "function add(a, b) { return a + b; }",
+      roundsExecuted: 2,
+      consensusReached: true,
+      finalApprovals: [
+        { model: "reviewer/a", approved: true, remainingIssues: [] },
+      ],
+      deliberationLog: { task: "task", team: {}, rounds: [] },
+      totalTokens: 0,
+      totalLLMCalls: 8,
+      modelsUsed: ["producer/m", "reviewer/a", "leader/m"],
+    };
+
+    function stubDeliberateFn(
+      result?: unknown,
+      error?: unknown,
+    ) {
+      if (error !== undefined) {
+        return mock(() => Promise.reject(error));
+      }
+      return mock(() => Promise.resolve(result ?? DELIBERATE_OUTPUT));
+    }
+
+    it("should return DeliberateOutput JSON when task and perspectives valid", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      const result = await server.handleDeliberate({
+        task: "Write a sort function",
+        perspectives: ["코드 품질", "보안"],
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content).toHaveLength(1);
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.result).toBe("function add(a, b) { return a + b; }");
+      expect(parsed.roundsExecuted).toBe(2);
+      expect(parsed.consensusReached).toBe(true);
+      expect(parsed.totalLLMCalls).toBe(8);
+    });
+
+    it("should forward producer_instructions as producerInstructions to deliberateFn", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      await server.handleDeliberate({
+        task: "task",
+        perspectives: ["p"],
+        producer_instructions: "Use TypeScript",
+      });
+
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0][0];
+      expect(callArg.producerInstructions).toBe("Use TypeScript");
+    });
+
+    it("should forward leader_instructions as leaderInstructions to deliberateFn", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      await server.handleDeliberate({
+        task: "task",
+        perspectives: ["p"],
+        leader_instructions: "Be strict",
+      });
+
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0][0];
+      expect(callArg.leaderInstructions).toBe("Be strict");
+    });
+
+    it("should forward max_rounds and consensus to deliberateFn", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      await server.handleDeliberate({
+        task: "task",
+        perspectives: ["p"],
+        max_rounds: 5,
+        consensus: "all_approve",
+      });
+
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0][0];
+      expect(callArg.maxRounds).toBe(5);
+      expect(callArg.consensus).toBe("all_approve");
+    });
+
+    it("should return isError undefined on success", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      const result = await server.handleDeliberate({
+        task: "task",
+        perspectives: ["p"],
+      });
+
+      expect(result.isError).toBeUndefined();
+    });
+
+    it("should return error when task is empty", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      const result = await server.handleDeliberate({
+        task: "",
+        perspectives: ["p"],
+      });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("task");
+    });
+
+    it("should return error when perspectives is empty array", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      const result = await server.handleDeliberate({
+        task: "task",
+        perspectives: [],
+      });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("perspectives");
+    });
+
+    it("should return error when deliberateFn is not configured", async () => {
+      const server = new PyreezMcpServer(validConfig());
+
+      const result = await server.handleDeliberate({
+        task: "task",
+        perspectives: ["p"],
+      });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("deliberation not available");
+    });
+
+    it("should return error with Error.message when deliberateFn throws Error", async () => {
+      const deliberateFn = stubDeliberateFn(undefined, new Error("LLM quota exceeded"));
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      const result = await server.handleDeliberate({
+        task: "task",
+        perspectives: ["p"],
+      });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("LLM quota exceeded");
+    });
+
+    it("should return error with String(value) when deliberateFn throws non-Error", async () => {
+      const deliberateFn = stubDeliberateFn(undefined, "raw failure string");
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      const result = await server.handleDeliberate({
+        task: "task",
+        perspectives: ["p"],
+      });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("raw failure string");
+    });
+
+    it("should work with single perspective", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      const result = await server.handleDeliberate({
+        task: "task",
+        perspectives: ["코드 품질"],
+      });
+
+      expect(result.isError).toBeUndefined();
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0][0];
+      expect(callArg.perspectives).toEqual(["코드 품질"]);
+    });
+
+    it("should check task before perspectives before deliberateFn availability", async () => {
+      // No deliberateFn configured, but task is empty → task error first
+      const server = new PyreezMcpServer(validConfig());
+
+      const result1 = await server.handleDeliberate({
+        task: "",
+        perspectives: [],
+      });
+      expect(result1.isError).toBe(true);
+      expect((result1.content[0] as { text: string }).text).toContain("task");
+
+      // Task valid, perspectives empty, no deliberateFn → perspectives error
+      const result2 = await server.handleDeliberate({
+        task: "task",
+        perspectives: [],
+      });
+      expect(result2.isError).toBe(true);
+      expect((result2.content[0] as { text: string }).text).toContain("perspectives");
+
+      // Task valid, perspectives valid, no deliberateFn → deliberation not available
+      const result3 = await server.handleDeliberate({
+        task: "task",
+        perspectives: ["p"],
+      });
+      expect(result3.isError).toBe(true);
+      expect((result3.content[0] as { text: string }).text).toContain("deliberation not available");
     });
   });
 
