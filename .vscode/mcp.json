@@ -1,0 +1,15 @@
+{
+  "servers": {
+    "sequential-thinking": {
+      "command": "bunx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "pyreez": {
+      "command": "bun",
+      "args": ["run", "src/index.ts"]
+    }
+  }
+}
