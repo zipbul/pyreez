@@ -428,6 +428,8 @@ interface DeliberateOutput {
 | C2 | 에러 핸들링 강화 (Phase별 재시도/폴백) | ✅ |
 | C3 | 로깅/모니터링 (실행 아카이브) | ❌ |
 | C4 | Classification 사전 검증 (분류 모델 정확도 벤치마크) | ❌ |
+| C5 | `<think>` 태그 전역 적용 (ask/ask_many 응답에도 stripThinkTags) | ❌ |
+| C6 | `scores` 도구 `top` 파라미터 추가 (정렬 + 슬라이스) | ❌ |
 
 ### Phase D: 합의 기반 숙의 (Deliberation)
 
@@ -753,6 +755,7 @@ interface DeliberateOutput {
 
 | 일자 | 내용 |
 |---|---|
+| 2026-02-23 | Phase C5/C6 추가 (think 태그 전역 적용, scores top 파라미터). DR-007/012/013 확정. C1/C2 ✅. Complexity 키워드 상승, DeepSeek think strip, Rate Limit 재시도, 에러 핸들링 개선. GitHub 레포 공개 (zipbul/pyreez). 452 tests GREEN. |
 | 2026-02-23 | Host-Native Integration 전략 추가 (Section 2). IDE/에이전트 생태계 리서치(10카테고리×3플랫폼) 반영. pyreez 배포 형태(MCP+Skill+Agent+Plugin) 확정. Phase D9 추가. `docs/research-frameworks.md` Section 13-14 추가. `.github/skills/`, `.github/agents/` 생성. |
 | 2026-02-23 | Section 2 전면 교체: 5+1 구조 → 합의 기반 이종 모델 숙의(Deliberation). 3계층 역할(Host/Orchestrator/Leader/Workers), SharedContext, 팀 다양성 보장 알고리즘, pyreez_deliberate 도구, Deliberation 프로세스 흐름. 11개 프레임워크 리서치 근거 `docs/research-frameworks.md` 추가. Phase D 로드맵 추가. DR-003(v2), DR-019(v2) 갱신. |
 | 2026-02-22 | PLAN.md 전면 개정. 5+1 아키텍처(Host=Orchestrator, pyreez=Infra) 반영. 16→21차원, 9→18모델 구현 완료 반영. Docker/Ollama 제거. Phase 5-6(COMPOSE/EXECUTE) pyreez 범위 밖으로 이동. DR 5건 확정, 2건 폐기. COMMUNICATION-PROTOCOL.md 삭제. |
