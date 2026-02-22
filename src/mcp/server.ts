@@ -16,6 +16,7 @@ import type { Reporter, CallRecord } from "../report/types";
 import type { RouteResult } from "../router/router";
 import type { BudgetConfig } from "../router/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
+import type { DeliberationStore } from "../deliberation/store-types";
 
 export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
@@ -25,6 +26,7 @@ export interface PyreezMcpServerConfig {
   routeFn: (prompt: string, budget?: BudgetConfig) => RouteResult | null;
   summaryFn?: () => Promise<import("../report/types").ReportSummary>;
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
+  deliberationStore?: DeliberationStore;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -37,6 +39,7 @@ export class PyreezMcpServer {
   private readonly routeFn: PyreezMcpServerConfig["routeFn"];
   private readonly summaryFn?: PyreezMcpServerConfig["summaryFn"];
   private readonly deliberateFn?: PyreezMcpServerConfig["deliberateFn"];
+  private readonly deliberationStore?: DeliberationStore;
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -62,6 +65,7 @@ export class PyreezMcpServer {
     this.routeFn = config.routeFn;
     this.summaryFn = config.summaryFn;
     this.deliberateFn = config.deliberateFn;
+    this.deliberationStore = config.deliberationStore;
 
     this.registerTools();
   }
@@ -165,9 +169,29 @@ export class PyreezMcpServer {
           'Record an LLM call result for quality tracking, or retrieve summary (action="summary")',
         inputSchema: z.object({
           action: z
-            .enum(["record", "summary"])
+            .enum(["record", "summary", "query_deliberation"])
             .optional()
-            .describe('Action: "record" (default) or "summary"'),
+            .describe('Action: "record" (default), "summary", or "query_deliberation"'),
+          query_task: z
+            .string()
+            .optional()
+            .describe("Filter deliberations by task (partial match)"),
+          query_perspective: z
+            .string()
+            .optional()
+            .describe("Filter deliberations by perspective"),
+          query_model: z
+            .string()
+            .optional()
+            .describe("Filter deliberations by model"),
+          query_consensus: z
+            .boolean()
+            .optional()
+            .describe("Filter deliberations by consensus reached"),
+          query_limit: z
+            .number()
+            .optional()
+            .describe("Limit number of deliberation results"),
           model: z.string().optional().describe("Model ID used"),
           task_type: z
             .string()
@@ -403,8 +427,33 @@ export class PyreezMcpServer {
     };
     team_id?: string;
     leader_id?: string;
+    query_task?: string;
+    query_perspective?: string;
+    query_model?: string;
+    query_consensus?: boolean;
+    query_limit?: number;
   }): Promise<CallToolResult> {
     const action = args.action ?? "record";
+
+    if (action === "query_deliberation") {
+      if (!this.deliberationStore) {
+        return this.errorResult("Error: deliberation store not available");
+      }
+      try {
+        const results = await this.deliberationStore.query({
+          task: args.query_task,
+          perspective: args.query_perspective,
+          model: args.query_model,
+          consensusReached: args.query_consensus,
+          limit: args.query_limit,
+        });
+        return this.textResult(JSON.stringify(results, null, 2));
+      } catch (error) {
+        return this.errorResult(
+          `Error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
 
     if (action === "summary") {
       if (!this.summaryFn) {

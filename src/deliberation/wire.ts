@@ -13,6 +13,7 @@ import type { ChatMessage, ChatCompletionResponse } from "../llm/types";
 import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput } from "./types";
 import type { EngineDeps, EngineConfig } from "./engine";
+import type { DeliberationStore } from "./store-types";
 import { composeTeam } from "./team-composer";
 import type { ComposeTeamOptions } from "./team-composer";
 import { deliberate } from "./engine";
@@ -33,6 +34,7 @@ export interface WireDeps {
     getById(id: string): ModelInfo | undefined;
   };
   readonly chat: (model: string, messages: ChatMessage[]) => Promise<string>;
+  readonly store?: DeliberationStore;
 }
 
 // -- Chat Adapter --
@@ -105,6 +107,30 @@ export function createDeliberateFn(
         : undefined;
 
     // 5. Run deliberation
-    return deliberate(team, input, engineDeps, config);
+    const result = await deliberate(team, input, engineDeps, config);
+
+    // 6. Auto-save to store (best-effort, errors are swallowed)
+    if (deps.store) {
+      try {
+        await deps.store.save({
+          id: crypto.randomUUID(),
+          task: input.task,
+          timestamp: Date.now(),
+          perspectives: [...input.perspectives],
+          consensusReached: result.consensusReached,
+          roundsExecuted: result.roundsExecuted,
+          result: result.result,
+          modelsUsed: [...result.modelsUsed],
+          totalLLMCalls: result.totalLLMCalls,
+          producerInstructions: input.producerInstructions,
+          leaderInstructions: input.leaderInstructions,
+          consensus: input.consensus,
+        });
+      } catch {
+        // best-effort save — do not fail the deliberation
+      }
+    }
+
+    return result;
   };
 }

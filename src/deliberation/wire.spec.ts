@@ -518,4 +518,87 @@ describe("createDeliberateFn", () => {
     mockComposeTeam.mockReset();
     mockDeliberate.mockReset();
   });
+
+  // -- Store integration (D7) --
+
+  it("should call store.save after successful deliberation", async () => {
+    // Arrange
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_OUTPUT);
+
+    const storeSave = mock(() => Promise.resolve());
+    const registry = {
+      getAll: () => [stubModel("a/1")],
+      getById: () => stubModel("a/1"),
+    };
+    const fn = createDeliberateFn({
+      registry,
+      chat: mock(async () => ""),
+      store: { save: storeSave, query: mock(), getById: mock() },
+    });
+
+    // Act
+    await fn({ task: "test", perspectives: ["보안", "성능"] });
+
+    // Assert
+    expect(storeSave).toHaveBeenCalledTimes(1);
+
+    // Cleanup
+    mockComposeTeam.mockReset();
+    mockDeliberate.mockReset();
+  });
+
+  it("should return deliberation result even when store.save throws", async () => {
+    // Arrange
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_OUTPUT);
+
+    const storeSave = mock(() => Promise.reject(new Error("store error")));
+    const registry = {
+      getAll: () => [stubModel("a/1")],
+      getById: () => stubModel("a/1"),
+    };
+    const fn = createDeliberateFn({
+      registry,
+      chat: mock(async () => ""),
+      store: { save: storeSave, query: mock(), getById: mock() },
+    });
+
+    // Act
+    const result = await fn({ task: "test", perspectives: ["보안", "성능"] });
+
+    // Assert — result returned despite store error
+    expect(result).toEqual(STUB_OUTPUT);
+    expect(storeSave).toHaveBeenCalledTimes(1);
+
+    // Cleanup
+    mockComposeTeam.mockReset();
+    mockDeliberate.mockReset();
+  });
+
+  it("should not call save when store is not provided", async () => {
+    // Arrange
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_OUTPUT);
+
+    const registry = {
+      getAll: () => [stubModel("a/1")],
+      getById: () => stubModel("a/1"),
+    };
+    // No store in deps
+    const fn = createDeliberateFn({
+      registry,
+      chat: mock(async () => ""),
+    });
+
+    // Act — should not throw
+    const result = await fn({ task: "test", perspectives: ["보안", "성능"] });
+
+    // Assert
+    expect(result).toEqual(STUB_OUTPUT);
+
+    // Cleanup
+    mockComposeTeam.mockReset();
+    mockDeliberate.mockReset();
+  });
 });

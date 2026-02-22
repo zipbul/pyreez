@@ -793,6 +793,100 @@ describe("PyreezMcpServer", () => {
       expect(recordCall.teamId).toBeUndefined();
       expect(recordCall.leaderId).toBeUndefined();
     });
+
+    // -- query_deliberation (D7) --
+
+    it("should query deliberation store and return results", async () => {
+      const mockRecords = [
+        {
+          id: "d1",
+          task: "Write tests",
+          timestamp: 1700000000000,
+          perspectives: ["보안"],
+          consensusReached: true,
+          roundsExecuted: 2,
+          result: "code here",
+          modelsUsed: ["openai/gpt-4.1"],
+          totalLLMCalls: 5,
+        },
+      ];
+      const store = {
+        save: mock(() => Promise.resolve()),
+        query: mock(() => Promise.resolve(mockRecords)),
+        getById: mock(() => Promise.resolve(undefined)),
+      };
+      const server = new PyreezMcpServer(
+        validConfig({ deliberationStore: store }),
+      );
+
+      const result = await server.handleReport({
+        action: "query_deliberation",
+        query_task: "tests",
+      });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].id).toBe("d1");
+      expect(store.query).toHaveBeenCalledTimes(1);
+    });
+
+    it("should return error when store is not configured for query_deliberation", async () => {
+      const server = new PyreezMcpServer(validConfig());
+
+      const result = await server.handleReport({
+        action: "query_deliberation",
+      });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("deliberation store");
+    });
+
+    it("should return all records when query_deliberation has no filters", async () => {
+      const mockRecords = [
+        {
+          id: "d1",
+          task: "A",
+          timestamp: 1,
+          perspectives: [],
+          consensusReached: true,
+          roundsExecuted: 1,
+          result: "r",
+          modelsUsed: [],
+          totalLLMCalls: 1,
+        },
+        {
+          id: "d2",
+          task: "B",
+          timestamp: 2,
+          perspectives: [],
+          consensusReached: false,
+          roundsExecuted: 1,
+          result: "r",
+          modelsUsed: [],
+          totalLLMCalls: 1,
+        },
+      ];
+      const store = {
+        save: mock(() => Promise.resolve()),
+        query: mock(() => Promise.resolve(mockRecords)),
+        getById: mock(() => Promise.resolve(undefined)),
+      };
+      const server = new PyreezMcpServer(
+        validConfig({ deliberationStore: store }),
+      );
+
+      const result = await server.handleReport({
+        action: "query_deliberation",
+      });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed).toHaveLength(2);
+      // Verify query was called with empty filters (no task/perspective/model)
+      const queryArg = (store.query as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(queryArg.task).toBeUndefined();
+    });
   });
 
   // === pyreez_deliberate ===
