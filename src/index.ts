@@ -2,13 +2,15 @@
  * Pyreez entry point.
  * Wires infrastructure modules and starts the MCP server over stdio.
  *
- * Architecture: pyreez = Infrastructure layer (5 MCP tools).
+ * Architecture: pyreez = Infrastructure layer (6 MCP tools).
  * Host (e.g., Copilot) = Orchestrator.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { loadConfigFromEnv } from "./config";
+import { createChatAdapter, createDeliberateFn } from "./deliberation/wire";
+import { FileDeliberationStore } from "./deliberation/file-store";
 import { LLMClient } from "./llm/client";
 import { PyreezMcpServer } from "./mcp/server";
 import { ModelRegistry } from "./model/registry";
@@ -22,6 +24,14 @@ async function main(): Promise<void> {
   const registry = new ModelRegistry();
   const fileIO = new BunFileIO();
   const reporter = new FileReporter(".pyreez/reports", fileIO);
+  const deliberationStore = new FileDeliberationStore(".pyreez/deliberations", fileIO);
+
+  const chatAdapter = createChatAdapter((req) => llmClient.chat(req));
+  const deliberateFn = createDeliberateFn({
+    registry,
+    chat: chatAdapter,
+    store: deliberationStore,
+  });
 
   const mcpServer = new McpServer({ name: "pyreez", version: "1.0.0" });
   const server = new PyreezMcpServer({
@@ -31,6 +41,8 @@ async function main(): Promise<void> {
     reporter,
     routeFn: route,
     summaryFn: () => reporter.summary(),
+    deliberateFn,
+    deliberationStore,
   });
 
   const transport = new StdioServerTransport();
