@@ -7,6 +7,7 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import type { ChatMessage } from "../llm/types";
+import { LLMClientError } from "../llm/client";
 import type {
   DeliberateInput,
   DeliberateOutput,
@@ -42,7 +43,7 @@ mock.module("./engine", () => ({
 }));
 
 // Import SUT after mocks
-const { createChatAdapter, createDeliberateFn } = await import("./wire");
+const { createChatAdapter, createDeliberateFn, stripThinkTags } = await import("./wire");
 const {
   buildProducerMessages,
   buildReviewerMessages,
@@ -600,5 +601,291 @@ describe("createDeliberateFn", () => {
     // Cleanup
     mockComposeTeam.mockReset();
     mockDeliberate.mockReset();
+  });
+});
+
+// =============================================================
+// stripThinkTags
+// =============================================================
+
+describe("stripThinkTags", () => {
+  it("should strip single think block from response", () => {
+    // Arrange
+    const input = "<think>internal reasoning here</think>actual content";
+
+    // Act
+    const result = stripThinkTags(input);
+
+    // Assert
+    expect(result).toBe("actual content");
+  });
+
+  it("should return text unchanged when no think tags present", () => {
+    // Arrange
+    const input = "just normal text without any tags";
+
+    // Act
+    const result = stripThinkTags(input);
+
+    // Assert
+    expect(result).toBe("just normal text without any tags");
+  });
+
+  it("should strip multiple think blocks", () => {
+    // Arrange
+    const input = "<think>first</think>middle <think>second</think>end";
+
+    // Act
+    const result = stripThinkTags(input);
+
+    // Assert
+    expect(result).toBe("middle end");
+  });
+
+  it("should handle think block with newlines", () => {
+    // Arrange
+    const input = "<think>line 1\nline 2\nline 3</think>actual output";
+
+    // Act
+    const result = stripThinkTags(input);
+
+    // Assert
+    expect(result).toBe("actual output");
+  });
+
+  it("should preserve JSON content after think block", () => {
+    // Arrange
+    const input =
+      '<think>reasoning about JSON structure</think>{"content": "hello"}';
+
+    // Act
+    const result = stripThinkTags(input);
+
+    // Assert
+    expect(result).toBe('{"content": "hello"}');
+  });
+
+  it("should leave incomplete think tags unchanged", () => {
+    // Arrange — no closing tag
+    const input = "<think>never closes, so this stays";
+
+    // Act
+    const result = stripThinkTags(input);
+
+    // Assert
+    expect(result).toBe("<think>never closes, so this stays");
+  });
+
+  it("should return empty string when response is only think block", () => {
+    // Arrange
+    const input = "<think>all thinking, no output</think>";
+
+    // Act
+    const result = stripThinkTags(input);
+
+    // Assert
+    expect(result).toBe("");
+  });
+
+  it("should trim whitespace after stripping think block", () => {
+    // Arrange
+    const input = "<think>reasoning</think>   actual content   ";
+
+    // Act
+    const result = stripThinkTags(input);
+
+    // Assert
+    expect(result).toBe("actual content");
+  });
+});
+
+// -- createChatAdapter + stripThinkTags integration --
+
+describe("createChatAdapter", () => {
+  it("should strip think tags in chat adapter response", async () => {
+    // Arrange — mock LLM returns response with think tags
+    const chatFn = mock(() =>
+      Promise.resolve({
+        id: "1",
+        object: "chat.completion" as const,
+        created: 0,
+        model: "deepseek/DeepSeek-R1-0528",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant" as const,
+              content: "<think>deep reasoning</think>clean answer",
+            },
+            finish_reason: "stop" as const,
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }),
+    );
+    const adapter = createChatAdapter(chatFn);
+
+    // Act
+    const result = await adapter("deepseek/DeepSeek-R1-0528", [
+      { role: "user", content: "test" },
+    ]);
+
+    // Assert — think tags should be stripped
+    expect(result).toBe("clean answer");
+  });
+});
+
+// =============================================================
+// createChatAdapter — retry on 429
+// =============================================================
+
+describe("createChatAdapter", () => {
+  // Helper: create a successful chat response
+  function okResponse(content: string) {
+    return {
+      id: "1",
+      object: "chat.completion" as const,
+      created: 0,
+      model: "m",
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant" as const, content },
+          finish_reason: "stop" as const,
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    };
+  }
+
+  it("should retry on 429 and return result on success", async () => {
+    // Arrange — first call: 429, second call: success
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.reject(new LLMClientError(429, "Rate limit exceeded.", "rate_limit_error", 100));
+      }
+      return Promise.resolve(okResponse("success"));
+    });
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1 });
+
+    // Act
+    const result = await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert
+    expect(result).toBe("success");
+    expect(chatFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("should use retryAfterMs delay when present in LLMClientError", async () => {
+    // Arrange — 429 with retryAfterMs=50 (short for test speed)
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.reject(new LLMClientError(429, "limit", "rate_limit_error", 50));
+      }
+      return Promise.resolve(okResponse("ok"));
+    });
+    const startTime = Date.now();
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1 });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert — should wait at least ~50ms (retryAfterMs)
+    const elapsed = Date.now() - startTime;
+    expect(elapsed).toBeGreaterThanOrEqual(40); // allow some tolerance
+  });
+
+  it("should use exponential backoff when retryAfterMs not available", async () => {
+    // Arrange — 429 without retryAfterMs, baseDelay=10ms
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount <= 2) {
+        return Promise.reject(new LLMClientError(429, "limit", "rate_limit_error"));
+      }
+      return Promise.resolve(okResponse("ok"));
+    });
+    const startTime = Date.now();
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 10 });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert — 2 retries: 10ms + 20ms = 30ms minimum
+    const elapsed = Date.now() - startTime;
+    expect(elapsed).toBeGreaterThanOrEqual(20); // allow tolerance
+    expect(chatFn).toHaveBeenCalledTimes(3);
+  });
+
+  it("should throw original error after max retries exceeded", async () => {
+    // Arrange — always 429
+    const chatFn = mock(() =>
+      Promise.reject(new LLMClientError(429, "limit", "rate_limit_error")),
+    );
+    const adapter = createChatAdapter(chatFn, { maxRetries: 2, baseDelayMs: 1 });
+
+    // Act & Assert
+    await expect(
+      adapter("m", [{ role: "user", content: "hi" }]),
+    ).rejects.toThrow("limit");
+    // 1 initial + 2 retries = 3 calls
+    expect(chatFn).toHaveBeenCalledTimes(3);
+  });
+
+  it("should throw immediately on non-429 error without retry", async () => {
+    // Arrange — 500 error
+    const chatFn = mock(() =>
+      Promise.reject(new LLMClientError(500, "Server error")),
+    );
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1 });
+
+    // Act & Assert
+    await expect(
+      adapter("m", [{ role: "user", content: "hi" }]),
+    ).rejects.toThrow("Server error");
+    expect(chatFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("should propagate response content after successful retry", async () => {
+    // Arrange — first: 429, second: success with specific content
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.reject(new LLMClientError(429, "limit", "rate_limit_error"));
+      }
+      return Promise.resolve(okResponse("<think>reasoning</think>clean output"));
+    });
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1 });
+
+    // Act
+    const result = await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert — should also strip think tags after retry
+    expect(result).toBe("clean output");
+  });
+
+  it("should retry up to configured max retries", async () => {
+    // Arrange — 429 three times, then success
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount <= 3) {
+        return Promise.reject(new LLMClientError(429, "limit", "rate_limit_error"));
+      }
+      return Promise.resolve(okResponse("finally"));
+    });
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1 });
+
+    // Act
+    const result = await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert — 1 initial + 3 retries = 4 calls total
+    expect(result).toBe("finally");
+    expect(chatFn).toHaveBeenCalledTimes(4);
   });
 });

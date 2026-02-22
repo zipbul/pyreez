@@ -47,9 +47,13 @@ function stubFetchOk(body: unknown = VALID_RESPONSE) {
   );
 }
 
-function stubFetchError(status: number, body: string) {
+function stubFetchError(
+  status: number,
+  body: string,
+  headers?: Record<string, string>,
+) {
   return mock((_url: string | URL | Request, _init?: RequestInit) =>
-    Promise.resolve(new Response(body, { status })),
+    Promise.resolve(new Response(body, { status, headers })),
   );
 }
 
@@ -330,7 +334,7 @@ describe("LLMClient", () => {
 
       // Assert
       const err = error as LLMClientError;
-      expect(err.message).toBe("Rate limit exceeded");
+      expect(err.message).toBe("Rate limit exceeded.");
       expect(err.type).toBe("rate_limit_error");
     });
 
@@ -393,6 +397,101 @@ describe("LLMClient", () => {
       // Assert
       const headers = fetchHeaders(fetchFn);
       expect(headers["Content-Type"]).toBe("text/plain");
+    });
+
+    // -- Rate limit error handling (T4) --
+
+    it("should include retryAfterMs parsed from Retry-After header on 429", async () => {
+      // Arrange
+      const fetchFn = stubFetchError(
+        429,
+        JSON.stringify({ error: { message: "limit" } }),
+        { "Retry-After": "30" },
+      );
+      const client = new LLMClient(validConfig(), fetchFn as unknown as typeof fetch);
+
+      // Act
+      const error = await client
+        .chat({ messages: [{ role: "user", content: "hi" }] })
+        .catch((e: unknown) => e);
+
+      // Assert
+      const err = error as LLMClientError;
+      expect(err.retryAfterMs).toBe(30000);
+    });
+
+    it("should standardize 429 error message with retry info", async () => {
+      // Arrange
+      const fetchFn = stubFetchError(
+        429,
+        JSON.stringify({ error: { message: "Some long ToS text..." } }),
+        { "Retry-After": "15" },
+      );
+      const client = new LLMClient(validConfig(), fetchFn as unknown as typeof fetch);
+
+      // Act
+      const error = await client
+        .chat({ messages: [{ role: "user", content: "hi" }] })
+        .catch((e: unknown) => e);
+
+      // Assert
+      const err = error as LLMClientError;
+      expect(err.message).toBe("Rate limit exceeded. Retry after 15s.");
+    });
+
+    it("should set retryAfterMs to undefined when no Retry-After header on 429", async () => {
+      // Arrange
+      const fetchFn = stubFetchError(
+        429,
+        JSON.stringify({ error: { message: "limit" } }),
+      );
+      const client = new LLMClient(validConfig(), fetchFn as unknown as typeof fetch);
+
+      // Act
+      const error = await client
+        .chat({ messages: [{ role: "user", content: "hi" }] })
+        .catch((e: unknown) => e);
+
+      // Assert
+      const err = error as LLMClientError;
+      expect(err.retryAfterMs).toBeUndefined();
+    });
+
+    it("should set retryAfterMs to undefined when Retry-After is non-numeric", async () => {
+      // Arrange
+      const fetchFn = stubFetchError(
+        429,
+        JSON.stringify({ error: { message: "limit" } }),
+        { "Retry-After": "abc" },
+      );
+      const client = new LLMClient(validConfig(), fetchFn as unknown as typeof fetch);
+
+      // Act
+      const error = await client
+        .chat({ messages: [{ role: "user", content: "hi" }] })
+        .catch((e: unknown) => e);
+
+      // Assert
+      const err = error as LLMClientError;
+      expect(err.retryAfterMs).toBeUndefined();
+    });
+
+    it('should default errorType to "rate_limit_error" on 429 when body has no type', async () => {
+      // Arrange
+      const fetchFn = stubFetchError(
+        429,
+        JSON.stringify({ message: "too many requests" }),
+      );
+      const client = new LLMClient(validConfig(), fetchFn as unknown as typeof fetch);
+
+      // Act
+      const error = await client
+        .chat({ messages: [{ role: "user", content: "hi" }] })
+        .catch((e: unknown) => e);
+
+      // Assert
+      const err = error as LLMClientError;
+      expect(err.type).toBe("rate_limit_error");
     });
   });
 });

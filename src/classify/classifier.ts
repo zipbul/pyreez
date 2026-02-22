@@ -325,11 +325,56 @@ const TASK_CRITICALITY_OVERRIDES: Partial<Record<TaskType, Criticality>> = {
 
 // -- Complexity estimation --
 
-function estimateComplexity(prompt: string): Complexity {
+/** Keywords indicating architectural/distributed complexity → force "complex". */
+const COMPLEX_KEYWORDS: readonly string[] = [
+  "아키텍처", "architecture",
+  "마이크로서비스", "microservice",
+  "분산 시스템", "distributed",
+  "마이그레이션", "migration",
+];
+
+/** Keywords indicating security/middleware/multi-module work → at least "moderate". */
+const MODERATE_KEYWORDS: readonly string[] = [
+  "jwt", "인증", "auth", "oauth",
+  "보안", "security",
+  "암호화", "encrypt", "bcrypt", "hash",
+  "xss", "csrf", "sql injection", "injection",
+  "미들웨어", "middleware",
+  "database", "데이터베이스",
+  "concurrent", "병렬", "멀티스레드",
+];
+
+function estimateComplexity(
+  prompt: string,
+  criticality: Criticality,
+): Complexity {
+  // Step 1: Length-based baseline
   const len = prompt.length;
-  if (len < 100) return "simple";
-  if (len < 500) return "moderate";
-  return "complex";
+  let complexity: Complexity;
+  if (len < 100) complexity = "simple";
+  else if (len < 500) complexity = "moderate";
+  else complexity = "complex";
+
+  // Step 2: Keyword-based elevation
+  const lower = prompt.toLowerCase();
+  if (COMPLEX_KEYWORDS.some((kw) => lower.includes(kw))) {
+    complexity = "complex";
+  } else if (
+    MODERATE_KEYWORDS.some((kw) => lower.includes(kw)) &&
+    complexity === "simple"
+  ) {
+    complexity = "moderate";
+  }
+
+  // Step 3: Criticality floor — high/critical tasks are never "simple"
+  if (
+    (criticality === "critical" || criticality === "high") &&
+    complexity === "simple"
+  ) {
+    complexity = "moderate";
+  }
+
+  return complexity;
 }
 
 // -- Criticality lookup --
@@ -355,11 +400,12 @@ export function classifyByRules(prompt: string): ClassifyResult | null {
   for (const [domain, rules] of KEYWORD_RULES) {
     for (const [taskType, keywords] of rules) {
       if (keywords.some((kw) => lower.includes(kw))) {
+        const criticality = lookupCriticality(domain, taskType);
         return {
           domain,
           taskType,
-          complexity: estimateComplexity(prompt),
-          criticality: lookupCriticality(domain, taskType),
+          complexity: estimateComplexity(prompt, criticality),
+          criticality,
           method: "rule",
         };
       }

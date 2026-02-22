@@ -15,6 +15,7 @@ export class LLMClientError extends Error {
     public readonly status: number,
     message: string,
     public readonly type?: string,
+    public readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = "LLMClientError";
@@ -75,6 +76,15 @@ export class LLMClient {
     });
 
     if (!response.ok) {
+      // Parse Retry-After header (seconds → ms)
+      const retryAfterHeader = response.headers.get("Retry-After");
+      const retryAfterSec = retryAfterHeader
+        ? parseInt(retryAfterHeader, 10)
+        : NaN;
+      const retryAfterMs = Number.isFinite(retryAfterSec)
+        ? retryAfterSec * 1000
+        : undefined;
+
       const errorBody = await response.text();
       let errorMessage: string;
       let errorType: string | undefined;
@@ -91,7 +101,21 @@ export class LLMClient {
         errorMessage = errorBody || `HTTP ${response.status}`;
       }
 
-      throw new LLMClientError(response.status, errorMessage, errorType);
+      // Standardize 429 rate-limit messages
+      if (response.status === 429) {
+        const retryPart = retryAfterMs
+          ? ` Retry after ${retryAfterMs / 1000}s.`
+          : "";
+        errorMessage = `Rate limit exceeded.${retryPart}`;
+        errorType = errorType ?? "rate_limit_error";
+      }
+
+      throw new LLMClientError(
+        response.status,
+        errorMessage,
+        errorType,
+        retryAfterMs,
+      );
     }
 
     return (await response.json()) as ChatCompletionResponse;

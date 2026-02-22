@@ -12,7 +12,7 @@
 
 ### 구현 상태
 
-210 테스트 GREEN, 1257 expect() calls. CLASSIFY→PROFILE→SELECT 라우팅 파이프라인 완성. MCP 5도구 완성.
+452 테스트 GREEN, 1778 expect() calls. CLASSIFY→PROFILE→SELECT 라우팅 파이프라인 완성. MCP 6도구 완성 (route, ask, ask_many, scores, report, deliberate). 합의 기반 이종 모델 숙의(Deliberation) 시스템 완성. Rate Limit 재시도 + 에러 핸들링 강화 완료.
 
 ---
 
@@ -424,8 +424,8 @@ interface DeliberateOutput {
 
 | 단위 | 내용 | 상태 |
 |---|---|---|
-| C1 | 레이트 리밋 관리 (GitHub API 한도 대응) | ❌ |
-| C2 | 에러 핸들링 강화 (Phase별 재시도/폴백) | ❌ |
+| C1 | 레이트 리밋 관리 (GitHub API 한도 대응) | ✅ |
+| C2 | 에러 핸들링 강화 (Phase별 재시도/폴백) | ✅ |
 | C3 | 로깅/모니터링 (실행 아카이브) | ❌ |
 | C4 | Classification 사전 검증 (분류 모델 정확도 벤치마크) | ❌ |
 
@@ -436,14 +436,14 @@ interface DeliberateOutput {
 
 | 단위 | 내용 | 상태 |
 |---|---|---|
-| D1 | SharedContext 타입 시스템 (Round, Production, Review, Synthesis) | ❌ |
-| D2 | Team Composer (Diversity Engine — provider 기반 다양성 보장) | ❌ |
-| D3 | Deliberation Engine (라운드 실행, 병렬 리뷰, 종료 조건) | ❌ |
-| D4 | 프롬프트 엔지니어링 (Producer/Reviewer/Leader 프롬프트 구성) | ❌ |
-| D5 | MCP `deliberate` 도구 등록 + 통합 | ❌ |
+| D1 | SharedContext 타입 시스템 (Round, Production, Review, Synthesis) | ✅ |
+| D2 | Team Composer (Diversity Engine — provider 기반 다양성 보장) | ✅ |
+| D3 | Deliberation Engine (라운드 실행, 병렬 리뷰, 종료 조건) | ✅ |
+| D4 | 프롬프트 엔지니어링 (Producer/Reviewer/Leader 프롬프트 구성) | ✅ |
+| D5 | MCP `deliberate` 도구 등록 + 통합 | ✅ |
 | D6 | Adaptive Routing (학습 라우팅 — 과거 성공 조합 가중치) | ❌ |
-| D7 | Stigmergic Report 확장 (query action — 과거 숙의 결과 검색) | ❌ |
-| D8 | Deliberation E2E 통합 테스트 | ❌ |
+| D7 | Stigmergic Report 확장 (query action — 과거 숙의 결과 검색) | ✅ |
+| D8 | Deliberation E2E 통합 테스트 | ✅ |
 | D9 | Host-Native Integration — SKILL.md 배포, Custom Agent 정의 (`.github/skills/`, `.github/agents/`) | ✅ |
 
 ---
@@ -548,7 +548,7 @@ interface DeliberateOutput {
 | B | 응답 헤더 기반 (`X-RateLimit-Remaining` + `Retry-After`) |
 | C | 사전 예산 배분 (호출 수 계산 → 한도 비교) |
 
-**결정:** 미확정
+**결정:** ✅ 확정 — Option B. LLMClient에서 `Retry-After` 헤더 파싱 → `retryAfterMs` 전달. `createChatAdapter`에서 429 시 자동 재시도 (지수 백오프, 기본 maxRetries=3, baseDelay=1000ms).
 
 ---
 
@@ -591,7 +591,7 @@ interface DeliberateOutput {
 | moderate | 2-5개 파일, 조건부 로직, 출력 500-2000 tokens |
 | complex | 다중 모듈, 아키텍처 결정, 출력 > 2000 tokens or 도메인 전문성 |
 
-**결정:** 미확정
+**결정:** ✅ 확정 — 3단계 복합 판정. (1) 길이 기반 baseline (100자 미만 simple, 500자 미만 moderate, 이상 complex). (2) 키워드 상승 — COMPLEX_KEYWORDS (architecture, 마이크로서비스, distributed, migration 등) → 강제 complex, MODERATE_KEYWORDS (jwt, 보안, auth, database 등) → simple→moderate 상승. (3) criticality floor — high/critical 태스크는 최소 moderate.
 
 ---
 
@@ -608,7 +608,7 @@ interface DeliberateOutput {
 | high | SYSTEM_DESIGN, ROOT_CAUSE 등 구조적 |
 | critical | SECURITY_REVIEW, INCIDENT_RESPONSE 등 |
 
-**결정:** 미확정
+**결정:** ✅ 확정 — KEYWORD_RULES에서 domain×taskType 조합별 criticality 매핑으로 구현. 예: (SECURITY, SECURITY_REVIEW) → critical, (CODE, IMPLEMENT_FEATURE) → medium, (ARCHITECTURE, SYSTEM_DESIGN) → high.
 
 ---
 

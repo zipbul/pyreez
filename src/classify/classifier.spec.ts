@@ -1,6 +1,6 @@
 /**
  * Unit tests for classifyByRules.
- * PRUNE final list: 23 tests.
+ * PRUNE final list: 38 tests.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -254,5 +254,153 @@ describe("classifyByRules", () => {
 
     // Assert
     expect(first).toEqual(second);
+  });
+
+  // -- Keyword-based complexity elevation --
+
+  it('should return moderate when prompt contains "jwt" keyword', () => {
+    // Arrange — short prompt with JWT keyword → CODING/IMPLEMENT_FEATURE, criticality=medium
+    const result = classifyByRules("JWT 인증 구현해줘");
+
+    // Assert — keyword "jwt" elevates simple → moderate
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("moderate");
+  });
+
+  it('should return moderate when prompt contains Korean "보안" keyword', () => {
+    // Arrange — "보안 리뷰" → REVIEW/SECURITY_REVIEW, criticality=critical
+    const result = classifyByRules("보안 리뷰 해줘");
+
+    // Assert — keyword "보안" + critical criticality → moderate
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("moderate");
+  });
+
+  it('should return complex when prompt contains "마이크로서비스" keyword', () => {
+    // Arrange — short prompt with complex keyword
+    const result = classifyByRules("마이크로서비스 구현해줘");
+
+    // Assert — complexKeyword overrides length-based simple
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("complex");
+  });
+
+  it('should return complex when prompt contains "architecture" keyword', () => {
+    // Arrange — English complex keyword + classification-triggering keyword "코드"
+    const result = classifyByRules("architecture 패턴으로 코드 구현해줘");
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("complex");
+  });
+
+  it('should return moderate when prompt contains "미들웨어" keyword', () => {
+    // Arrange
+    const result = classifyByRules("미들웨어 구현해줘");
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("moderate");
+  });
+
+  it('should return moderate when prompt contains "database" keyword', () => {
+    // Arrange
+    const result = classifyByRules("database 연동 구현해줘");
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("moderate");
+  });
+
+  it("should return moderate for critical criticality with short prompt", () => {
+    // Arrange — "보안 검토" → REVIEW/SECURITY_REVIEW → criticality=critical
+    // Even if "보안" is also a moderate keyword, criticality floor alone ensures moderate
+    const result = classifyByRules("보안 검토 해줘");
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.criticality).toBe("critical");
+    expect(result!.complexity).toBe("moderate");
+  });
+
+  it("should return moderate for high criticality with short prompt", () => {
+    // Arrange — "시스템 설계" → ARCHITECTURE/SYSTEM_DESIGN → criticality=high
+    const result = classifyByRules("시스템 설계");
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.criticality).toBe("high");
+    expect(result!.complexity).toBe("moderate");
+  });
+
+  it("should remain simple for medium criticality without keywords", () => {
+    // Arrange — "함수 구현" → CODING/IMPLEMENT_FEATURE → criticality=medium, no complexity keywords
+    const result = classifyByRules("함수 구현");
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("simple");
+  });
+
+  it("should return complex for architecture keyword even with short prompt", () => {
+    // Arrange — very short but contains complex keyword
+    const result = classifyByRules("분산 시스템 구현");
+
+    // Assert — complexKeyword overrides length
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("complex");
+  });
+
+  it("should match complexity keywords case-insensitively", () => {
+    // Arrange — uppercase "JWT"
+    const result = classifyByRules("JWT 구현해줘");
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("moderate");
+  });
+
+  it("should return complex when both complex and moderate keywords present", () => {
+    // Arrange — "분산" (complex) + "보안" (moderate)
+    const result = classifyByRules("분산 시스템 보안 구현");
+
+    // Assert — complex keyword takes priority
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("complex");
+  });
+
+  it("should remain complex for long prompt with moderate keywords", () => {
+    // Arrange — long prompt (500+ chars) that already gets complex from length
+    const longPrompt =
+      "보안 인증 미들웨어를 구현합니다. ".repeat(30) +
+      "JWT 와 OAuth 를 지원해야 합니다.";
+
+    const result = classifyByRules(longPrompt);
+
+    // Assert — already complex from length, moderate keyword doesn't downgrade
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("complex");
+  });
+
+  it("should return moderate when moderate keyword and moderate prompt length", () => {
+    // Arrange — medium-length prompt with moderate keyword
+    const mediumPrompt =
+      "JWT 인증 미들웨어를 구현해야 합니다. " +
+      "기존의 인터페이스를 유지하면서 내부 구현을 변경합니다.";
+
+    const result = classifyByRules(mediumPrompt);
+
+    // Assert — length says moderate, keyword says moderate → moderate
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("moderate");
+  });
+
+  it("should return moderate for critical criticality with moderate keyword", () => {
+    // Arrange — "보안 리뷰" = SECURITY_REVIEW, critical + "보안" moderate keyword
+    const result = classifyByRules("보안 리뷰");
+
+    // Assert — both keyword and criticality point to moderate
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("moderate");
   });
 });
