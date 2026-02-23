@@ -1,8 +1,8 @@
 /**
- * Evaluation Suite integration tests.
+ * Evaluation Suite unit tests.
+ * Uses mock.module for ./runner to control runMatrix output (TST-MOCK-STRATEGY #2).
  */
-import { describe, it, expect } from "bun:test";
-import { runEvalSuite } from "./suite";
+import { describe, it, expect, mock } from "bun:test";
 import { PromptRegistry } from "./prompts";
 import type {
   ModelRunner,
@@ -16,6 +16,37 @@ import type {
 import type { RatingsMap } from "./bt-updater";
 import { setRating } from "./bt-updater";
 import { SIGMA_BASE } from "../model/types";
+
+// -- Mock runMatrix (module-level dependency of suite.ts) --
+
+type RunMatrixFn = (
+  runner: ModelRunner,
+  prompts: EvalPrompt[],
+  modelIds: string[],
+  concurrency?: number,
+  onProgress?: (completed: number, total: number) => void,
+) => Promise<EvalResponse[]>;
+
+let runMatrixFn: RunMatrixFn;
+
+// Default: forward to DI-injected runner (real-like behavior)
+const defaultRunMatrix: RunMatrixFn = async (runner, prompts, modelIds) => {
+  const results: EvalResponse[] = [];
+  for (const prompt of prompts) {
+    for (const modelId of modelIds) {
+      const response = await runner.generate(modelId, prompt.text);
+      results.push({ ...response, promptId: prompt.id, modelId });
+    }
+  }
+  return results;
+};
+
+mock.module("./runner", () => ({
+  runMatrix: (...args: unknown[]) => (runMatrixFn as Function)(...args),
+}));
+
+// Import SUT after mock
+const { runEvalSuite } = await import("./suite");
 
 // -- Helpers --
 
@@ -99,6 +130,7 @@ function makeConfig(overrides: Partial<EvalSuiteConfig> = {}): EvalSuiteConfig {
 
 describe("runEvalSuite", () => {
   it("should run full pipeline and return results", async () => {
+    runMatrixFn = defaultRunMatrix;
     const registry = makeRegistry();
     const runner = makeMockRunner();
     const judge = makeMockJudge("A>B");
@@ -115,6 +147,7 @@ describe("runEvalSuite", () => {
   });
 
   it("should throw on empty prompts (no match)", async () => {
+    runMatrixFn = defaultRunMatrix;
     const registry = new PromptRegistry();
     const runner = makeMockRunner();
     const judge = makeMockJudge();
@@ -127,6 +160,7 @@ describe("runEvalSuite", () => {
   });
 
   it("should update BT ratings after run", async () => {
+    runMatrixFn = defaultRunMatrix;
     const registry = makeRegistry();
     const runner = makeMockRunner();
     const judge = makeMockJudge("A>>B"); // model-a always wins strongly
@@ -145,6 +179,7 @@ describe("runEvalSuite", () => {
   });
 
   it("should store pairwise results with correct model ids", async () => {
+    runMatrixFn = defaultRunMatrix;
     const registry = makeRegistry();
     const runner = makeMockRunner();
     const judge = makeMockJudge("A>B");
@@ -160,56 +195,70 @@ describe("runEvalSuite", () => {
   });
 
   it("should skip prompts with no responses in response index", async () => {
-    // Arrange — runner returns nothing for one prompt
-    const registry = makeRegistry(); // 2 prompts
-    const runner: ModelRunner = {
-      generate: async (modelId, prompt): Promise<EvalResponse> => {
-        // Only respond for coding prompt, skip math prompt
-        if (!prompt.startsWith("What is")) {
-          return {
-            promptId: "",
-            modelId,
-            response: `Response from ${modelId}`,
-            latencyMs: 50,
-            tokenUsage: { input: 100, output: 200 },
-          };
-        }
-        return {
-          promptId: "",
-          modelId,
-          response: `Response from ${modelId}`,
-          latencyMs: 50,
-          tokenUsage: { input: 100, output: 200 },
-        };
+    // Arrange — runMatrix returns responses only for the first prompt (coding)
+    // Second prompt (math) has no entry → suite.ts L77 `if (!promptResponses) continue;`
+    const registry = makeRegistry(); // 2 prompts: coding-mod-001, math-simple-001
+    runMatrixFn = async () => [
+      // Only coding prompt has responses — math prompt is missing entirely
+      {
+        promptId: "coding-mod-001",
+        modelId: "model-a",
+        response: "LRU impl",
+        latencyMs: 50,
+        tokenUsage: { input: 100, output: 200 },
       },
-    };
+      {
+        promptId: "coding-mod-001",
+        modelId: "anchor",
+        response: "LRU impl anchor",
+        latencyMs: 50,
+        tokenUsage: { input: 100, output: 200 },
+      },
+    ];
+    const runner = makeMockRunner(); // not used directly (runMatrix is mocked)
     const judge = makeMockJudge("A>B");
     const config = makeConfig({ modelIds: ["model-a"], anchorModelId: "anchor" });
     const ratings: RatingsMap = new Map();
 
-    // Act — should not throw even if some prompts have no index entry
+    // Act
     const result = await runEvalSuite(registry, runner, judge, config, ratings);
 
-    // Assert — pipeline completes
+    // Assert — 2 prompts queried, but only 1 has responses → only 1 pair compared
     expect(result.promptCount).toBe(2);
+    expect(result.pairwiseResults).toHaveLength(1);
+    expect(result.pairwiseResults[0]!.modelA).toBe("model-a");
   });
 
   it("should skip pairs when one model response is missing", async () => {
-    // Arrange — runner that fails for one model on one prompt
+    // Arrange — runMatrix returns both prompts but anchor model is missing for math prompt
+    // suite.ts L82 `if (!responseA || !responseB) continue;`
     const registry = makeRegistry();
-    let callCount = 0;
-    const runner: ModelRunner = {
-      generate: async (modelId, prompt): Promise<EvalResponse> => {
-        callCount++;
-        return {
-          promptId: "",
-          modelId,
-          response: `Response ${callCount}`,
-          latencyMs: 50,
-          tokenUsage: { input: 100, output: 200 },
-        };
+    runMatrixFn = async () => [
+      // coding prompt: both models present → pair runs
+      {
+        promptId: "coding-mod-001",
+        modelId: "model-a",
+        response: "LRU impl",
+        latencyMs: 50,
+        tokenUsage: { input: 100, output: 200 },
       },
-    };
+      {
+        promptId: "coding-mod-001",
+        modelId: "anchor",
+        response: "LRU anchor",
+        latencyMs: 50,
+        tokenUsage: { input: 100, output: 200 },
+      },
+      // math prompt: only model-a present, anchor missing → pair skipped
+      {
+        promptId: "math-simple-001",
+        modelId: "model-a",
+        response: "391",
+        latencyMs: 50,
+        tokenUsage: { input: 100, output: 200 },
+      },
+    ];
+    const runner = makeMockRunner();
     const judge = makeMockJudge("A>B");
     const config = makeConfig({
       modelIds: ["model-a"],
@@ -220,8 +269,10 @@ describe("runEvalSuite", () => {
     // Act
     const result = await runEvalSuite(registry, runner, judge, config, ratings);
 
-    // Assert — should complete without error
+    // Assert — 2 prompts, but math pair skipped (anchor missing)
     expect(result.promptCount).toBe(2);
-    expect(result.pairwiseResults.length).toBeGreaterThanOrEqual(0);
+    expect(result.pairwiseResults).toHaveLength(1); // only coding pair
+    expect(result.pairwiseResults[0]!.modelA).toBe("model-a");
+    expect(result.pairwiseResults[0]!.modelB).toBe("anchor");
   });
 });

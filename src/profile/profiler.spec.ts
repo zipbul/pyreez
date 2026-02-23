@@ -267,7 +267,7 @@ describe("profileTask", () => {
     expect(weightOf(result, "MULTILINGUAL")).toBe(0.4);
     expect(result.requiresKorean).toBe(true);
     expect(result.estimatedInputTokens).toBeGreaterThanOrEqual(5000);
-    expect(result.complexity).toBeUndefined; // TaskRequirement doesn't have complexity, it's reflected in tokens
+    expect((result as any).complexity).toBeUndefined(); // TaskRequirement doesn't have complexity, it's reflected in tokens
   });
 
   // -- CO: minimal flags --

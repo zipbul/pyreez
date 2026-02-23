@@ -58,7 +58,7 @@ function stubFetchError(
 }
 
 function fetchArgs(fn: ReturnType<typeof stubFetchOk>) {
-  const [url, init] = fn.mock.calls[0];
+  const [url, init] = fn.mock.calls[0]!;
   return { url: url as string, init: init as RequestInit };
 }
 

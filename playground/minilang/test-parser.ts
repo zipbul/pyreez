@@ -81,7 +81,7 @@ assert(ast.type === "Program", "root is Program");
 assert(ast.body.length === 8, `expected 8 top-level stmts, got ${ast.body.length}`);
 
 // 1. let x = 42;
-const s0 = ast.body[0];
+const s0 = ast.body[0]!;
 assert(s0.type === "LetDecl", "stmt 0 is LetDecl");
 if (s0.type === "LetDecl") {
   assert(s0.name === "x", "let name is x");
@@ -90,7 +90,7 @@ if (s0.type === "LetDecl") {
 }
 
 // 2. let mut name = "hello";
-const s1 = ast.body[1];
+const s1 = ast.body[1]!;
 assert(s1.type === "LetDecl", "stmt 1 is LetDecl");
 if (s1.type === "LetDecl") {
   assert(s1.name === "name", "name is 'name'");
@@ -99,19 +99,19 @@ if (s1.type === "LetDecl") {
 }
 
 // 3. fn add(a, b) { let sum = a + b; return sum; }
-const s2 = ast.body[2];
+const s2 = ast.body[2]!;
 assert(s2.type === "FnDecl", "stmt 2 is FnDecl");
 if (s2.type === "FnDecl") {
   assert(s2.name === "add", "fn name is add");
   assert(s2.params.length === 2, "2 params");
   assert(s2.params[0] === "a" && s2.params[1] === "b", "params are a, b");
   assert(s2.body.length === 2, "fn body has 2 stmts");
-  assert(s2.body[0].type === "LetDecl", "body[0] is LetDecl");
-  assert(s2.body[1].type === "ReturnStmt", "body[1] is ReturnStmt");
+  assert(s2.body[0]!.type === "LetDecl", "body[0] is LetDecl");
+  assert(s2.body[1]!.type === "ReturnStmt", "body[1] is ReturnStmt");
 }
 
 // 4. if (x >= 10 and x != 0) { ... } else { ... }
-const s3 = ast.body[3];
+const s3 = ast.body[3]!;
 assert(s3.type === "IfStmt", "stmt 3 is IfStmt");
 if (s3.type === "IfStmt") {
   assert(s3.condition.type === "BinaryExpr", "condition is BinaryExpr");
@@ -123,12 +123,12 @@ if (s3.type === "IfStmt") {
 }
 
 // 5. while (x > 0) { x = x - 1; }
-const s4 = ast.body[4];
+const s4 = ast.body[4]!;
 assert(s4.type === "WhileStmt", "stmt 4 is WhileStmt");
 if (s4.type === "WhileStmt") {
   assert(s4.condition.type === "BinaryExpr", "while cond is BinaryExpr");
   assert(s4.body.length === 1, "while body has 1 stmt");
-  const bodyStmt = s4.body[0];
+  const bodyStmt = s4.body[0]!;
   assert(bodyStmt.type === "ExprStmt", "body stmt is ExprStmt");
   if (bodyStmt.type === "ExprStmt") {
     assert(bodyStmt.expr.type === "AssignExpr", "expr is AssignExpr");
@@ -136,7 +136,7 @@ if (s4.type === "WhileStmt") {
 }
 
 // 6. let neg = -5;
-const s5 = ast.body[5];
+const s5 = ast.body[5]!;
 assert(s5.type === "LetDecl", "stmt 5 is LetDecl");
 if (s5.type === "LetDecl") {
   assert(s5.init.type === "UnaryExpr", "init is UnaryExpr");
@@ -147,7 +147,7 @@ if (s5.type === "LetDecl") {
 }
 
 // 7. let result = add(1, 2);
-const s6 = ast.body[6];
+const s6 = ast.body[6]!;
 assert(s6.type === "LetDecl", "stmt 6 is LetDecl");
 if (s6.type === "LetDecl") {
   assert(s6.name === "result", "name is result");
@@ -159,7 +159,7 @@ if (s6.type === "LetDecl") {
 }
 
 // 8. let lambda = fn(a, b) { return a + b; };
-const s7 = ast.body[7];
+const s7 = ast.body[7]!;
 assert(s7.type === "LetDecl", "stmt 7 is LetDecl");
 if (s7.type === "LetDecl") {
   assert(s7.init.type === "FnExpr", "init is FnExpr");

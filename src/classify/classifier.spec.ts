@@ -235,10 +235,11 @@ describe("classifyByRules", () => {
     // The classifier should have a defined priority order
     const result = classifyByRules("테스트 구현해줘");
 
-    // Assert — Should match one domain (not ambiguous)
+    // Assert — TESTING domain ordered before CODING in KEYWORD_RULES (classifier.ts#L24)
+    // "테스트" matches TESTING/UNIT_TEST_WRITE before "구현" matches CODING
     expect(result).not.toBeNull();
-    expect(result!.domain).toBeDefined();
-    expect(result!.taskType).toBeDefined();
+    expect(result!.domain).toBe("TESTING");
+    expect(result!.taskType).toBe("UNIT_TEST_WRITE");
   });
 
   // -- Idempotency --

@@ -665,7 +665,6 @@ describe("selectModel", () => {
  * SIGMA_BASE = 350.
  */
 
-import { ALL_DIMENSIONS } from "../model/types";
 import type { CapabilityDimension } from "../model/types";
 
 /** DimensionRating-style capabilities helper. */

@@ -465,9 +465,9 @@ export class PyreezMcpServer {
           score = bt.mu;
           conf = Math.round(Math.max(0, 1 - bt.sigma / 350) * 100) / 100;
         } else {
-          // Legacy format: plain number + separate confidence map
+          // Legacy format: plain number (no confidence available)
           score = typeof raw === "number" ? raw : 0;
-          conf = (m.confidence as Record<string, number> | undefined)?.[dim] ?? 0;
+          conf = 0;
         }
         return {
           id: m.id,
@@ -488,7 +488,6 @@ export class PyreezMcpServer {
       id: m.id,
       name: m.name,
       capabilities: m.capabilities,
-      confidence: m.confidence,
       cost: m.cost,
     }));
     return this.textResult(JSON.stringify(full, null, 2));

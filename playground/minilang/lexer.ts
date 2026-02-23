@@ -226,16 +226,16 @@ export class Lexer {
 
   private peek(): string {
     if (this.isAtEnd()) return "\0";
-    return this.source[this.pos];
+    return this.source[this.pos]!;
   }
 
   private peekNext(): string {
     if (this.pos + 1 >= this.source.length) return "\0";
-    return this.source[this.pos + 1];
+    return this.source[this.pos + 1]!;
   }
 
   private advance(): string {
-    const c = this.source[this.pos];
+    const c = this.source[this.pos]!;
     this.pos++;
     this.column++;
     return c;

@@ -41,7 +41,7 @@ describe("FileReporter", () => {
     expect(io.mkdir).toHaveBeenCalledTimes(1);
     expect(io.appendFile).toHaveBeenCalledTimes(1);
 
-    const appendCall = (io.appendFile as ReturnType<typeof mock>).mock.calls[0];
+    const appendCall = (io.appendFile as ReturnType<typeof mock>).mock.calls[0]!;
     const writtenPath = appendCall[0] as string;
     const writtenData = appendCall[1] as string;
 
@@ -65,7 +65,7 @@ describe("FileReporter", () => {
 
     await reporter.record(record);
 
-    const appendCall = (io.appendFile as ReturnType<typeof mock>).mock.calls[0];
+    const appendCall = (io.appendFile as ReturnType<typeof mock>).mock.calls[0]!;
     const parsed = JSON.parse((appendCall[1] as string).trim());
     expect(parsed.context).toEqual({
       windowSize: 128000,
@@ -85,7 +85,7 @@ describe("FileReporter", () => {
 
     await reporter.record(record);
 
-    const appendCall = (io.appendFile as ReturnType<typeof mock>).mock.calls[0];
+    const appendCall = (io.appendFile as ReturnType<typeof mock>).mock.calls[0]!;
     const parsed = JSON.parse((appendCall[1] as string).trim());
     expect(parsed.teamId).toBe("team-alpha");
     expect(parsed.leaderId).toBe("openai/gpt-4.1");
@@ -119,9 +119,9 @@ describe("FileReporter", () => {
     const all = await reporter.getAll();
 
     expect(all).toHaveLength(3);
-    expect(all[0].model).toBe("model-a");
-    expect(all[1].model).toBe("model-b");
-    expect(all[2].model).toBe("model-c");
+    expect(all[0]!.model).toBe("model-a");
+    expect(all[1]!.model).toBe("model-b");
+    expect(all[2]!.model).toBe("model-c");
   });
 
   it("should filter records by model via getByModel", async () => {
@@ -216,17 +216,17 @@ describe("FileReporter", () => {
     const summary = await reporter.summary();
 
     expect(summary.totalRecords).toBe(3);
-    expect(summary.models["model-a"].count).toBe(2);
-    expect(summary.models["model-a"].avgQuality).toBe(7);
-    expect(summary.models["model-a"].avgLatencyMs).toBe(1500);
-    expect(summary.models["model-a"].avgTokens).toEqual({
+    expect(summary.models["model-a"]!.count).toBe(2);
+    expect(summary.models["model-a"]!.avgQuality).toBe(7);
+    expect(summary.models["model-a"]!.avgLatencyMs).toBe(1500);
+    expect(summary.models["model-a"]!.avgTokens).toEqual({
       input: 150,
       output: 300,
     });
-    expect(summary.models["model-a"].avgContextUtilization).toBe(0.4);
-    expect(summary.models["model-b"].count).toBe(1);
-    expect(summary.models["model-b"].avgQuality).toBe(9);
-    expect(summary.models["model-b"].avgContextUtilization).toBeNull();
+    expect(summary.models["model-a"]!.avgContextUtilization).toBe(0.4);
+    expect(summary.models["model-b"]!.count).toBe(1);
+    expect(summary.models["model-b"]!.avgQuality).toBe(9);
+    expect(summary.models["model-b"]!.avgContextUtilization).toBeNull();
   });
 
   // === NE (Negative / Error) ===
@@ -307,8 +307,8 @@ describe("FileReporter", () => {
     const all = await reporter.getAll();
 
     expect(all).toHaveLength(2);
-    expect(all[0].model).toBe("valid-model");
-    expect(all[1].model).toBe("another-valid");
+    expect(all[0]!.model).toBe("valid-model");
+    expect(all[1]!.model).toBe("another-valid");
   });
 
   // === ED (Edge) ===
@@ -331,7 +331,7 @@ describe("FileReporter", () => {
 
     await reporter.record(validRecord({ quality: 0 }));
 
-    const appendCall = (io.appendFile as ReturnType<typeof mock>).mock.calls[0];
+    const appendCall = (io.appendFile as ReturnType<typeof mock>).mock.calls[0]!;
     const parsed = JSON.parse((appendCall[1] as string).trim());
     expect(parsed.quality).toBe(0);
   });
@@ -363,7 +363,7 @@ describe("FileReporter", () => {
     );
 
     expect(io.appendFile).toHaveBeenCalledTimes(1);
-    const appendCall = (io.appendFile as ReturnType<typeof mock>).mock.calls[0];
+    const appendCall = (io.appendFile as ReturnType<typeof mock>).mock.calls[0]!;
     const parsed = JSON.parse((appendCall[1] as string).trim());
     expect(parsed.quality).toBe(0);
     expect(parsed.latencyMs).toBe(0);
@@ -392,7 +392,7 @@ describe("FileReporter", () => {
     const all = await reporter.getAll();
 
     expect(all).toHaveLength(1);
-    expect(all[0].model).toBe("good");
+    expect(all[0]!.model).toBe("good");
   });
 
   it("should round-trip records with optional fields undefined", async () => {
@@ -407,10 +407,10 @@ describe("FileReporter", () => {
     const all = await reporter.getAll();
 
     expect(all).toHaveLength(1);
-    expect(all[0].context).toBeUndefined();
-    expect(all[0].teamId).toBeUndefined();
-    expect(all[0].leaderId).toBeUndefined();
-    expect(all[0].model).toBe("openai/gpt-4.1");
+    expect(all[0]!.context).toBeUndefined();
+    expect(all[0]!.teamId).toBeUndefined();
+    expect(all[0]!.leaderId).toBeUndefined();
+    expect(all[0]!.model).toBe("openai/gpt-4.1");
   });
 
   // === ST (State Transition) ===
@@ -437,7 +437,7 @@ describe("FileReporter", () => {
 
     const afterAll = await reporter.getAll();
     expect(afterAll).toHaveLength(1);
-    expect(afterAll[0].model).toBe("test-model");
+    expect(afterAll[0]!.model).toBe("test-model");
   });
 
   it("should return empty getAll after record then clear", async () => {
@@ -497,7 +497,7 @@ describe("FileReporter", () => {
 
     const all = await reporter.getAll();
     expect(all).toHaveLength(1);
-    expect(all[0].model).toBe("new-model");
+    expect(all[0]!.model).toBe("new-model");
   });
 
   // === ID (Idempotency) ===
@@ -573,9 +573,9 @@ describe("FileReporter", () => {
     const all = await reporter.getAll();
 
     expect(all).toHaveLength(4);
-    expect(all[0].model).toBe("first");
-    expect(all[1].model).toBe("second");
-    expect(all[2].model).toBe("third");
-    expect(all[3].model).toBe("fourth");
+    expect(all[0]!.model).toBe("first");
+    expect(all[1]!.model).toBe("second");
+    expect(all[2]!.model).toBe("third");
+    expect(all[3]!.model).toBe("fourth");
   });
 });

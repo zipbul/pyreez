@@ -173,9 +173,9 @@ describe("addRound", () => {
     ctx = addRound(ctx, makeRound(3, { synthesis: makeSynthesis("approve") }));
 
     expect(ctx.rounds).toHaveLength(3);
-    expect(ctx.rounds[0].number).toBe(1);
-    expect(ctx.rounds[1].number).toBe(2);
-    expect(ctx.rounds[2].number).toBe(3);
+    expect(ctx.rounds[0]!.number).toBe(1);
+    expect(ctx.rounds[1]!.number).toBe(2);
+    expect(ctx.rounds[2]!.number).toBe(3);
   });
 
   it("should not mutate the original context (immutability)", () => {
@@ -403,6 +403,9 @@ describe("SharedContext lifecycle", () => {
     expect(latestRound(ctx)?.number).toBe(1);
     expect(totalLLMCalls(ctx)).toBe(4);
     expect(modelsUsed(ctx)).toHaveLength(4);
+    // Should contain expected model IDs from round
+    expect(modelsUsed(ctx)).toContain("openai/gpt-4.1");
+    expect(modelsUsed(ctx)).toContain("openai/o4-mini");
 
     // Round 2: approve
     ctx = addRound(

@@ -284,8 +284,8 @@ describe("migrateToV2", () => {
     const result = migrateToV2(v1, benchmarks);
     expect(result.version).toBe(2);
     // INSTRUCTION_FOLLOWING should be anchored from ifeval
-    expect(result.models["test/model"].scores.INSTRUCTION_FOLLOWING.mu).toBe(850);
-    expect(result.models["test/model"].scores.INSTRUCTION_FOLLOWING.sigma).toBe(SIGMA_ANCHORED);
+    expect(result.models["test/model"]!.scores.INSTRUCTION_FOLLOWING!.mu).toBe(850);
+    expect(result.models["test/model"]!.scores.INSTRUCTION_FOLLOWING!.sigma).toBe(SIGMA_ANCHORED);
   });
 
   it("should migrate v1 data without benchmarks using score*100", () => {
@@ -294,8 +294,8 @@ describe("migrateToV2", () => {
     });
     const result = migrateToV2(v1);
     expect(result.version).toBe(2);
-    expect(result.models["test/model"].scores.REASONING.mu).toBe(800);
-    expect(result.models["test/model"].scores.REASONING.sigma).toBe(SIGMA_BASE);
+    expect(result.models["test/model"]!.scores.REASONING!.mu).toBe(800);
+    expect(result.models["test/model"]!.scores.REASONING!.sigma).toBe(SIGMA_BASE);
   });
 
   it("should update version field from 1 to 2", () => {
@@ -328,10 +328,10 @@ describe("migrateToV2", () => {
       },
     };
     const result = migrateToV2(v1 as any);
-    expect(result.models["test/m"].scores.REASONING.mu).toBe(700);
+    expect(result.models["test/m"]!.scores.REASONING!.mu).toBe(700);
     // Missing dimensions should get defaults
-    expect(result.models["test/m"].scores.TOOL_USE.mu).toBe(0);
-    expect(result.models["test/m"].scores.TOOL_USE.sigma).toBe(SIGMA_BASE);
+    expect(result.models["test/m"]!.scores.TOOL_USE!.mu).toBe(0);
+    expect(result.models["test/m"]!.scores.TOOL_USE!.sigma).toBe(SIGMA_BASE);
   });
 
   it("should pass through already-v2 data unchanged", () => {
@@ -365,8 +365,8 @@ describe("migrateToV2", () => {
     const result = migrateToV2(v1, {});
     expect(result.version).toBe(2);
     // All dimensions should fall back to score*100
-    expect(result.models["m/a"].scores.REASONING.mu).toBe(500); // default score=5 → 500
-    expect(result.models["m/a"].scores.REASONING.sigma).toBe(SIGMA_BASE);
+    expect(result.models["m/a"]!.scores.REASONING!.mu).toBe(500); // default score=5 → 500
+    expect(result.models["m/a"]!.scores.REASONING!.sigma).toBe(SIGMA_BASE);
   });
 
   it("should produce same result when called twice", () => {

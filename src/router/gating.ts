@@ -192,10 +192,10 @@ export function gate(
   // Combine expert weights using gate values
   const combined: DimensionWeights = {};
   for (let i = 0; i < experts.length; i++) {
-    const gateVal = gateValues[i];
+    const gateVal = gateValues[i]!;
     if (gateVal < 0.01) continue; // skip negligible contributions
 
-    for (const [dim, weight] of Object.entries(experts[i].weights)) {
+    for (const [dim, weight] of Object.entries(experts[i]!.weights)) {
       const d = dim as CapabilityDimension;
       combined[d] = (combined[d] ?? 0) + gateVal * weight;
     }
@@ -210,7 +210,7 @@ export function gate(
   }
 
   const activeExperts = experts
-    .map((e, i) => ({ expertId: e.id, gateValue: gateValues[i] }))
+    .map((e, i) => ({ expertId: e.id, gateValue: gateValues[i]! }))
     .filter((e) => e.gateValue >= 0.01)
     .sort((a, b) => b.gateValue - a.gateValue);
 

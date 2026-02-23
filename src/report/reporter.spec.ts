@@ -28,11 +28,11 @@ describe("InMemoryReporter", () => {
 
     const all = reporter.getAll();
     expect(all).toHaveLength(1);
-    expect(all[0].model).toBe("openai/gpt-4.1");
-    expect(all[0].taskType).toBe("CODE_WRITE");
-    expect(all[0].quality).toBe(8);
-    expect(all[0].latencyMs).toBe(1200);
-    expect(all[0].tokens).toEqual({ input: 100, output: 200 });
+    expect(all[0]!.model).toBe("openai/gpt-4.1");
+    expect(all[0]!.taskType).toBe("CODE_WRITE");
+    expect(all[0]!.quality).toBe(8);
+    expect(all[0]!.latencyMs).toBe(1200);
+    expect(all[0]!.tokens).toEqual({ input: 100, output: 200 });
   });
 
   it("should return all records in order via getAll", async () => {
@@ -44,9 +44,9 @@ describe("InMemoryReporter", () => {
 
     const all = reporter.getAll();
     expect(all).toHaveLength(3);
-    expect(all[0].model).toBe("openai/gpt-4.1");
-    expect(all[1].model).toBe("openai/gpt-4.1-mini");
-    expect(all[2].model).toBe("meta/Llama-4-Maverick");
+    expect(all[0]!.model).toBe("openai/gpt-4.1");
+    expect(all[1]!.model).toBe("openai/gpt-4.1-mini");
+    expect(all[2]!.model).toBe("meta/Llama-4-Maverick");
   });
 
   it("should filter records by model via getByModel", async () => {
@@ -146,7 +146,7 @@ describe("InMemoryReporter", () => {
 
     const all = reporter.getAll();
     expect(all).toHaveLength(1);
-    expect(all[0].quality).toBe(0);
+    expect(all[0]!.quality).toBe(0);
   });
 
   // === CO ===

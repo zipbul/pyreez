@@ -275,7 +275,7 @@ export class Evaluator {
 
     const fnEnv = new Environment(callee.closure);
     for (let i = 0; i < callee.params.length; i++) {
-      fnEnv.define(callee.params[i], args[i], true);
+      fnEnv.define(callee.params[i]!, args[i], true);
     }
 
     try {

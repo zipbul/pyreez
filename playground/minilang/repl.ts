@@ -24,7 +24,7 @@ function runSource(source: string): void {
 // File mode: run a .ml file
 const args = Bun.argv.slice(2);
 if (args.length > 0) {
-  const file = Bun.file(args[0]);
+  const file = Bun.file(args[0]!);
   const source = await file.text();
   runSource(source);
   process.exit(0);

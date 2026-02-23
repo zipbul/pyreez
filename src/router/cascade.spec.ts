@@ -29,7 +29,7 @@ function makeModel(id: string, inputPer1M: number, outputPer1M: number): ModelIn
 
 function makeRequirement(): TaskRequirement {
   return {
-    taskType: "CODE_WRITE",
+    taskType: "IMPLEMENT_FEATURE" as any,
     domain: "CODING",
     requiredCapabilities: [],
     estimatedInputTokens: 1000,
@@ -67,16 +67,16 @@ describe("buildCascadeChain", () => {
       makeModel("medium", 2, 6),
     ];
     const chain = buildCascadeChain(models, 1000, 500);
-    expect(chain[0].model.id).toBe("cheap");
-    expect(chain[1].model.id).toBe("medium");
-    expect(chain[2].model.id).toBe("expensive");
+    expect(chain[0]!.model.id).toBe("cheap");
+    expect(chain[1]!.model.id).toBe("medium");
+    expect(chain[2]!.model.id).toBe("expensive");
   });
 
   it("should calculate estimated cost", () => {
     const models = [makeModel("m1", 1.0, 4.0)];
     const chain = buildCascadeChain(models, 1000, 500);
     // (1000 * 1.0 + 500 * 4.0) / 1_000_000 = 3000 / 1_000_000 = 0.003
-    expect(chain[0].estimatedCost).toBeCloseTo(0.003, 5);
+    expect(chain[0]!.estimatedCost).toBeCloseTo(0.003, 5);
   });
 });
 
@@ -124,8 +124,8 @@ describe("executeCascade", () => {
     expect(result.selectedModelId).toBe("expensive");
     expect(result.completed).toBe(true);
     expect(result.steps).toHaveLength(2);
-    expect(result.steps[0].accepted).toBe(false);
-    expect(result.steps[1].accepted).toBe(true);
+    expect(result.steps[0]!.accepted).toBe(false);
+    expect(result.steps[1]!.accepted).toBe(true);
   });
 
   it("should stop at maxSteps", async () => {

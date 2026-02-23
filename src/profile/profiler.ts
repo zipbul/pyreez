@@ -260,7 +260,7 @@ export function profileTask(
   ];
 
   // Token estimates from complexity
-  const tokens = COMPLEXITY_TOKENS[complexity] ?? COMPLEXITY_TOKENS.moderate;
+  const tokens = COMPLEXITY_TOKENS[complexity] ?? COMPLEXITY_TOKENS.moderate!;
 
   // Flags
   const requiresKorean = KOREAN_REGEX.test(prompt);

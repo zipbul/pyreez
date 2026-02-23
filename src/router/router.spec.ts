@@ -32,7 +32,7 @@ const stubRequirement: TaskRequirement = {
   requiresToolCalling: false,
 };
 
-const stubModel: ModelInfo = {
+const stubModel = {
   id: "test/model",
   name: "Test Model",
   contextWindow: 100_000,
@@ -42,7 +42,7 @@ const stubModel: ModelInfo = {
     HALLUCINATION_RESISTANCE: 6, CONFIDENCE_CALIBRATION: 6, SELF_CONSISTENCY: 6, AMBIGUITY_HANDLING: 6,
     INSTRUCTION_FOLLOWING: 7, STRUCTURED_OUTPUT: 7, LONG_CONTEXT: 7, MULTILINGUAL: 6,
     SPEED: 7, COST_EFFICIENCY: 6,
-  },
+  } as any,
   confidence: {
     REASONING: 0.3, MATH_REASONING: 0.3, MULTI_STEP_DEPTH: 0.3, CREATIVITY: 0.3, ANALYSIS: 0.3, JUDGMENT: 0.3,
     CODE_GENERATION: 0.3, CODE_UNDERSTANDING: 0.3, DEBUGGING: 0.3, SYSTEM_THINKING: 0.3, TOOL_USE: 0.3,
@@ -52,7 +52,7 @@ const stubModel: ModelInfo = {
   },
   cost: { inputPer1M: 0.4, outputPer1M: 1.6 },
   supportsToolCalling: true,
-};
+} as ModelInfo;
 
 const stubSelectResult: SelectResult = {
   model: stubModel,
@@ -166,7 +166,7 @@ describe("route", () => {
 
     // Assert
     expect(result).not.toBeNull();
-    expect((result!.selection as FallbackSelectResult).warning).toBeDefined();
+    expect((result!.selection as FallbackSelectResult).warning).toBe("Fallback: all models filtered");
   });
 
   // -- CO: classify succeeds but select returns fallback --
@@ -181,7 +181,7 @@ describe("route", () => {
     // Assert
     expect(result).not.toBeNull();
     expect(result!.classification).toEqual(stubClassifyResult);
-    expect((result!.selection as FallbackSelectResult).relaxedConstraints).toBeDefined();
+    expect((result!.selection as FallbackSelectResult).relaxedConstraints).toEqual(["budget"]);
   });
 
   // -- ID: idempotency --

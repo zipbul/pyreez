@@ -383,10 +383,12 @@ describe("composeTeam", () => {
       );
       expect(team.producer).toBeDefined();
       expect(team.producer.role).toBe("producer");
+      expect(team.producer.model).toMatch(/\w+\/\w+/);
       expect(team.reviewers).toHaveLength(2);
       expect(team.reviewers.every((r) => r.role === "reviewer")).toBe(true);
       expect(team.leader).toBeDefined();
       expect(team.leader.role).toBe("leader");
+      expect(team.leader.model).toMatch(/\w+\/\w+/);
     });
   });
 
@@ -445,7 +447,7 @@ describe("composeTeam", () => {
       // Reviewers and leader auto-selected
       expect(team.reviewers).toHaveLength(2);
       expect(team.leader).toBeDefined();
-      expect(team.leader.model).not.toBe("");
+      expect(team.leader.model).toMatch(/\w+\/\w+/);
     });
   });
 
@@ -544,8 +546,10 @@ describe("composeTeam", () => {
         deps,
       );
       expect(team.producer).toBeDefined();
+      expect(team.producer.model).toMatch(/\w+\/\w+/);
       expect(team.reviewers).toHaveLength(2);
       expect(team.leader).toBeDefined();
+      expect(team.leader.model).toMatch(/\w+\/\w+/);
     });
 
     it("should not swap when diversity is already met", () => {
@@ -677,7 +681,7 @@ describe("composeTeam", () => {
  * SIGMA_BASE = 350.
  */
 
-const SIGMA_BASE = 350;
+const SIGMA_BASE_LOCAL = 350;
 
 /** Create a ModelInfo with DimensionRating-style capabilities for BT rating. */
 function makeBTModel(overrides: {

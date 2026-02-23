@@ -107,7 +107,7 @@ export function roundRobinPairings(
   const pairs: Array<[string, string]> = [];
   for (let i = 0; i < modelIds.length; i++) {
     for (let j = i + 1; j < modelIds.length; j++) {
-      pairs.push([modelIds[i], modelIds[j]]);
+      pairs.push([modelIds[i]!, modelIds[j]!]);
     }
   }
   return pairs;

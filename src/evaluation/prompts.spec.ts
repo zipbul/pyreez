@@ -120,7 +120,7 @@ describe("PromptRegistry", () => {
     reg.register(makePrompt({ id: "v", verifiable: true, referenceAnswer: "42" }));
     reg.register(makePrompt({ id: "nv", verifiable: false }));
     expect(reg.query({ verifiableOnly: true })).toHaveLength(1);
-    expect(reg.query({ verifiableOnly: true })[0].id).toBe("v");
+    expect(reg.query({ verifiableOnly: true })[0]!.id).toBe("v");
   });
 
   it("should filter prompts by minComplexity", () => {
@@ -138,6 +138,6 @@ describe("PromptRegistry", () => {
 
     // Assert — only "high" has complexity >= 4
     expect(result).toHaveLength(1);
-    expect(result[0].id).toBe("high");
+    expect(result[0]!.id).toBe("high");
   });
 });

@@ -52,7 +52,7 @@ describe("FileRunLogger", () => {
     expect(io.mkdir).toHaveBeenCalledWith(".pyreez/runs");
     expect(io.appendFile).toHaveBeenCalledTimes(1);
     const [path, data] = (io.appendFile as ReturnType<typeof mock>).mock
-      .calls[0];
+      .calls[0]!;
     expect(path).toContain(".pyreez/runs/");
     expect(path).toEndWith(".jsonl");
     const parsed = JSON.parse(data.replace("\n", ""));
@@ -102,8 +102,8 @@ describe("FileRunLogger", () => {
     const result = await logger.query();
 
     expect(result).toHaveLength(2);
-    expect(result[0].id).toBe("r1");
-    expect(result[1].id).toBe("r2");
+    expect(result[0]!.id).toBe("r1");
+    expect(result[1]!.id).toBe("r2");
   });
 
   it("should filter records by tool", async () => {
@@ -143,7 +143,7 @@ describe("FileRunLogger", () => {
     const result = await logger.query({ success: false });
 
     expect(result).toHaveLength(1);
-    expect(result[0].id).toBe("r2");
+    expect(result[0]!.id).toBe("r2");
   });
 
   it("should limit query results", async () => {
@@ -188,7 +188,7 @@ describe("FileRunLogger", () => {
     const result = await logger.query();
 
     expect(result).toHaveLength(1);
-    expect(result[0].id).toBe("r1");
+    expect(result[0]!.id).toBe("r1");
   });
 
   // -- ED: undefined timestamp fallback --

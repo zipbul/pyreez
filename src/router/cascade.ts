@@ -153,7 +153,7 @@ export async function executeCascade(
 
   // If no model passed, use the last tried model
   if (!completed && steps.length > 0) {
-    selectedModelId = steps[steps.length - 1].modelId;
+    selectedModelId = steps[steps.length - 1]!.modelId;
   }
 
   return {

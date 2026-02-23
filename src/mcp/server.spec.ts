@@ -8,6 +8,8 @@ import type { ModelRegistry } from "../model/registry";
 import type { Reporter } from "../report/types";
 import type { RouteResult } from "../router/router";
 import type { BudgetConfig } from "../router/types";
+import type { ModelInfo } from "../model/types";
+import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 
 // --- Test Doubles ---
 
@@ -122,7 +124,7 @@ const DEFAULT_ROUTE_RESULT: RouteResult = {
     expectedCost: 0.02,
     reason: "Best match for CODE_WRITE",
   },
-} as RouteResult;
+} as unknown as RouteResult;
 
 function stubRouteFn(
   result?: RouteResult | null,
@@ -241,12 +243,14 @@ describe("PyreezMcpServer", () => {
 
       expect(result.isError).toBeUndefined();
       expect(result.content).toHaveLength(1);
-      expect(result.content[0].type).toBe("text");
+      expect(result.content[0]!.type).toBe("text");
 
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.classification).toBeDefined();
-      expect(parsed.requirement).toBeDefined();
-      expect(parsed.selection).toBeDefined();
+      expect(parsed.classification.domain).toBe("DEVELOPMENT");
+      expect(parsed.classification.taskType).toBe("CODE_WRITE");
+      expect(parsed.requirement.minContextWindow).toBe(4096);
+      expect(parsed.selection.model.id).toBe("openai/gpt-4.1");
+      expect(parsed.selection.score).toBe(0.85);
     });
 
     it("should forward budget to routeFn when budget specified", async () => {
@@ -334,7 +338,7 @@ describe("PyreezMcpServer", () => {
       });
 
       const chatCall = (llmClient.chat as ReturnType<typeof mock>).mock
-        .calls[0][0];
+        .calls[0]![0];
       expect(chatCall.model).toBe("openai/gpt-4.1");
       expect(chatCall.temperature).toBe(0.7);
       expect(chatCall.max_tokens).toBe(500);
@@ -587,6 +591,7 @@ describe("PyreezMcpServer", () => {
       );
       const failure = parsed.find((r: { error: string }) => r.error);
       expect(success).toBeDefined();
+      expect(success.content).toBe("success content");
       expect(failure).toBeDefined();
       expect(failure.error).toContain("model unavailable");
     });
@@ -749,12 +754,14 @@ describe("PyreezMcpServer", () => {
             id: "openai/gpt-4.1",
             name: "GPT-4.1",
             contextWindow: 1048576,
-            capabilities: { REASONING: 9, CODE_GENERATION: 8 },
-            confidence: { REASONING: 0.8, CODE_GENERATION: 0.7 },
+            capabilities: {
+              REASONING: { mu: 9, sigma: 70, comparisons: 10 },
+              CODE_GENERATION: { mu: 8, sigma: 105, comparisons: 10 },
+            },
             cost: { inputPer1M: 2.0, outputPer1M: 8.0 },
             supportsToolCalling: true,
           },
-        ]),
+        ] as unknown as ModelInfo[]),
       });
       const server = new PyreezMcpServer(validConfig({ registry }));
 
@@ -811,7 +818,7 @@ describe("PyreezMcpServer", () => {
             cost: { inputPer1M: 1.5, outputPer1M: 3.0 },
             supportsToolCalling: true,
           },
-        ]),
+        ] as unknown as ModelInfo[]),
       });
       const server = new PyreezMcpServer(validConfig({ registry }));
 
@@ -850,7 +857,7 @@ describe("PyreezMcpServer", () => {
             cost: { inputPer1M: 3.0, outputPer1M: 6.0 },
             supportsToolCalling: true,
           },
-        ]),
+        ] as unknown as ModelInfo[]),
       });
       const server = new PyreezMcpServer(validConfig({ registry }));
 
@@ -889,7 +896,7 @@ describe("PyreezMcpServer", () => {
             cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
             supportsToolCalling: true,
           },
-        ]),
+        ] as unknown as ModelInfo[]),
       });
       const server = new PyreezMcpServer(validConfig({ registry }));
 
@@ -924,7 +931,7 @@ describe("PyreezMcpServer", () => {
             cost: { inputPer1M: 0.5, outputPer1M: 1.0 },
             supportsToolCalling: true,
           },
-        ]),
+        ] as unknown as ModelInfo[]),
       });
       const server = new PyreezMcpServer(validConfig({ registry }));
 
@@ -956,7 +963,7 @@ describe("PyreezMcpServer", () => {
             cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
             supportsToolCalling: true,
           },
-        ]),
+        ] as unknown as ModelInfo[]),
       });
       const server = new PyreezMcpServer(validConfig({ registry }));
 
@@ -998,7 +1005,7 @@ describe("PyreezMcpServer", () => {
       expect(reporter.record).toHaveBeenCalledTimes(1);
 
       const recordCall = (reporter.record as ReturnType<typeof mock>).mock
-        .calls[0][0];
+        .calls[0]![0];
       expect(recordCall.model).toBe("openai/gpt-4.1");
       expect(recordCall.taskType).toBe("CODE_WRITE");
       expect(recordCall.quality).toBe(8);
@@ -1039,7 +1046,7 @@ describe("PyreezMcpServer", () => {
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed.recorded).toBe(true);
       const recordCall = (reporter.record as ReturnType<typeof mock>).mock
-        .calls[0][0];
+        .calls[0]![0];
       expect(recordCall.quality).toBe(0);
     });
 
@@ -1080,7 +1087,7 @@ describe("PyreezMcpServer", () => {
 
       expect(result.isError).toBeUndefined();
       const recordCall = (reporter.record as ReturnType<typeof mock>).mock
-        .calls[0][0];
+        .calls[0]![0];
       expect(recordCall.context).toEqual({
         windowSize: 128000,
         utilization: 0.45,
@@ -1104,7 +1111,7 @@ describe("PyreezMcpServer", () => {
 
       expect(result.isError).toBeUndefined();
       const recordCall = (reporter.record as ReturnType<typeof mock>).mock
-        .calls[0][0];
+        .calls[0]![0];
       expect(recordCall.teamId).toBe("team-alpha");
       expect(recordCall.leaderId).toBe("openai/gpt-4.1");
     });
@@ -1174,7 +1181,7 @@ describe("PyreezMcpServer", () => {
 
       expect(result.isError).toBeUndefined();
       const recordCall = (reporter.record as ReturnType<typeof mock>).mock
-        .calls[0][0];
+        .calls[0]![0];
       expect(recordCall.context).toEqual({
         windowSize: 128000,
         utilization: 0.3,
@@ -1297,11 +1304,11 @@ describe("PyreezMcpServer", () => {
     function stubDeliberateFn(
       result?: unknown,
       error?: unknown,
-    ) {
+    ): (input: DeliberateInput) => Promise<DeliberateOutput> {
       if (error !== undefined) {
-        return mock(() => Promise.reject(error));
+        return mock(() => Promise.reject(error)) as any;
       }
-      return mock(() => Promise.resolve(result ?? DELIBERATE_OUTPUT));
+      return mock(() => Promise.resolve(result ?? DELIBERATE_OUTPUT)) as any;
     }
 
     it("should return DeliberateOutput JSON when task and perspectives valid", async () => {
@@ -1332,7 +1339,7 @@ describe("PyreezMcpServer", () => {
         producer_instructions: "Use TypeScript",
       });
 
-      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0][0];
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
       expect(callArg.producerInstructions).toBe("Use TypeScript");
     });
 
@@ -1346,7 +1353,7 @@ describe("PyreezMcpServer", () => {
         leader_instructions: "Be strict",
       });
 
-      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0][0];
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
       expect(callArg.leaderInstructions).toBe("Be strict");
     });
 
@@ -1361,7 +1368,7 @@ describe("PyreezMcpServer", () => {
         consensus: "all_approve",
       });
 
-      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0][0];
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
       expect(callArg.maxRounds).toBe(5);
       expect(callArg.consensus).toBe("all_approve");
     });
@@ -1452,7 +1459,7 @@ describe("PyreezMcpServer", () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0][0];
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
       expect(callArg.perspectives).toEqual(["코드 품질"]);
     });
 
@@ -1546,11 +1553,12 @@ describe("PyreezMcpServer", () => {
 
       expect(runLogger.log).toHaveBeenCalledTimes(1);
       const logged = (runLogger.log as ReturnType<typeof mock>).mock
-        .calls[0][0];
+        .calls[0]![0];
       expect(logged.tool).toBe("route");
       expect(logged.success).toBe(true);
       expect(logged.durationMs).toBeGreaterThanOrEqual(0);
-      expect(logged.id).toBeTruthy();
+      expect(logged.id).toBeString();
+      expect(logged.id.length).toBeGreaterThan(0);
     });
 
     it("should log failed tool call with error message", async () => {
@@ -1572,7 +1580,7 @@ describe("PyreezMcpServer", () => {
 
       expect(runLogger.log).toHaveBeenCalledTimes(1);
       const logged = (runLogger.log as ReturnType<typeof mock>).mock
-        .calls[0][0];
+        .calls[0]![0];
       expect(logged.tool).toBe("ask");
       expect(logged.success).toBe(false);
       expect(logged.error).toContain("API error");
@@ -1599,7 +1607,7 @@ describe("PyreezMcpServer", () => {
       const parsed = JSON.parse(
         (result.content[0] as { text: string }).text,
       );
-      expect(parsed.selection).toBeDefined();
+      expect(parsed.selection.model.id).toBe("openai/gpt-4.1");
     });
 
     it("should propagate original error when both handler and runLogger throw", async () => {

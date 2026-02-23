@@ -147,21 +147,21 @@ describe("routeByPreference", () => {
     }
 
     const ranked = routeByPreference(table, "CODE_WRITE", ["m1", "m2"]);
-    expect(ranked[0].modelId).toBe("m1");
-    expect(ranked[0].score).toBeGreaterThan(ranked[1].score);
+    expect(ranked[0]!.modelId).toBe("m1");
+    expect(ranked[0]!.score).toBeGreaterThan(ranked[1]!.score);
   });
 
   it("should return 0.5 score for unknown models", () => {
     const table = new PreferenceTable();
     const ranked = routeByPreference(table, "CODE_WRITE", ["unknown"]);
-    expect(ranked[0].score).toBe(0.5);
-    expect(ranked[0].confidence).toBe(0);
+    expect(ranked[0]!.score).toBe(0.5);
+    expect(ranked[0]!.confidence).toBe(0);
   });
 
   it("should return 0.5 score for unknown task type", () => {
     const table = new PreferenceTable();
     table.record(makePairwise("m1", "m2", "A>B"), "CODE_WRITE");
     const ranked = routeByPreference(table, "UNKNOWN", ["m1", "m2"]);
-    expect(ranked[0].score).toBe(0.5);
+    expect(ranked[0]!.score).toBe(0.5);
   });
 });

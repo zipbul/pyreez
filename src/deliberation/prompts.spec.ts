@@ -122,8 +122,10 @@ describe("buildProducerMessages", () => {
     const messages = buildProducerMessages(ctx);
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]!.content).toBeTruthy();
-    expect(messages[1]!.content).toBeTruthy();
+    expect(messages[0]!.role).toBe("system");
+    expect(messages[0]!.content).toContain("task");
+    expect(messages[1]!.role).toBe("user");
+    expect(messages[1]!.content).toContain(ctx.task);
   });
 
   it("should serialize multiple rounds of history", () => {
@@ -199,8 +201,10 @@ describe("buildReviewerMessages", () => {
     const messages = buildReviewerMessages(ctx, "코드 품질");
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]!.content).toBeTruthy();
-    expect(messages[1]!.content).toBeTruthy();
+    expect(messages[0]!.role).toBe("system");
+    expect(messages[0]!.content).toContain("코드 품질");
+    expect(messages[1]!.role).toBe("user");
+    expect(messages[1]!.content).toContain(ctx.task);
   });
 
   it("should handle single reviewer perspective", () => {
@@ -296,7 +300,8 @@ describe("buildLeaderMessages", () => {
     const messages = buildLeaderMessages(ctx);
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]!.content).toBeTruthy();
+    expect(messages[0]!.role).toBe("system");
+    expect(messages[0]!.content).toContain("Leader");
     expect(messages[1]!.content).toContain("Hello");
   });
 
@@ -348,9 +353,18 @@ describe("cross-function", () => {
     const ctx2 = makeCtx([makeRound(1), makeRound(2)]);
 
     for (const ctx of [ctx0, ctx1, ctx2]) {
-      expect(buildProducerMessages(ctx)).toHaveLength(2);
-      expect(buildReviewerMessages(ctx, "p")).toHaveLength(2);
-      expect(buildLeaderMessages(ctx)).toHaveLength(2);
+      const producer = buildProducerMessages(ctx);
+      const reviewer = buildReviewerMessages(ctx, "p");
+      const leader = buildLeaderMessages(ctx);
+      expect(producer).toHaveLength(2);
+      expect(producer[0]!.role).toBe("system");
+      expect(producer[1]!.role).toBe("user");
+      expect(reviewer).toHaveLength(2);
+      expect(reviewer[0]!.role).toBe("system");
+      expect(reviewer[1]!.role).toBe("user");
+      expect(leader).toHaveLength(2);
+      expect(leader[0]!.role).toBe("system");
+      expect(leader[1]!.role).toBe("user");
     }
   });
 
@@ -382,6 +396,8 @@ describe("cross-function", () => {
 
     // partial content should be present in history
     expect(producer[1]!.content).toContain("partial content");
+    expect(reviewer[1]!.content).toContain("partial content");
+    expect(leader[1]!.content).toContain("partial content");
   });
 
   // -- ED: production undefined in round --

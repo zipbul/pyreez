@@ -35,11 +35,11 @@ const mockDeliberate = mock<
 });
 
 mock.module("./team-composer", () => ({
-  composeTeam: (...args: any[]) => mockComposeTeam(...args),
+  composeTeam: (...args: any[]) => (mockComposeTeam as Function)(...args),
 }));
 
 mock.module("./engine", () => ({
-  deliberate: (...args: any[]) => mockDeliberate(...args),
+  deliberate: (...args: any[]) => (mockDeliberate as Function)(...args),
 }));
 
 // Import SUT after mocks
@@ -86,13 +86,11 @@ const STUB_OUTPUT: DeliberateOutput = {
 
 function stubModel(id: string): ModelInfo {
   const dims = {} as any;
-  const conf = {} as any;
   return {
     id,
     name: id,
     contextWindow: 128000,
     capabilities: dims,
-    confidence: conf,
     cost: { inputPer1M: 0, outputPer1M: 0 },
     supportsToolCalling: true,
   };
@@ -160,7 +158,7 @@ describe("createChatAdapter", () => {
 
     // Assert
     expect(chatFn).toHaveBeenCalledTimes(1);
-    const callArg = chatFn.mock.calls[0]![0];
+    const callArg = (chatFn.mock.calls[0] as any[])[0];
     expect(callArg.model).toBe("test-model");
     expect(callArg.messages).toEqual(messages);
   });
@@ -255,6 +253,7 @@ describe("createDeliberateFn", () => {
 
     const registry = {
       getAll: () => [stubModel("openai/gpt-4.1")],
+      getAvailable: () => [stubModel("openai/gpt-4.1")],
       getById: (id: string) =>
         id === "openai/gpt-4.1" ? stubModel("openai/gpt-4.1") : undefined,
     };
@@ -290,6 +289,7 @@ describe("createDeliberateFn", () => {
 
     const registry = {
       getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
       getById: () => stubModel("a/1"),
     };
     const chat = mock(async () => "response");
@@ -327,6 +327,7 @@ describe("createDeliberateFn", () => {
 
     const registry = {
       getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
       getById: () => stubModel("a/1"),
     };
     const chat = mock(async () => "response");
@@ -352,7 +353,7 @@ describe("createDeliberateFn", () => {
       throw new Error("Task description must be a non-empty string");
     });
 
-    const registry = { getAll: () => [], getById: () => undefined };
+    const registry = { getAll: () => [], getAvailable: () => [], getById: () => undefined };
     const chat = mock(async () => "response");
     const fn = createDeliberateFn({ registry, chat });
 
@@ -374,6 +375,7 @@ describe("createDeliberateFn", () => {
 
     const registry = {
       getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
       getById: () => stubModel("a/1"),
     };
     const chat = mock(async () => "response");
@@ -396,6 +398,7 @@ describe("createDeliberateFn", () => {
 
     const registry = {
       getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
       getById: () => stubModel("a/1"),
     };
     const fn = createDeliberateFn({ registry, chat: mock(async () => "") });
@@ -419,6 +422,7 @@ describe("createDeliberateFn", () => {
 
     const registry = {
       getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
       getById: () => stubModel("a/1"),
     };
     const fn = createDeliberateFn({ registry, chat: mock(async () => "") });
@@ -442,6 +446,7 @@ describe("createDeliberateFn", () => {
 
     const registry = {
       getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
       getById: () => stubModel("a/1"),
     };
     const fn = createDeliberateFn({ registry, chat: mock(async () => "") });
@@ -469,6 +474,7 @@ describe("createDeliberateFn", () => {
 
     const registry = {
       getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
       getById: () => stubModel("a/1"),
     };
     const fn = createDeliberateFn({ registry, chat: mock(async () => "") });
@@ -496,6 +502,7 @@ describe("createDeliberateFn", () => {
 
     const registry = {
       getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
       getById: () => stubModel("a/1"),
     };
     const fn = createDeliberateFn({ registry, chat: mock(async () => "") });
@@ -530,6 +537,7 @@ describe("createDeliberateFn", () => {
     const storeSave = mock(() => Promise.resolve());
     const registry = {
       getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
       getById: () => stubModel("a/1"),
     };
     const fn = createDeliberateFn({
@@ -557,6 +565,7 @@ describe("createDeliberateFn", () => {
     const storeSave = mock(() => Promise.reject(new Error("store error")));
     const registry = {
       getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
       getById: () => stubModel("a/1"),
     };
     const fn = createDeliberateFn({
@@ -584,6 +593,7 @@ describe("createDeliberateFn", () => {
 
     const registry = {
       getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
       getById: () => stubModel("a/1"),
     };
     // No store in deps

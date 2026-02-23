@@ -149,3 +149,6 @@ export class ModelRegistry {
     );
   }
 }
+
+/** Exported for unit testing only — not part of public API. */
+export const __testing__ = { parseModels } as const;

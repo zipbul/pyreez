@@ -82,8 +82,8 @@ export function extractPairwise(records: CallRecord[]): PairwiseResult[] {
     // Compare each pair of different models within same task type
     for (let i = 0; i < taskRecords.length; i++) {
       for (let j = i + 1; j < taskRecords.length; j++) {
-        const a = taskRecords[i];
-        const b = taskRecords[j];
+        const a = taskRecords[i]!;
+        const b = taskRecords[j]!;
         if (a.model === b.model) continue;
 
         const diff = a.quality - b.quality;
@@ -97,12 +97,12 @@ export function extractPairwise(records: CallRecord[]): PairwiseResult[] {
 
         results.push({
           promptId: `usage-${taskType}-${i}-${j}`,
-          modelA: a.model,
-          modelB: b.model,
+          modelA: a!.model,
+          modelB: b!.model,
           judge: "usage-quality",
           outcome,
           swapped: false,
-          reasoning: `Quality diff: ${diff.toFixed(1)} (${a.quality} vs ${b.quality})`,
+          reasoning: `Quality diff: ${diff.toFixed(1)} (${a!.quality} vs ${b!.quality})`,
           confidence: Math.min(1.0, Math.abs(diff) / 10),
         });
       }

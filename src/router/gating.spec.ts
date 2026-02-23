@@ -55,14 +55,14 @@ describe("softmax", () => {
 
   it("should give highest probability to largest value", () => {
     const result = softmax([1.0, 3.0, 2.0]);
-    expect(result[1]).toBeGreaterThan(result[0]);
-    expect(result[1]).toBeGreaterThan(result[2]);
+    expect(result[1]!).toBeGreaterThan(result[0]!);
+    expect(result[1]!).toBeGreaterThan(result[2]!);
   });
 
   it("should return uniform for equal values", () => {
     const result = softmax([1.0, 1.0, 1.0]);
-    expect(Math.abs(result[0] - result[1])).toBeLessThan(1e-10);
-    expect(Math.abs(result[1] - result[2])).toBeLessThan(1e-10);
+    expect(Math.abs(result[0]! - result[1]!)).toBeLessThan(1e-10);
+    expect(Math.abs(result[1]! - result[2]!)).toBeLessThan(1e-10);
   });
 });
 
@@ -76,7 +76,7 @@ describe("gate", () => {
     expect(result.weights.CODE_GENERATION).toBeDefined();
     expect(result.weights.CODE_GENERATION!).toBeGreaterThan(0);
     const topExpert = result.activeExperts[0];
-    expect(topExpert.expertId).toBe("coding");
+    expect(topExpert!.expertId).toBe("coding");
   });
 
   it("should activate math expert for math task", () => {
@@ -122,7 +122,7 @@ describe("toCapabilityRequirements", () => {
     expect(reqs.length).toBeGreaterThan(0);
     // Should be sorted by weight descending
     for (let i = 1; i < reqs.length; i++) {
-      expect(reqs[i - 1].weight).toBeGreaterThanOrEqual(reqs[i].weight);
+      expect(reqs[i - 1]!.weight).toBeGreaterThanOrEqual(reqs[i]!.weight);
     }
   });
 

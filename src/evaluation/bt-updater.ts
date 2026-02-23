@@ -221,7 +221,7 @@ export function bootstrapCI(
     // Resample with replacement
     const resampled = Array.from(
       { length: results.length },
-      () => results[Math.floor(Math.random() * results.length)],
+      () => results[Math.floor(Math.random() * results.length)]!,
     );
 
     const ratings: RatingsMap = new Map();
@@ -232,9 +232,9 @@ export function bootstrapCI(
   }
 
   mus.sort((a, b) => a - b);
-  const lower = mus[Math.floor(iterations * 0.025)];
-  const upper = mus[Math.floor(iterations * 0.975)];
-  const median = mus[Math.floor(iterations * 0.5)];
+  const lower = mus[Math.floor(iterations * 0.025)]!;
+  const upper = mus[Math.floor(iterations * 0.975)]!;
+  const median = mus[Math.floor(iterations * 0.5)]!;
 
   return { lower, upper, median };
 }

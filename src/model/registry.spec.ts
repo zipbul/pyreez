@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { ModelRegistry } from "./registry";
-import { ALL_DIMENSIONS } from "./types";
+import { ModelRegistry, __testing__ } from "./registry";
+import { ALL_DIMENSIONS, SIGMA_BASE } from "./types";
 import type { ModelInfo } from "./types";
 
 // -- Tests --
@@ -138,8 +138,8 @@ describe("ModelRegistry", () => {
 
       // Assert
       expect(models).toBeArrayOfSize(2);
-      expect(models[0].id).toBe("openai/gpt-4.1");
-      expect(models[1].id).toBe("microsoft/Phi-4");
+      expect(models[0]!.id).toBe("openai/gpt-4.1");
+      expect(models[1]!.id).toBe("microsoft/Phi-4");
     });
   });
 
@@ -418,23 +418,24 @@ describe("ModelRegistry (BT rating)", () => {
           },
         },
       };
-      // Access parseModels via constructor
-      const reg = new ModelRegistry(
-        // @ts-expect-error — passing raw V1 JSON through constructor indirectly
-        undefined,
-      );
-      // Instead, directly test through the registry by examining real models
-      // which are all V2. We verify V1 migration by creating a registry with mock data.
-      // Since parseModels is not exported, test via real models' DimensionRating structure.
-      const model = reg.getById("openai/gpt-4.1");
 
-      // Assert — capabilities should be DimensionRating, not plain numbers
-      expect(model).toBeDefined();
-      const rating = model!.capabilities.REASONING;
-      expect(rating).toHaveProperty("mu");
-      expect(rating).toHaveProperty("sigma");
-      expect(rating).toHaveProperty("comparisons");
-      expect(typeof rating.mu).toBe("number");
+      // Act — parseModels via __testing__ export (TST-ACCESS)
+      const models = __testing__.parseModels(v1Data as any);
+
+      // Assert — V1 → V2 migration: score×100 → mu, sigma=SIGMA_BASE, dataPoints → comparisons
+      expect(models).toHaveLength(1);
+      const model = models[0]!;
+      expect(model.id).toBe("test/legacy-model");
+      expect(model.name).toBe("Legacy");
+      const reasoning = model.capabilities.REASONING;
+      expect(reasoning.mu).toBe(80); // 0.8 * 100
+      expect(reasoning.sigma).toBe(SIGMA_BASE);
+      expect(reasoning.comparisons).toBe(5);
+      // Non-specified dimensions should get default rating
+      const codegen = model.capabilities.CODE_GENERATION;
+      expect(codegen.mu).toBe(0);
+      expect(codegen.sigma).toBe(SIGMA_BASE);
+      expect(codegen.comparisons).toBe(0);
     });
   });
 

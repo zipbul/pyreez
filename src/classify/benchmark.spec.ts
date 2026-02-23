@@ -24,8 +24,8 @@ function stubClassify(result: ClassifyResult | null): ClassifyFn {
 function makeResult(
   domain: string,
   taskType: string,
-  complexity = "simple" as const,
-  criticality = "medium" as const,
+  complexity: ClassifyResult["complexity"] = "simple",
+  criticality: ClassifyResult["criticality"] = "medium",
 ): ClassifyResult {
   return {
     domain: domain as ClassifyResult["domain"],
@@ -175,8 +175,8 @@ describe("runBenchmark", () => {
     // Assert
     expect(result.correct).toBe(0);
     expect(result.misclassified).toHaveLength(1);
-    expect(result.misclassified[0].reason).toBe("unclassified");
-    expect(result.misclassified[0].actual).toBeNull();
+    expect(result.misclassified[0]!.reason).toBe("unclassified");
+    expect(result.misclassified[0]!.actual).toBeNull();
   });
 
   // 7. [NE] should report wrong-domain when domain mismatches
@@ -190,8 +190,8 @@ describe("runBenchmark", () => {
 
     // Assert
     expect(result.misclassified).toHaveLength(1);
-    expect(result.misclassified[0].reason).toBe("wrong-domain");
-    expect(result.misclassified[0].actual!.domain).toBe("TESTING");
+    expect(result.misclassified[0]!.reason).toBe("wrong-domain");
+    expect(result.misclassified[0]!.actual!.domain).toBe("TESTING");
   });
 
   // 8. [NE] should report wrong-task-type when domain correct but taskType mismatches
@@ -205,7 +205,7 @@ describe("runBenchmark", () => {
 
     // Assert
     expect(result.misclassified).toHaveLength(1);
-    expect(result.misclassified[0].reason).toBe("wrong-task-type");
+    expect(result.misclassified[0]!.reason).toBe("wrong-task-type");
   });
 
   // 9. [NE] should report wrong-complexity when domain/taskType correct but complexity mismatches
@@ -223,7 +223,7 @@ describe("runBenchmark", () => {
 
     // Assert
     expect(result.misclassified).toHaveLength(1);
-    expect(result.misclassified[0].reason).toBe("wrong-complexity");
+    expect(result.misclassified[0]!.reason).toBe("wrong-complexity");
   });
 
   // 10. [NE] should report wrong-criticality when complexity correct but criticality mismatches
@@ -241,7 +241,7 @@ describe("runBenchmark", () => {
 
     // Assert
     expect(result.misclassified).toHaveLength(1);
-    expect(result.misclassified[0].reason).toBe("wrong-criticality");
+    expect(result.misclassified[0]!.reason).toBe("wrong-criticality");
   });
 
   // 11. [NE] should return accuracy 0 when all cases misclassified
@@ -274,7 +274,7 @@ describe("runBenchmark", () => {
     const result = runBenchmark(cases, classify);
 
     // Assert — domain checked first (B4 before B5)
-    expect(result.misclassified[0].reason).toBe("wrong-domain");
+    expect(result.misclassified[0]!.reason).toBe("wrong-domain");
   });
 
   // 13. [NE] should prioritize wrong-complexity over wrong-criticality
@@ -291,7 +291,7 @@ describe("runBenchmark", () => {
     const result = runBenchmark(cases, classify);
 
     // Assert — complexity checked first (B6/B7 before B8/B9)
-    expect(result.misclassified[0].reason).toBe("wrong-complexity");
+    expect(result.misclassified[0]!.reason).toBe("wrong-complexity");
   });
 
   // 14. [CO] should compute partial accuracy for mixed correct/wrong results
@@ -318,7 +318,7 @@ describe("runBenchmark", () => {
     expect(result.correct).toBe(2);
     expect(result.accuracy).toBeCloseTo(2 / 3);
     expect(result.misclassified).toHaveLength(1);
-    expect(result.misclassified[0].case.prompt).toBe("c");
+    expect(result.misclassified[0]!.case.prompt).toBe("c");
   });
 
   // 15. [CO] should handle all mismatch types in single run
@@ -413,8 +413,8 @@ describe("runBenchmark", () => {
     expect(forward.accuracy).toBe(reversed.accuracy);
     expect(forward.correct).toBe(reversed.correct);
     // But misclassified order may differ
-    expect(forward.misclassified[0].case.prompt).toBe("b");
-    expect(reversed.misclassified[0].case.prompt).toBe("b");
+    expect(forward.misclassified[0]!.case.prompt).toBe("b");
+    expect(reversed.misclassified[0]!.case.prompt).toBe("b");
   });
 
   // 18. [ID] should return identical results for identical inputs

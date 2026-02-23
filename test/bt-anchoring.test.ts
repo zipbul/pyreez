@@ -74,9 +74,9 @@ describe("BT Anchoring E2E", () => {
     const v2 = migrateToV2(v1, benchmarks);
     expect(v2.version).toBe(2);
 
-    const model = v2.models["test/alpha"];
+    const model = v2.models["test/alpha"]!;
     for (const dim of ALL_DIMENSIONS) {
-      const rating = model.scores[dim];
+      const rating = model.scores[dim]!;
       expect(rating.mu).toBeGreaterThanOrEqual(0);
       expect(rating.mu).toBeLessThanOrEqual(1000);
       expect(rating.sigma).toBeGreaterThan(0);
@@ -104,7 +104,7 @@ describe("BT Anchoring E2E", () => {
     };
 
     const v2 = migrateToV2(v1);
-    const model = v2.models["test/meta"];
+    const model = v2.models["test/meta"]!;
     expect(model.name).toBe("MetaModel");
     expect(model.contextWindow).toBe(500000);
     expect(model.supportsToolCalling).toBe(false);

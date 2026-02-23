@@ -75,19 +75,19 @@ export function parseJudgeResponse(raw: string): {
   // Extract verdict
   const verdictMatch = raw.match(/VERDICT:\s*(A>>B|A>B|A=B|B>A|B>>A)/i);
   const outcome: PairwiseOutcome = verdictMatch
-    ? (verdictMatch[1] as PairwiseOutcome)
+    ? (verdictMatch[1]! as PairwiseOutcome)
     : "A=B"; // default to tie if parsing fails
 
   // Extract reasoning
   const reasoningMatch = raw.match(
     /REASONING:\s*([\s\S]*?)(?=CONFIDENCE:|VERDICT:|$)/i,
   );
-  const reasoning = reasoningMatch ? reasoningMatch[1].trim() : raw.trim();
+  const reasoning = reasoningMatch ? reasoningMatch[1]!.trim() : raw.trim();
 
   // Extract confidence
   const confidenceMatch = raw.match(/CONFIDENCE:\s*(-?[\d.]+)/i);
   const confidence = confidenceMatch
-    ? Math.max(0, Math.min(1, parseFloat(confidenceMatch[1])))
+    ? Math.max(0, Math.min(1, parseFloat(confidenceMatch[1]!)))
     : 0.5; // default to 0.5 if not found
 
   return { outcome, reasoning, confidence };

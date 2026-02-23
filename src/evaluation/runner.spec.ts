@@ -115,6 +115,6 @@ describe("runMatrix", () => {
   it("should record token usage from runner", async () => {
     const runner = makeMockRunner();
     const results = await runMatrix(runner, [makePrompt()], ["m1"]);
-    expect(results[0].tokenUsage).toEqual({ input: 10, output: 20 });
+    expect(results[0]!.tokenUsage).toEqual({ input: 10, output: 20 });
   });
 });

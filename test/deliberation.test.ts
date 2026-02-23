@@ -262,6 +262,12 @@ describe("Deliberation E2E", () => {
     expect(result.consensusReached).toBe(false);
     expect(result.roundsExecuted).toBe(3);
     expect(result.deliberationLog.rounds).toHaveLength(3);
+    // All rounds should have "continue" decision (no consensus)
+    for (const round of result.deliberationLog.rounds) {
+      if (round.synthesis) {
+        expect(round.synthesis.decision).toBe("continue");
+      }
+    }
   });
 
   // ----------------------------------------------------------
@@ -555,8 +561,10 @@ describe("Deliberation E2E", () => {
     }
     expect(result.deliberationLog.task).toBe("Output field test");
     expect(result.deliberationLog.team.producer).toBeDefined();
+    expect(result.deliberationLog.team.producer.model).toMatch(/\w+\/\w+/);
     expect(result.deliberationLog.team.reviewers.length).toBe(2);
     expect(result.deliberationLog.team.leader).toBeDefined();
+    expect(result.deliberationLog.team.leader.model).toMatch(/\w+\/\w+/);
     expect(result.deliberationLog.rounds).toHaveLength(1);
     // 1 producer + 2 reviewers + 1 leader = 4
     expect(result.totalLLMCalls).toBe(4);

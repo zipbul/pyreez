@@ -68,8 +68,8 @@ describe("extractPairwise", () => {
     ];
     const results = extractPairwise(records);
     expect(results).toHaveLength(1);
-    expect(results[0].modelA).toBe("m1");
-    expect(results[0].modelB).toBe("m2");
+    expect(results[0]!.modelA).toBe("m1");
+    expect(results[0]!.modelB).toBe("m2");
   });
 
   it("should produce A>>B for strong quality difference", () => {
@@ -78,7 +78,7 @@ describe("extractPairwise", () => {
       makeRecord({ model: "m2", quality: 3, taskType: "CODE_WRITE" }),
     ];
     const results = extractPairwise(records);
-    expect(results[0].outcome).toBe("A>>B");
+    expect(results[0]!.outcome).toBe("A>>B");
   });
 
   it("should produce A>B for weak quality difference", () => {
@@ -87,7 +87,7 @@ describe("extractPairwise", () => {
       makeRecord({ model: "m2", quality: 5, taskType: "CODE_WRITE" }),
     ];
     const results = extractPairwise(records);
-    expect(results[0].outcome).toBe("A>B");
+    expect(results[0]!.outcome).toBe("A>B");
   });
 
   it("should skip when same model", () => {
@@ -120,7 +120,7 @@ describe("extractPairwise", () => {
       makeRecord({ model: "m2", quality: 9, taskType: "CODE_WRITE" }),
     ];
     const results = extractPairwise(records);
-    expect(results[0].outcome).toBe("B>>A");
+    expect(results[0]!.outcome).toBe("B>>A");
   });
 
   it("should produce B>A for weak reverse quality diff", () => {
@@ -135,7 +135,7 @@ describe("extractPairwise", () => {
 
     // Assert — diff = 5-7 = -2, |diff|=2 >= MIN_QUALITY_DIFF(0.5) but < STRONG_QUALITY_DIFF(3)
     expect(results).toHaveLength(1);
-    expect(results[0].outcome).toBe("B>A");
+    expect(results[0]!.outcome).toBe("B>A");
   });
 });
 
@@ -206,9 +206,11 @@ describe("calibrate", () => {
 
   it("should collect anomalies when updateRating detects anomaly", () => {
     // Arrange — create a big upset: m1 has very high rating but loses strongly
+    // sigma must be high enough that scaledK produces mu change > ANOMALY_THRESHOLD(100)
+    // K = K_BASE(32) * sigma/SIGMA_BASE(350); sigma=1200 → K≈109.7 → max change≈109 > 100
     const ratings: RatingsMap = new Map();
-    setRating(ratings, "m1", "CODE_GENERATION", { mu: 900, sigma: 100, comparisons: 50 });
-    setRating(ratings, "m2", "CODE_GENERATION", { mu: 100, sigma: 100, comparisons: 50 });
+    setRating(ratings, "m1", "CODE_GENERATION", { mu: 900, sigma: 1200, comparisons: 50 });
+    setRating(ratings, "m2", "CODE_GENERATION", { mu: 100, sigma: 1200, comparisons: 50 });
 
     // m2 wins strongly (B>>A): m1 quality=2, m2 quality=9
     const records = [
@@ -221,6 +223,10 @@ describe("calibrate", () => {
 
     // Assert — m1 had mu=900 but lost strongly, should trigger anomaly detection
     expect(result.comparisonsProcessed).toBe(1);
+    expect(result.anomalies.length).toBeGreaterThan(0);
+    expect(result.anomalies).toContainEqual(
+      expect.objectContaining({ modelId: "m1", dimension: "CODE_GENERATION" }),
+    );
     // The mu of m1 should have decreased (big upset)
     const m1Rating = getRating(ratings, "m1", "CODE_GENERATION");
     expect(m1Rating.mu).toBeLessThan(900);

@@ -1,4 +1,4 @@
-import { Token, TokenType } from "./tokens";
+import { type Token, TokenType } from "./tokens";
 
 export type Program = { type: "Program"; body: Stmt[] };
 
@@ -121,7 +121,7 @@ export class Parser {
     if (this.match(TokenType.LBRACE)) {
       const stmts = this.parseBlock();
       if (stmts.length === 1) {
-        const s = stmts[0];
+        const s = stmts[0]!;
         if (s.type === "ExprStmt") return s;
       }
       throw this.error(this.peek(), "Unexpected block statement here");
@@ -392,11 +392,11 @@ export class Parser {
   }
 
   private peek(): Token {
-    return this.tokens[this.pos];
+    return this.tokens[this.pos]!;
   }
 
   private previous(): Token {
-    return this.tokens[this.pos - 1];
+    return this.tokens[this.pos - 1]!;
   }
 
   private error(token: Token, message: string): Error {
