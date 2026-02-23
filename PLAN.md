@@ -426,10 +426,10 @@ interface DeliberateOutput {
 |---|---|---|
 | C1 | 레이트 리밋 관리 (GitHub API 한도 대응) | ✅ |
 | C2 | 에러 핸들링 강화 (Phase별 재시도/폴백) | ✅ |
-| C3 | 로깅/모니터링 (실행 아카이브) | ❌ |
+| C3 | 로깅/모니터링 (실행 아카이브) | ✅ |
 | C4 | Classification 사전 검증 (분류 모델 정확도 벤치마크) | ❌ |
-| C5 | `<think>` 태그 전역 적용 (ask/ask_many 응답에도 stripThinkTags) | ❌ |
-| C6 | `scores` 도구 `top` 파라미터 추가 (정렬 + 슬라이스) | ❌ |
+| C5 | `<think>` 태그 전역 적용 (ask/ask_many 응답에도 stripThinkTags) | ✅ |
+| C6 | `scores` 도구 `top` 파라미터 추가 (정렬 + 슬라이스) | ✅ |
 
 ### Phase D: 합의 기반 숙의 (Deliberation)
 
@@ -443,7 +443,7 @@ interface DeliberateOutput {
 | D3 | Deliberation Engine (라운드 실행, 병렬 리뷰, 종료 조건) | ✅ |
 | D4 | 프롬프트 엔지니어링 (Producer/Reviewer/Leader 프롬프트 구성) | ✅ |
 | D5 | MCP `deliberate` 도구 등록 + 통합 | ✅ |
-| D6 | Adaptive Routing (학습 라우팅 — 과거 성공 조합 가중치) | ❌ |
+| D6 | Adaptive Routing (학습 라우팅 — 과거 성공 조합 가중치) | ✅ (프레임) |
 | D7 | Stigmergic Report 확장 (query action — 과거 숙의 결과 검색) | ✅ |
 | D8 | Deliberation E2E 통합 테스트 | ✅ |
 | D9 | Host-Native Integration — SKILL.md 배포, Custom Agent 정의 (`.github/skills/`, `.github/agents/`) | ✅ |
@@ -564,7 +564,7 @@ interface DeliberateOutput {
 | B | 실행 아카이브 (`.pyreez/runs/{timestamp}.json`) |
 | C | A+B 결합 |
 
-**결정:** 미확정
+**결정:** ✅ 확정 — Option B. FileRunLogger가 `.pyreez/runs/{date}.jsonl`에 JSONL 아카이브 기록. 서버 logRun 래퍼가 6개 도구 핸들러를 감싸서 성공/실패/durationMs 자동 기록. fire-and-forget (로깅 실패가 도구 실행에 영향 없음).
 
 ---
 
@@ -683,7 +683,7 @@ interface DeliberateOutput {
 | B | 구현과 병행 검증 |
 | C | 원래 로드맵대로 나중에 검증 |
 
-**결정:** 미확정
+**결정:** ✅ 확정 — Option B. 구현과 병행 검증. 필드테스트에서 실사용하면서 분류 정확도와 모델 스코어링을 동시에 조정.
 
 ---
 
@@ -755,6 +755,7 @@ interface DeliberateOutput {
 
 | 일자 | 내용 |
 |---|---|
+| 2026-02-23 | C3/C5/C6 ✅, D6 Adaptive Routing 프레임 ✅. DR-009 확정(B), DR-020 확정(B). FileRunLogger+logRun 래퍼, stripThinkTags 전역, scores top, AdaptiveWeightProvider+nullAdaptiveWeight+compositeScore boost. 493 tests GREEN. |
 | 2026-02-23 | Phase C5/C6 추가 (think 태그 전역 적용, scores top 파라미터). DR-007/012/013 확정. C1/C2 ✅. Complexity 키워드 상승, DeepSeek think strip, Rate Limit 재시도, 에러 핸들링 개선. GitHub 레포 공개 (zipbul/pyreez). 452 tests GREEN. |
 | 2026-02-23 | Host-Native Integration 전략 추가 (Section 2). IDE/에이전트 생태계 리서치(10카테고리×3플랫폼) 반영. pyreez 배포 형태(MCP+Skill+Agent+Plugin) 확정. Phase D9 추가. `docs/research-frameworks.md` Section 13-14 추가. `.github/skills/`, `.github/agents/` 생성. |
 | 2026-02-23 | Section 2 전면 교체: 5+1 구조 → 합의 기반 이종 모델 숙의(Deliberation). 3계층 역할(Host/Orchestrator/Leader/Workers), SharedContext, 팀 다양성 보장 알고리즘, pyreez_deliberate 도구, Deliberation 프로세스 흐름. 11개 프레임워크 리서치 근거 `docs/research-frameworks.md` 추가. Phase D 로드맵 추가. DR-003(v2), DR-019(v2) 갱신. |
