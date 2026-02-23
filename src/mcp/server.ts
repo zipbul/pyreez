@@ -1,7 +1,7 @@
 /**
- * PyreezMcpServer — MCP server exposing 5 infrastructure tools.
+ * PyreezMcpServer — MCP server exposing 6 infrastructure tools.
  *
- * Tools: pyreez_route, pyreez_ask, pyreez_ask_many, pyreez_scores, pyreez_report
+ * Tools: pyreez_route, pyreez_ask, pyreez_ask_many, pyreez_scores, pyreez_report, pyreez_deliberate
  * Architecture: pyreez = Infrastructure layer, Host = Orchestrator.
  */
 
@@ -13,6 +13,7 @@ import type { LLMClient } from "../llm/client";
 import type { ModelRegistry } from "../model/registry";
 import type { ModelInfo } from "../model/types";
 import type { Reporter, CallRecord } from "../report/types";
+import type { RunLogger } from "../report/run-logger";
 import type { RouteResult } from "../router/router";
 import type { BudgetConfig } from "../router/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
@@ -28,6 +29,7 @@ export interface PyreezMcpServerConfig {
   summaryFn?: () => Promise<import("../report/types").ReportSummary>;
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
   deliberationStore?: DeliberationStore;
+  runLogger?: RunLogger;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -41,6 +43,7 @@ export class PyreezMcpServer {
   private readonly summaryFn?: PyreezMcpServerConfig["summaryFn"];
   private readonly deliberateFn?: PyreezMcpServerConfig["deliberateFn"];
   private readonly deliberationStore?: DeliberationStore;
+  private readonly runLogger?: RunLogger;
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -67,6 +70,7 @@ export class PyreezMcpServer {
     this.summaryFn = config.summaryFn;
     this.deliberateFn = config.deliberateFn;
     this.deliberationStore = config.deliberationStore;
+    this.runLogger = config.runLogger;
 
     this.registerTools();
   }
@@ -276,12 +280,57 @@ export class PyreezMcpServer {
     );
   }
 
+  // --- Run Logging ---
+
+  private async logRun(
+    tool: string,
+    handler: () => Promise<CallToolResult>,
+  ): Promise<CallToolResult> {
+    if (!this.runLogger) return handler();
+
+    const start = Date.now();
+    const id = crypto.randomUUID();
+    try {
+      const result = await handler();
+      try {
+        await this.runLogger.log({
+          id,
+          timestamp: start,
+          tool,
+          durationMs: Date.now() - start,
+          success: !result.isError,
+          error: result.isError
+            ? (result.content[0] as { text: string }).text
+            : undefined,
+        });
+      } catch {
+        // logging failure must not break the tool
+      }
+      return result;
+    } catch (error) {
+      try {
+        await this.runLogger.log({
+          id,
+          timestamp: start,
+          tool,
+          durationMs: Date.now() - start,
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } catch {
+        // logging failure must not break the tool
+      }
+      throw error;
+    }
+  }
+
   // --- Tool Handlers ---
 
   async handleRoute(args: {
     task: string;
     budget?: number;
   }): Promise<CallToolResult> {
+    return this.logRun("route", async () => {
     if (!args.task) {
       return this.errorResult("Error: task is required");
     }
@@ -304,6 +353,7 @@ export class PyreezMcpServer {
         `Error: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    });
   }
 
   async handleAsk(args: {
@@ -312,6 +362,7 @@ export class PyreezMcpServer {
     temperature?: number;
     max_tokens?: number;
   }): Promise<CallToolResult> {
+    return this.logRun("ask", async () => {
     if (!args.model) {
       return this.errorResult("Error: model is required");
     }
@@ -341,6 +392,7 @@ export class PyreezMcpServer {
         `Error: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    });
   }
 
   async handleAskMany(args: {
@@ -349,6 +401,7 @@ export class PyreezMcpServer {
     temperature?: number;
     max_tokens?: number;
   }): Promise<CallToolResult> {
+    return this.logRun("ask_many", async () => {
     if (!args.models?.length) {
       return this.errorResult("Error: models must not be empty");
     }
@@ -382,6 +435,7 @@ export class PyreezMcpServer {
     });
 
     return this.textResult(JSON.stringify(mapped, null, 2));
+    });
   }
 
   async handleScores(args: {
@@ -389,6 +443,7 @@ export class PyreezMcpServer {
     dimension?: string;
     top?: number;
   }): Promise<CallToolResult> {
+    return this.logRun("scores", async () => {
     let models: ModelInfo[];
 
     if (args.model) {
@@ -422,6 +477,7 @@ export class PyreezMcpServer {
       cost: m.cost,
     }));
     return this.textResult(JSON.stringify(full, null, 2));
+    });
   }
 
   async handleReport(args: {
@@ -444,6 +500,7 @@ export class PyreezMcpServer {
     query_consensus?: boolean;
     query_limit?: number;
   }): Promise<CallToolResult> {
+    return this.logRun("report", async () => {
     const action = args.action ?? "record";
 
     if (action === "query_deliberation") {
@@ -510,6 +567,7 @@ export class PyreezMcpServer {
         `Error: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    });
   }
 
   // --- Lifecycle ---
@@ -522,6 +580,7 @@ export class PyreezMcpServer {
     max_rounds?: number;
     consensus?: string;
   }): Promise<CallToolResult> {
+    return this.logRun("deliberate", async () => {
     if (!args.task) {
       return this.errorResult("Error: task is required");
     }
@@ -548,6 +607,7 @@ export class PyreezMcpServer {
         `Error: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    });
   }
 
   // --- Lifecycle (server) ---

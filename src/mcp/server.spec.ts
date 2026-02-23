@@ -1474,4 +1474,75 @@ describe("PyreezMcpServer", () => {
       await expect(server.close()).rejects.toThrow("close failed");
     });
   });
+
+  // === Run Logging ===
+
+  describe("run logging", () => {
+    it("should log successful tool call via runLogger", async () => {
+      const runLogger = {
+        log: mock(() => Promise.resolve()),
+        query: mock(() => Promise.resolve([])),
+      };
+      const server = new PyreezMcpServer(validConfig({ runLogger }));
+
+      await server.handleRoute({ task: "test task" });
+
+      expect(runLogger.log).toHaveBeenCalledTimes(1);
+      const logged = (runLogger.log as ReturnType<typeof mock>).mock
+        .calls[0][0];
+      expect(logged.tool).toBe("route");
+      expect(logged.success).toBe(true);
+      expect(logged.durationMs).toBeGreaterThanOrEqual(0);
+      expect(logged.id).toBeTruthy();
+    });
+
+    it("should log failed tool call with error message", async () => {
+      const runLogger = {
+        log: mock(() => Promise.resolve()),
+        query: mock(() => Promise.resolve([])),
+      };
+      const llmClient = stubLlmClient({
+        chat: mock(() => Promise.reject(new Error("API error"))) as any,
+      });
+      const server = new PyreezMcpServer(
+        validConfig({ runLogger, llmClient }),
+      );
+
+      await server.handleAsk({
+        model: "openai/gpt-4.1",
+        messages: [{ role: "user", content: "hello" }],
+      });
+
+      expect(runLogger.log).toHaveBeenCalledTimes(1);
+      const logged = (runLogger.log as ReturnType<typeof mock>).mock
+        .calls[0][0];
+      expect(logged.tool).toBe("ask");
+      expect(logged.success).toBe(false);
+      expect(logged.error).toContain("API error");
+    });
+
+    it("should not fail when runLogger is not configured", async () => {
+      const server = new PyreezMcpServer(validConfig());
+
+      const result = await server.handleRoute({ task: "test task" });
+
+      expect(result.isError).toBeUndefined();
+    });
+
+    it("should still return result when runLogger.log throws", async () => {
+      const runLogger = {
+        log: mock(() => Promise.reject(new Error("log write failed"))),
+        query: mock(() => Promise.resolve([])),
+      };
+      const server = new PyreezMcpServer(validConfig({ runLogger }));
+
+      const result = await server.handleRoute({ task: "test task" });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse(
+        (result.content[0] as { text: string }).text,
+      );
+      expect(parsed.selection).toBeDefined();
+    });
+  });
 });
