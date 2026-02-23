@@ -489,16 +489,16 @@ interface DeliberateOutput {
 
 | 단위 | 내용 | 의존 | 상태 |
 |---|---|---|---|
-| F1 | **BT Dimensional Rating** — `DimensionRating { mu, sigma, comparisons }` 타입 도입. `ModelCapabilities` 0-10 → BT mu/sigma 전환. `compositeScore` BT 기반 재설계. `scores/models.json` 스키마 마이그레이션 | — | ❌ |
-| F2 | **Benchmark Anchoring** — 공개 벤치마크(Open LLM Leaderboard 6종 + HumanEval+ + SWE-bench) 결과 수집 → 18모델 초기 BT mu 설정. 인간 추정치 대체 | F1 | ❌ |
-| F3 | **2-Track Selection** — criticality 기반 분기: critical/high → quality-first, low/medium → cost-first. CE-first 편향 해소. E2 흡수 | F1 | ❌ |
-| F4 | **Preference Router** — RouteLLM Matrix Factorization 방식. deliberation에서 수집된 preference data로 쿼리→모델 라우팅 학습 | F1, F8 | ❌ |
-| F5 | **MoE Dimension Gating** — ArmoRM 방식 MoE로 태스크별 차원 가중치 자동 결정. 수동 weight 관리 제거 | F1, F8 | ❌ |
-| F6 | **Adaptive Weight (Cascade)** — FrugalGPT LLM Cascade. 쿼리별 모델 조합 학습. Confidence Gate 기반 에스컬레이션. E1 흡수 | F1, F8 | ❌ |
-| F7 | **Calibration Loop** — 실사용 결과 → BT 레이팅 자동 갱신. sigma 수렴 모니터링. 이상치 탐지 | F1, F8 | ❌ |
-| F8 | **Evaluation Suite** — 4-Layer 벤치마크 시스템 (아래 상세). 프롬프트 셋 + LLM-as-Judge + Pairwise Comparison 파이프라인 | F1 | ❌ |
-| F9 | **모델 확장** — Opus 4.6, Gemini 3.1 Pro, GPT 5.3 등 누락 모델 추가. F2 앵커링 즉시 적용 | F1, F2 | ❌ |
-| F10 | **LLM-as-Judge Pipeline** — MT-Bench/Arena-Hard 방식 자동 평가. Position swap, 5-outcome scoring, length bias 보정 | F8 | ❌ |
+| F1 | **BT Dimensional Rating** — `DimensionRating { mu, sigma, comparisons }` 타입 도입. `ModelCapabilities` 0-10 → BT mu/sigma 전환. `compositeScore` BT 기반 재설계. `scores/models.json` 스키마 마이그레이션 | — | ✅ |
+| F2 | **Benchmark Anchoring** — 공개 벤치마크(Open LLM Leaderboard 6종 + HumanEval+ + SWE-bench) 결과 수집 → 18모델 초기 BT mu 설정. 인간 추정치 대체 | F1 | ✅ |
+| F3 | **2-Track Selection** — criticality 기반 분기: critical/high → quality-first, low/medium → cost-first. CE-first 편향 해소. E2 흡수 | F1 | ✅ |
+| F4 | **Preference Router** — RouteLLM Matrix Factorization 방식. deliberation에서 수집된 preference data로 쿼리→모델 라우팅 학습 | F1, F8 | ✅ |
+| F5 | **MoE Dimension Gating** — ArmoRM 방식 MoE로 태스크별 차원 가중치 자동 결정. 수동 weight 관리 제거 | F1, F8 | ✅ |
+| F6 | **Adaptive Weight (Cascade)** — FrugalGPT LLM Cascade. 쿼리별 모델 조합 학습. Confidence Gate 기반 에스컬레이션. E1 흡수 | F1, F8 | ✅ |
+| F7 | **Calibration Loop** — 실사용 결과 → BT 레이팅 자동 갱신. sigma 수렴 모니터링. 이상치 탐지 | F1, F8 | ✅ |
+| F8 | **Evaluation Suite** — 4-Layer 벤치마크 시스템 (아래 상세). 프롬프트 셋 + LLM-as-Judge + Pairwise Comparison 파이프라인 | F1 | ✅ |
+| F9 | **모델 확장** — Opus 4.6, Gemini 3.1 Pro, GPT 5.3 등 누락 모델 추가. F2 앵커링 즉시 적용 | F1, F2 | ✅ |
+| F10 | **LLM-as-Judge Pipeline** — MT-Bench/Arena-Hard 방식 자동 평가. Position swap, 5-outcome scoring, length bias 보정 | F8 | ✅ |
 
 의존 그래프:
 ```

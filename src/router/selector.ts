@@ -114,11 +114,17 @@ interface ScoredModel {
   costEfficiency: number;
 }
 
+/** Determine if criticality warrants quality-first selection. */
+function isQualityFirst(criticality?: string): boolean {
+  return criticality === "critical" || criticality === "high";
+}
+
 function scoredAndRanked(
   filtered: FilteredModel[],
   requiredCapabilities: CapabilityRequirement[],
   adaptive: AdaptiveWeightProvider,
   taskType: string,
+  qualityFirst: boolean = false,
 ): ScoredModel[] {
   const scored = filtered.map(({ model, expectedCost }) => {
     const score = compositeScore(model, requiredCapabilities, adaptive, taskType);
@@ -126,13 +132,23 @@ function scoredAndRanked(
     return { model, score, expectedCost, costEfficiency };
   });
 
-  // Sort: costEfficiency DESC → score DESC (tiebreak)
-  scored.sort((a, b) => {
-    if (b.costEfficiency !== a.costEfficiency) {
+  if (qualityFirst) {
+    // Quality-first: score DESC → costEfficiency DESC (tiebreak)
+    scored.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
       return b.costEfficiency - a.costEfficiency;
-    }
-    return b.score - a.score;
-  });
+    });
+  } else {
+    // Cost-first: costEfficiency DESC → score DESC (tiebreak)
+    scored.sort((a, b) => {
+      if (b.costEfficiency !== a.costEfficiency) {
+        return b.costEfficiency - a.costEfficiency;
+      }
+      return b.score - a.score;
+    });
+  }
 
   return scored;
 }
@@ -216,15 +232,17 @@ export function selectModel(
     return fallbackResult(models, requirement);
   }
 
-  // Step 2 + 3: COMPOSITE SCORE → COST-EFFICIENCY ranking
+  // Step 2 + 3: COMPOSITE SCORE → ranking (quality-first or cost-first based on criticality)
+  const qualityFirst = isQualityFirst(requirement.criticality);
   const ranked = scoredAndRanked(
     filtered,
     requirement.requiredCapabilities,
     effectiveAdaptive,
     requirement.taskType,
+    qualityFirst,
   );
 
-  // Step 4: return top candidate (simplified budget-aware — always CE-first for now)
+  // Step 4: return top candidate (2-Track: quality-first for critical/high, cost-first otherwise)
   const best = ranked[0]!;
 
   return {

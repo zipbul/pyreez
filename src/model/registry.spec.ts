@@ -13,12 +13,12 @@ describe("ModelRegistry", () => {
   const registry = new ModelRegistry();
 
   describe("getAll", () => {
-    it("should return array of 18 models", () => {
+    it("should return array of 21 models", () => {
       // Arrange & Act
       const models = registry.getAll();
 
       // Assert
-      expect(models).toBeArrayOfSize(18);
+      expect(models).toBeArrayOfSize(21);
     });
 
     it("should return equal results on repeated calls", () => {
@@ -237,12 +237,12 @@ describe("ModelRegistry (BT rating)", () => {
       expect(typeof reasoning.mu).toBe("number");
     });
 
-    it("should parse all 18 models with 21 dimensions each", () => {
+    it("should parse all 21 models with 21 dimensions each", () => {
       // Arrange & Act
       const models = registry.getAll();
 
       // Assert
-      expect(models).toBeArrayOfSize(18);
+      expect(models).toBeArrayOfSize(21);
       for (const model of models) {
         for (const dim of ALL_DIMENSIONS) {
           const rating = model.capabilities[dim] as any;

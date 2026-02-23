@@ -692,10 +692,10 @@ function makeBTModel(overrides: Partial<ModelInfo> & {
     id: "test/bt-model",
     name: "BT Model",
     contextWindow: 100_000,
-    capabilities: makeBTCapabilities(btCapabilities) as any,
     cost: { inputPer1M: 1.0, outputPer1M: 4.0 },
     supportsToolCalling: true,
     ...rest,
+    capabilities: makeBTCapabilities(btCapabilities) as any,
   };
 }
 
@@ -1220,5 +1220,207 @@ describe("selectModel (BT: fallback)", () => {
 
     // Assert — reduce starts from first, same cost → keeps first
     expect(result.model.id).toBe("a");
+  });
+});
+
+// ================================================================
+// 2-Track Selection (criticality-based)
+// ================================================================
+
+describe("selectModel (2-Track Selection)", () => {
+  // Two models: highScore is expensive but capable, cheapModel is cheap but weak
+  const highScoreModel = makeBTModel({
+    id: "quality/high",
+    name: "Quality High",
+    btCapabilities: {
+      CODE_GENERATION: { mu: 900, sigma: 150, comparisons: 10 },
+      REASONING: { mu: 900, sigma: 150, comparisons: 10 },
+      INSTRUCTION_FOLLOWING: { mu: 900, sigma: 150, comparisons: 10 },
+    },
+    cost: { inputPer1M: 5.0, outputPer1M: 20.0 },
+  });
+
+  const cheapModel = makeBTModel({
+    id: "cheap/low",
+    name: "Cheap Low",
+    btCapabilities: {
+      CODE_GENERATION: { mu: 400, sigma: 150, comparisons: 10 },
+      REASONING: { mu: 400, sigma: 150, comparisons: 10 },
+      INSTRUCTION_FOLLOWING: { mu: 400, sigma: 150, comparisons: 10 },
+    },
+    cost: { inputPer1M: 0.1, outputPer1M: 0.4 },
+  });
+
+  const models = [highScoreModel, cheapModel];
+  const bigBudget: BudgetConfig = { perRequest: 10.0 };
+
+  // -- HP --
+
+  it("should select highest-score model when criticality is critical", () => {
+    const req = makeRequirement({ criticality: "critical" });
+    const result = selectModel(models, req, bigBudget);
+    expect(result.model.id).toBe("quality/high");
+  });
+
+  it("should select highest-score model when criticality is high", () => {
+    const req = makeRequirement({ criticality: "high" });
+    const result = selectModel(models, req, bigBudget);
+    expect(result.model.id).toBe("quality/high");
+  });
+
+  it("should select most cost-efficient model when criticality is medium", () => {
+    const req = makeRequirement({ criticality: "medium" });
+    const result = selectModel(models, req, bigBudget);
+    // cheapModel has much higher CE (score/cost ratio)
+    expect(result.model.id).toBe("cheap/low");
+  });
+
+  it("should select most cost-efficient model when criticality is low", () => {
+    const req = makeRequirement({ criticality: "low" });
+    const result = selectModel(models, req, bigBudget);
+    expect(result.model.id).toBe("cheap/low");
+  });
+
+  it("should select expensive high-score model over cheap low-score when critical", () => {
+    // This is the core scenario: CE-first would pick cheap, quality-first picks expensive
+    const req = makeRequirement({ criticality: "critical" });
+    const resultCritical = selectModel(models, req, bigBudget);
+    const reqMedium = makeRequirement({ criticality: "medium" });
+    const resultMedium = selectModel(models, reqMedium, bigBudget);
+
+    expect(resultCritical.model.id).toBe("quality/high");
+    expect(resultMedium.model.id).toBe("cheap/low");
+  });
+
+  // -- NE --
+
+  it("should default to cost-first when criticality is undefined", () => {
+    const req = makeRequirement(); // no criticality
+    const result = selectModel(models, req, bigBudget);
+    expect(result.model.id).toBe("cheap/low");
+  });
+
+  it("should return fallback when critical but no models pass filter", () => {
+    const req = makeRequirement({
+      criticality: "critical",
+      estimatedInputTokens: 999999,
+      estimatedOutputTokens: 999999,
+    });
+    // Models have 100k context, require ~2M tokens → all filtered
+    const result = selectModel(models, req, bigBudget);
+    expect((result as FallbackSelectResult).warning).toBeDefined();
+  });
+
+  it("should return fallback when no models regardless of criticality", () => {
+    const req = makeRequirement({ criticality: "critical" });
+    const result = selectModel([], req, bigBudget);
+    expect((result as FallbackSelectResult).warning).toBeDefined();
+  });
+
+  it("should default to cost-first for empty criticality", () => {
+    const req = makeRequirement({ criticality: undefined });
+    const result = selectModel(models, req, bigBudget);
+    expect(result.model.id).toBe("cheap/low");
+  });
+
+  it("should still filter by hard constraints when quality-first", () => {
+    // highScoreModel doesn't pass Korean check
+    const nonKoreanHigh = makeBTModel({
+      ...highScoreModel,
+      btCapabilities: {
+        CODE_GENERATION: { mu: 900, sigma: 150, comparisons: 10 },
+        REASONING: { mu: 900, sigma: 150, comparisons: 10 },
+        INSTRUCTION_FOLLOWING: { mu: 900, sigma: 150, comparisons: 10 },
+        MULTILINGUAL: { mu: 200, sigma: 350, comparisons: 0 }, // below 500 threshold
+      },
+    });
+    const koreanCheap = makeBTModel({
+      ...cheapModel,
+      btCapabilities: {
+        CODE_GENERATION: { mu: 400, sigma: 150, comparisons: 10 },
+        REASONING: { mu: 400, sigma: 150, comparisons: 10 },
+        INSTRUCTION_FOLLOWING: { mu: 400, sigma: 150, comparisons: 10 },
+        MULTILINGUAL: { mu: 800, sigma: 150, comparisons: 10 },
+      },
+    });
+    const req = makeRequirement({ criticality: "critical", requiresKorean: true });
+    const result = selectModel([nonKoreanHigh, koreanCheap], req, bigBudget);
+    // highScore filtered by Korean → only cheap passes
+    expect(result.model.id).toBe(koreanCheap.id);
+  });
+
+  // -- ED --
+
+  it("should treat exactly 'critical' as quality-first", () => {
+    const req = makeRequirement({ criticality: "critical" });
+    const result = selectModel(models, req, bigBudget);
+    expect(result.model.id).toBe("quality/high");
+  });
+
+  it("should treat exactly 'high' as quality-first", () => {
+    const req = makeRequirement({ criticality: "high" });
+    const result = selectModel(models, req, bigBudget);
+    expect(result.model.id).toBe("quality/high");
+  });
+
+  it("should treat exactly 'medium' as cost-first", () => {
+    const req = makeRequirement({ criticality: "medium" });
+    const result = selectModel(models, req, bigBudget);
+    expect(result.model.id).toBe("cheap/low");
+  });
+
+  it("should treat exactly 'low' as cost-first", () => {
+    const req = makeRequirement({ criticality: "low" });
+    const result = selectModel(models, req, bigBudget);
+    expect(result.model.id).toBe("cheap/low");
+  });
+
+  it("should return same result for single model regardless of criticality", () => {
+    const single = [highScoreModel];
+    const critical = selectModel(single, makeRequirement({ criticality: "critical" }), bigBudget);
+    const low = selectModel(single, makeRequirement({ criticality: "low" }), bigBudget);
+    expect(critical.model.id).toBe(low.model.id);
+  });
+
+  it("should pick expensive when critical vs cheap when medium (same two models)", () => {
+    const critResult = selectModel(models, makeRequirement({ criticality: "critical" }), bigBudget);
+    const medResult = selectModel(models, makeRequirement({ criticality: "medium" }), bigBudget);
+    expect(critResult.model.id).toBe("quality/high");
+    expect(medResult.model.id).toBe("cheap/low");
+  });
+
+  it("should handle zero-cost models in quality-first mode", () => {
+    const freeModel = makeBTModel({
+      id: "free/model",
+      btCapabilities: {
+        CODE_GENERATION: { mu: 300, sigma: 150, comparisons: 5 },
+        REASONING: { mu: 300, sigma: 150, comparisons: 5 },
+        INSTRUCTION_FOLLOWING: { mu: 300, sigma: 150, comparisons: 5 },
+      },
+      cost: { inputPer1M: 0, outputPer1M: 0 },
+    });
+    const req = makeRequirement({ criticality: "critical" });
+    const result = selectModel([freeModel, highScoreModel], req, bigBudget);
+    // Quality-first → highScoreModel has higher score even though free has infinite CE
+    expect(result.model.id).toBe("quality/high");
+  });
+
+  // -- CO --
+
+  it("should handle critical + all filtered → fallback", () => {
+    const tinyBudget: BudgetConfig = { perRequest: 0.0001 };
+    const req = makeRequirement({ criticality: "critical" });
+    const result = selectModel(models, req, tinyBudget);
+    expect((result as FallbackSelectResult).warning).toBeDefined();
+  });
+
+  it("should apply quality-first with adaptive boost", () => {
+    const adaptive: AdaptiveWeightProvider = {
+      getBoost: (id) => id === "cheap/low" ? 0.5 : 0,
+    };
+    const req = makeRequirement({ criticality: "critical" });
+    // Even with boost to cheap model, quality-first should prefer higher raw score
+    const result = selectModel(models, req, bigBudget, adaptive);
+    expect(result.model.id).toBe("quality/high");
   });
 });
