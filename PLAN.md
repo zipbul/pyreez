@@ -12,7 +12,7 @@
 
 ### 구현 상태
 
-452 테스트 GREEN, 1778 expect() calls. CLASSIFY→PROFILE→SELECT 라우팅 파이프라인 완성. MCP 6도구 완성 (route, ask, ask_many, scores, report, deliberate). 합의 기반 이종 모델 숙의(Deliberation) 시스템 완성. Rate Limit 재시도 + 에러 핸들링 강화 완료.
+513 테스트 GREEN, 1922 expect() calls. CLASSIFY→PROFILE→SELECT 라우팅 파이프라인 완성. MCP 6도구 완성 (route, ask, ask_many, scores, report, deliberate). 합의 기반 이종 모델 숙의(Deliberation) 시스템 완성. Rate Limit 재시도 + 에러 핸들링 강화 완료. 분류 정확도 벤치마크 하네스(C4) 완성. 필드테스트(MCP 직접 호출) 6/6 도구 정상 확인.
 
 ---
 
@@ -443,10 +443,28 @@ interface DeliberateOutput {
 | D3 | Deliberation Engine (라운드 실행, 병렬 리뷰, 종료 조건) | ✅ |
 | D4 | 프롬프트 엔지니어링 (Producer/Reviewer/Leader 프롬프트 구성) | ✅ |
 | D5 | MCP `deliberate` 도구 등록 + 통합 | ✅ |
-| D6 | Adaptive Routing (학습 라우팅 — 과거 성공 조합 가중치) | ✅ (프레임) |
+| D6 | Adaptive Routing (학습 라우팅 — 과거 성공 조합 가중치) | ✅ (프레임) / ❌ (활성화) |
 | D7 | Stigmergic Report 확장 (query action — 과거 숙의 결과 검색) | ✅ |
 | D8 | Deliberation E2E 통합 테스트 | ✅ |
 | D9 | Host-Native Integration — SKILL.md 배포, Custom Agent 정의 (`.github/skills/`, `.github/agents/`) | ✅ |
+
+### Phase E: 차기 작업 (필드테스트 발견 사항)
+
+> 2026-02-23 필드테스트에서 발견된 문제 및 개선 항목.
+
+| 단위 | 내용 | 상태 |
+|---|---|---|
+| E1 | D6 Activation — `ReportBasedAdaptiveWeight` 구현 (report.record 데이터 기반 compositeScore 부스트 자동 계산) | ❌ |
+| E2 | Critical 태스크 라우팅 개선 — 비용효율(CE) 편향 보정. complex/critical 태스크에 최소 모델 등급(capability threshold) 제약 추가 | ❌ |
+| E3 | Confidence 보정 메커니즘 — 현재 전 모델 confidence=0.3 고정. 실사용 record 데이터 기반으로 신뢰도 자동 갱신 | ❌ |
+
+#### 필드테스트 발견 사항 (2026-02-23)
+
+| 관찰 | 내용 | 대응 |
+|------|------|------|
+| 비용효율 편향 | complex/critical 보안 리뷰(SECURITY_REVIEW)에 GPT-4.1 nano가 선택됨. CE 우선 알고리즘이 고능력 모델을 필요로 하는 태스크에 저비용 모델 과도 선호 | E2로 대응 |
+| confidence 고정 | 전 모델 confidence 값이 0.3으로 초기값에 고정. 점수 신뢰도 반영 안 됨 | E3로 대응 |
+| D6 미활성 | AdaptiveWeightProvider 프레임만 존재. nullAdaptiveWeight = 항상 boost 0. 학습 라우팅 미작동 | E1로 대응 |
 
 ---
 
@@ -755,6 +773,7 @@ interface DeliberateOutput {
 
 | 일자 | 내용 |
 |---|---|
+| 2026-02-23 | C4 ✅ (분류 정확도 벤치마크 하네스 — runBenchmark, SEED_CASES 25개 12도메인). 필드테스트 완료 — MCP 6/6 도구 정상. 라우팅 비용효율 편향·confidence 고정·D6 미활성 발견. Phase E 신규 추가. 513 tests GREEN. |
 | 2026-02-23 | C3/C5/C6 ✅, D6 Adaptive Routing 프레임 ✅. DR-009 확정(B), DR-020 확정(B). FileRunLogger+logRun 래퍼, stripThinkTags 전역, scores top, AdaptiveWeightProvider+nullAdaptiveWeight+compositeScore boost. 493 tests GREEN. |
 | 2026-02-23 | Phase C5/C6 추가 (think 태그 전역 적용, scores top 파라미터). DR-007/012/013 확정. C1/C2 ✅. Complexity 키워드 상승, DeepSeek think strip, Rate Limit 재시도, 에러 핸들링 개선. GitHub 레포 공개 (zipbul/pyreez). 452 tests GREEN. |
 | 2026-02-23 | Host-Native Integration 전략 추가 (Section 2). IDE/에이전트 생태계 리서치(10카테고리×3플랫폼) 반영. pyreez 배포 형태(MCP+Skill+Agent+Plugin) 확정. Phase D9 추가. `docs/research-frameworks.md` Section 13-14 추가. `.github/skills/`, `.github/agents/` 생성. |
