@@ -383,4 +383,38 @@ describe("cross-function", () => {
     // partial content should be present in history
     expect(producer[1]!.content).toContain("partial content");
   });
+
+  // -- ED: production undefined in round --
+
+  it("should skip production section when round has no production", () => {
+    // Arrange — round with production omitted (undefined)
+    const roundNoProduction: Round = {
+      number: 1,
+      reviews: [
+        {
+          model: "reviewer/a",
+          perspective: "코드 품질",
+          issues: [],
+          approval: true,
+          reasoning: "ok",
+        },
+      ],
+      synthesis: {
+        model: "leader/model",
+        consensusStatus: "progressing",
+        keyAgreements: [],
+        keyDisagreements: [],
+        actionItems: [],
+        decision: "continue",
+      },
+    };
+    const ctx = makeCtx([roundNoProduction]);
+
+    // Act
+    const messages = buildProducerMessages(ctx);
+
+    // Assert — no Production heading in serialized round
+    expect(messages[1]!.content).toContain("Round 1");
+    expect(messages[1]!.content).not.toContain("**Production**");
+  });
 });

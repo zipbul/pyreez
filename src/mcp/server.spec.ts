@@ -941,6 +941,40 @@ describe("PyreezMcpServer", () => {
       expect(parsed[1].id).toBe("model-b");
       expect(parsed[1].score).toBe(6);
     });
+
+    it("should return BT format scores with confidence from sigma", async () => {
+      // Arrange — model with BT format capabilities {mu, sigma, comparisons}
+      const registry = stubRegistry({
+        getAll: mock(() => [
+          {
+            id: "bt-model",
+            name: "BT Model",
+            contextWindow: 128000,
+            capabilities: {
+              REASONING: { mu: 750, sigma: 100, comparisons: 20 },
+            },
+            cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
+            supportsToolCalling: true,
+          },
+        ]),
+      });
+      const server = new PyreezMcpServer(validConfig({ registry }));
+
+      // Act
+      const result = await server.handleScores({
+        dimension: "REASONING",
+        top: 1,
+      });
+
+      // Assert — should detect BT format and extract mu as score
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].id).toBe("bt-model");
+      expect(parsed[0].score).toBe(750);
+      // confidence = round(max(0, 1 - sigma/350) * 100) / 100
+      expect(parsed[0].confidence).toBeCloseTo(0.71, 1);
+    });
   });
 
   // === pyreez_report ===
@@ -984,6 +1018,29 @@ describe("PyreezMcpServer", () => {
       });
 
       expect(result.isError).toBe(true);
+    });
+
+    it("should accept quality=0 as a valid value in report record", async () => {
+      // Arrange — quality=0 is a valid score (worst but valid)
+      const reporter = stubReporter();
+      const server = new PyreezMcpServer(validConfig({ reporter }));
+
+      // Act
+      const result = await server.handleReport({
+        model: "openai/gpt-4.1",
+        task_type: "CODE_WRITE",
+        quality: 0,
+        latency_ms: 500,
+        tokens: { input: 50, output: 100 },
+      });
+
+      // Assert — should succeed, not reject quality=0
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.recorded).toBe(true);
+      const recordCall = (reporter.record as ReturnType<typeof mock>).mock
+        .calls[0][0];
+      expect(recordCall.quality).toBe(0);
     });
 
     it("should return error when reporter.record() throws", async () => {
@@ -1543,6 +1600,32 @@ describe("PyreezMcpServer", () => {
         (result.content[0] as { text: string }).text,
       );
       expect(parsed.selection).toBeDefined();
+    });
+
+    it("should propagate original error when both handler and runLogger throw", async () => {
+      // Arrange — handler throws, runLogger.log also throws
+      const runLogger = {
+        log: mock(() => Promise.reject(new Error("log write failed"))),
+        query: mock(() => Promise.resolve([])),
+      };
+      const llmClient = stubLlmClient({
+        chat: mock(() => Promise.reject(new Error("LLM API down"))) as any,
+      });
+      const server = new PyreezMcpServer(
+        validConfig({ runLogger, llmClient }),
+      );
+
+      // Act — handleAsk will throw from chat, logRun catches logger failure
+      const result = await server.handleAsk({
+        model: "openai/gpt-4.1",
+        messages: [{ role: "user", content: "hello" }],
+      });
+
+      // Assert — error should be from the handler, not from runLogger
+      expect(result.isError).toBe(true);
+      const text = (result.content[0] as { text: string }).text;
+      expect(text).toContain("LLM API down");
+      expect(text).not.toContain("log write failed");
     });
   });
 });

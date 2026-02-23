@@ -122,6 +122,21 @@ describe("extractPairwise", () => {
     const results = extractPairwise(records);
     expect(results[0].outcome).toBe("B>>A");
   });
+
+  it("should produce B>A for weak reverse quality diff", () => {
+    // Arrange — m1.quality < m2.quality, |diff| >= MIN_QUALITY_DIFF but < STRONG_QUALITY_DIFF
+    const records = [
+      makeRecord({ model: "m1", quality: 5, taskType: "CODE_WRITE" }),
+      makeRecord({ model: "m2", quality: 7, taskType: "CODE_WRITE" }),
+    ];
+
+    // Act
+    const results = extractPairwise(records);
+
+    // Assert — diff = 5-7 = -2, |diff|=2 >= MIN_QUALITY_DIFF(0.5) but < STRONG_QUALITY_DIFF(3)
+    expect(results).toHaveLength(1);
+    expect(results[0].outcome).toBe("B>A");
+  });
 });
 
 // ================================================================
@@ -187,5 +202,27 @@ describe("calibrate", () => {
 
     const m1Sigma = getRating(ratings, "m1", "CODE_GENERATION").sigma;
     expect(m1Sigma).toBeLessThan(SIGMA_BASE);
+  });
+
+  it("should collect anomalies when updateRating detects anomaly", () => {
+    // Arrange — create a big upset: m1 has very high rating but loses strongly
+    const ratings: RatingsMap = new Map();
+    setRating(ratings, "m1", "CODE_GENERATION", { mu: 900, sigma: 100, comparisons: 50 });
+    setRating(ratings, "m2", "CODE_GENERATION", { mu: 100, sigma: 100, comparisons: 50 });
+
+    // m2 wins strongly (B>>A): m1 quality=2, m2 quality=9
+    const records = [
+      makeRecord({ model: "m1", quality: 2, taskType: "CODE_WRITE" }),
+      makeRecord({ model: "m2", quality: 9, taskType: "CODE_WRITE" }),
+    ];
+
+    // Act
+    const result = calibrate(ratings, records);
+
+    // Assert — m1 had mu=900 but lost strongly, should trigger anomaly detection
+    expect(result.comparisonsProcessed).toBe(1);
+    // The mu of m1 should have decreased (big upset)
+    const m1Rating = getRating(ratings, "m1", "CODE_GENERATION");
+    expect(m1Rating.mu).toBeLessThan(900);
   });
 });

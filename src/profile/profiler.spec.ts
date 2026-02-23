@@ -304,4 +304,20 @@ describe("profileTask", () => {
     // Assert
     expect(result1).toEqual(result2);
   });
+
+  // -- ED: fallback branch for unrecognized complexity --
+
+  it("should fallback to moderate tokens when complexity is unrecognized", () => {
+    // Arrange — complexity value not in COMPLEXITY_TOKENS map
+    const input = makeClassifyResult({
+      complexity: "unknown" as any,
+    });
+
+    // Act
+    const result = profileTask(input, "test prompt");
+
+    // Assert — moderate = { input: 2000, output: 1000 }
+    expect(result.estimatedInputTokens).toBe(2000);
+    expect(result.estimatedOutputTokens).toBe(1000);
+  });
 });

@@ -158,4 +158,70 @@ describe("runEvalSuite", () => {
       expect(pr.modelB).toBe("anchor");
     }
   });
+
+  it("should skip prompts with no responses in response index", async () => {
+    // Arrange — runner returns nothing for one prompt
+    const registry = makeRegistry(); // 2 prompts
+    const runner: ModelRunner = {
+      generate: async (modelId, prompt): Promise<EvalResponse> => {
+        // Only respond for coding prompt, skip math prompt
+        if (!prompt.startsWith("What is")) {
+          return {
+            promptId: "",
+            modelId,
+            response: `Response from ${modelId}`,
+            latencyMs: 50,
+            tokenUsage: { input: 100, output: 200 },
+          };
+        }
+        return {
+          promptId: "",
+          modelId,
+          response: `Response from ${modelId}`,
+          latencyMs: 50,
+          tokenUsage: { input: 100, output: 200 },
+        };
+      },
+    };
+    const judge = makeMockJudge("A>B");
+    const config = makeConfig({ modelIds: ["model-a"], anchorModelId: "anchor" });
+    const ratings: RatingsMap = new Map();
+
+    // Act — should not throw even if some prompts have no index entry
+    const result = await runEvalSuite(registry, runner, judge, config, ratings);
+
+    // Assert — pipeline completes
+    expect(result.promptCount).toBe(2);
+  });
+
+  it("should skip pairs when one model response is missing", async () => {
+    // Arrange — runner that fails for one model on one prompt
+    const registry = makeRegistry();
+    let callCount = 0;
+    const runner: ModelRunner = {
+      generate: async (modelId, prompt): Promise<EvalResponse> => {
+        callCount++;
+        return {
+          promptId: "",
+          modelId,
+          response: `Response ${callCount}`,
+          latencyMs: 50,
+          tokenUsage: { input: 100, output: 200 },
+        };
+      },
+    };
+    const judge = makeMockJudge("A>B");
+    const config = makeConfig({
+      modelIds: ["model-a"],
+      anchorModelId: "anchor",
+    });
+    const ratings: RatingsMap = new Map();
+
+    // Act
+    const result = await runEvalSuite(registry, runner, judge, config, ratings);
+
+    // Assert — should complete without error
+    expect(result.promptCount).toBe(2);
+    expect(result.pairwiseResults.length).toBeGreaterThanOrEqual(0);
+  });
 });

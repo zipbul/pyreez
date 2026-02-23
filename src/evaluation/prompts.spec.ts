@@ -122,4 +122,22 @@ describe("PromptRegistry", () => {
     expect(reg.query({ verifiableOnly: true })).toHaveLength(1);
     expect(reg.query({ verifiableOnly: true })[0].id).toBe("v");
   });
+
+  it("should filter prompts by minComplexity", () => {
+    // Arrange
+    const reg = new PromptRegistry();
+    reg.register(
+      makePrompt({ id: "low", criteria: makeCriteria({ complexity: 2 }) }),
+    );
+    reg.register(
+      makePrompt({ id: "high", criteria: makeCriteria({ complexity: 5 }) }),
+    );
+
+    // Act
+    const result = reg.query({ minComplexity: 4 });
+
+    // Assert — only "high" has complexity >= 4
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("high");
+  });
 });

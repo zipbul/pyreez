@@ -402,4 +402,53 @@ describe("classifyByRules", () => {
     expect(result).not.toBeNull();
     expect(result!.complexity).toBe("moderate");
   });
+
+  // -- boostCriticality: CRITICAL_KEYWORDS --
+
+  it('should return criticality "critical" when prompt contains "보안 취약점"', () => {
+    // Arrange — "보안 취약점" is a CRITICAL_KEYWORD, "구현" triggers CODING domain
+    const result = classifyByRules("보안 취약점 패치를 구현해줘");
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.criticality).toBe("critical");
+  });
+
+  it('should return criticality "critical" when prompt contains "vulnerability"', () => {
+    // Arrange — English CRITICAL_KEYWORD
+    const result = classifyByRules("vulnerability 수정 구현해줘");
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.criticality).toBe("critical");
+  });
+
+  // -- boostCriticality: HIGH_CRITICALITY_KEYWORDS --
+
+  it('should boost criticality from medium to high when prompt contains "프로덕션"', () => {
+    // Arrange — "프로덕션" is HIGH_CRITICALITY_KEYWORD, "구현" → CODING (default medium)
+    const result = classifyByRules("프로덕션 배포 스크립트 구현해줘");
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.criticality).toBe("high");
+  });
+
+  it('should boost criticality from medium to high when prompt contains "production"', () => {
+    // Arrange — English HIGH_CRITICALITY_KEYWORD
+    const result = classifyByRules("production 환경 설정 구현해줘");
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.criticality).toBe("high");
+  });
+
+  it('should not demote criticality when base is already critical', () => {
+    // Arrange — "보안 리뷰" → SECURITY_REVIEW → base=critical, "프로덕션" is HIGH keyword
+    const result = classifyByRules("프로덕션 보안 리뷰");
+
+    // Assert — critical should remain critical, not demoted to high
+    expect(result).not.toBeNull();
+    expect(result!.criticality).toBe("critical");
+  });
 });

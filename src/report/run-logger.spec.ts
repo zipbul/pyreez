@@ -190,4 +190,41 @@ describe("FileRunLogger", () => {
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("r1");
   });
+
+  // -- ED: undefined timestamp fallback --
+
+  it("should use current date path when record timestamp is undefined", async () => {
+    // Arrange
+    const io = stubFileIO();
+    const logger = new FileRunLogger(".pyreez/runs", io);
+    const record = validRecord({ timestamp: undefined as any });
+
+    // Act
+    await logger.log(record);
+
+    // Assert — path should be a valid YYYY-MM-DD, not NaN
+    const call = (io.appendFile as any).mock.calls[0];
+    const path = call[0] as string;
+    expect(path).toMatch(/\.pyreez\/runs\/\d{4}-\d{2}-\d{2}\.jsonl$/);
+    expect(path).not.toContain("NaN");
+  });
+
+  // -- ED: negative limit --
+
+  it("should return empty array when limit is negative", async () => {
+    // Arrange — 2 records available
+    const records = [validRecord({ id: "r1" }), validRecord({ id: "r2" })];
+    const content = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
+    const io = stubFileIO({
+      glob: mock(() => Promise.resolve([".pyreez/runs/2026-02-23.jsonl"])),
+      readFile: mock(() => Promise.resolve(content)),
+    });
+    const logger = new FileRunLogger(".pyreez/runs", io);
+
+    // Act
+    const result = await logger.query({ limit: -1 });
+
+    // Assert — Math.max(0, -1) = 0 → empty
+    expect(result).toHaveLength(0);
+  });
 });

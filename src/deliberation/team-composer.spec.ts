@@ -776,4 +776,31 @@ describe("scoreDimensions (BT rating)", () => {
     // Assert
     expect(scoreAB).toBeCloseTo(scoreBA, 5);
   });
+
+  // -- leader auto-select edge --
+
+  it("should throw when auto-selecting leader with empty models and producer override", () => {
+    // Arrange — producer is overridden, but models is empty, leader needs auto-select
+    const deps: ComposeTeamDeps = {
+      getModels: () => [],
+      getById: (id: string) => {
+        if (id === "openai/gpt-4.1") {
+          return makeModel({ id: "openai/gpt-4.1" });
+        }
+        return undefined;
+      },
+    };
+
+    // Act & Assert — producer override succeeds, but leader auto-select fails
+    expect(() =>
+      composeTeam(
+        {
+          task: "Test task",
+          perspectives: ["security", "performance"],
+          overrides: { producer: "openai/gpt-4.1" },
+        },
+        deps,
+      ),
+    ).toThrow("No models available to auto-select leader");
+  });
 });

@@ -414,4 +414,40 @@ describe("SharedContext lifecycle", () => {
     expect(totalLLMCalls(ctx)).toBe(8);
     expect(latestSynthesis(ctx)?.decision).toBe("approve");
   });
+
+  // -- NE: undefined reviewers --
+
+  it("should throw when team.reviewers is undefined", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      createSharedContext("task", makeTeam({ reviewers: undefined as any })),
+    ).toThrow("Team must have at least one reviewer");
+  });
+
+  // -- ED: production undefined in modelsUsed --
+
+  it("should not include undefined in modelsUsed when round has no production", () => {
+    // Arrange — round with production omitted
+    const team = makeTeam();
+    let ctx = createSharedContext("task", team);
+    const round: Round = {
+      number: 1,
+      reviews: [
+        makeReview("deepseek/deepseek-r1", "코드 품질"),
+        makeReview("meta/llama-4-scout", "보안"),
+      ],
+      synthesis: makeSynthesis("continue"),
+    };
+    ctx = addRound(ctx, round);
+
+    // Act
+    const models = modelsUsed(ctx);
+
+    // Assert — 3 models (2 reviewers + 1 synthesis), no undefined
+    expect(models).toHaveLength(3);
+    expect(models).toContain("deepseek/deepseek-r1");
+    expect(models).toContain("meta/llama-4-scout");
+    expect(models).toContain("openai/o4-mini");
+    expect(models).not.toContain(undefined as any);
+  });
 });
