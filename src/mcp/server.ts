@@ -17,6 +17,7 @@ import type { RouteResult } from "../router/router";
 import type { BudgetConfig } from "../router/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 import type { DeliberationStore } from "../deliberation/store-types";
+import { stripThinkTags } from "../deliberation/wire";
 
 export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
@@ -156,6 +157,10 @@ export class PyreezMcpServer {
             .string()
             .optional()
             .describe("Filter by capability dimension (e.g., REASONING)"),
+          top: z
+            .number()
+            .optional()
+            .describe("Return top N models sorted by score DESC (requires dimension)"),
         }),
       },
       async (args) => this.handleScores(args),
@@ -330,7 +335,7 @@ export class PyreezMcpServer {
         return this.errorResult("Error: empty response from model");
       }
 
-      return this.textResult(content);
+      return this.textResult(stripThinkTags(content));
     } catch (error) {
       return this.errorResult(
         `Error: ${error instanceof Error ? error.message : String(error)}`,
@@ -363,7 +368,7 @@ export class PyreezMcpServer {
           max_tokens: args.max_tokens,
         });
         const content = response.choices[0]?.message?.content ?? "";
-        return { model, content };
+        return { model, content: stripThinkTags(content) };
       }),
     );
 
@@ -382,6 +387,7 @@ export class PyreezMcpServer {
   async handleScores(args: {
     model?: string;
     dimension?: string;
+    top?: number;
   }): Promise<CallToolResult> {
     let models: ModelInfo[];
 
@@ -394,12 +400,17 @@ export class PyreezMcpServer {
 
     if (args.dimension) {
       const dim = args.dimension;
-      const scored = models.map((m) => ({
+      let scored = models.map((m) => ({
         id: m.id,
         name: m.name,
         score: (m.capabilities as Record<string, number>)[dim] ?? 0,
         confidence: (m.confidence as Record<string, number>)[dim] ?? 0,
       }));
+      if (args.top != null) {
+        scored = scored
+          .sort((a, b) => b.score - a.score)
+          .slice(0, Math.max(0, args.top));
+      }
       return this.textResult(JSON.stringify(scored, null, 2));
     }
 

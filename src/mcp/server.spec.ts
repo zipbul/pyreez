@@ -412,6 +412,75 @@ describe("PyreezMcpServer", () => {
         "empty",
       );
     });
+
+    it("should strip think tags from response content", async () => {
+      const llmClient = stubLlmClient({
+        chat: mock(() =>
+          Promise.resolve({
+            id: "test",
+            object: "chat.completion",
+            created: Date.now(),
+            model: "test",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content:
+                    "<think>internal reasoning</think>actual answer",
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+          }),
+        ) as any,
+      });
+      const server = new PyreezMcpServer(validConfig({ llmClient }));
+
+      const result = await server.handleAsk({
+        model: "deepseek/deepseek-r1",
+        messages: [{ role: "user", content: "hello" }],
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect((result.content[0] as { text: string }).text).toBe(
+        "actual answer",
+      );
+    });
+
+    it("should return empty text when response contains only think tags", async () => {
+      const llmClient = stubLlmClient({
+        chat: mock(() =>
+          Promise.resolve({
+            id: "test",
+            object: "chat.completion",
+            created: Date.now(),
+            model: "test",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "<think>only reasoning here</think>",
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+          }),
+        ) as any,
+      });
+      const server = new PyreezMcpServer(validConfig({ llmClient }));
+
+      const result = await server.handleAsk({
+        model: "deepseek/deepseek-r1",
+        messages: [{ role: "user", content: "hello" }],
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect((result.content[0] as { text: string }).text).toBe("");
+    });
   });
 
   // === pyreez_ask_many ===
@@ -541,6 +610,108 @@ describe("PyreezMcpServer", () => {
       expect(parsed[0].error).toContain("all models down");
       expect(parsed[1].error).toContain("all models down");
     });
+
+    it("should strip think tags from each model response", async () => {
+      const llmClient = stubLlmClient({
+        chat: mock((req: { model: string }) =>
+          Promise.resolve({
+            id: "test",
+            object: "chat.completion",
+            created: Date.now(),
+            model: req.model,
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: `<think>reasoning for ${req.model}</think>answer from ${req.model}`,
+                },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+        ) as any,
+      });
+      const server = new PyreezMcpServer(validConfig({ llmClient }));
+
+      const result = await server.handleAskMany({
+        models: ["deepseek/deepseek-r1", "openai/gpt-4.1"],
+        messages: [{ role: "user", content: "hello" }],
+      });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed[0].content).toBe("answer from deepseek/deepseek-r1");
+      expect(parsed[1].content).toBe("answer from openai/gpt-4.1");
+    });
+
+    it("should strip think tags only from models that have them", async () => {
+      let callIndex = 0;
+      const llmClient = stubLlmClient({
+        chat: mock(() => {
+          callIndex++;
+          const content =
+            callIndex === 1
+              ? "<think>deep thought</think>stripped answer"
+              : "clean answer";
+          return Promise.resolve({
+            id: "test",
+            object: "chat.completion",
+            created: Date.now(),
+            model: callIndex === 1 ? "deepseek/deepseek-r1" : "openai/gpt-4.1",
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content },
+                finish_reason: "stop",
+              },
+            ],
+          });
+        }) as any,
+      });
+      const server = new PyreezMcpServer(validConfig({ llmClient }));
+
+      const result = await server.handleAskMany({
+        models: ["deepseek/deepseek-r1", "openai/gpt-4.1"],
+        messages: [{ role: "user", content: "hello" }],
+      });
+
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed[0].content).toBe("stripped answer");
+      expect(parsed[1].content).toBe("clean answer");
+    });
+
+    it("should return empty content for model with only think tags", async () => {
+      const llmClient = stubLlmClient({
+        chat: mock(() =>
+          Promise.resolve({
+            id: "test",
+            object: "chat.completion",
+            created: Date.now(),
+            model: "deepseek/deepseek-r1",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "<think>only internal reasoning</think>",
+                },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+        ) as any,
+      });
+      const server = new PyreezMcpServer(validConfig({ llmClient }));
+
+      const result = await server.handleAskMany({
+        models: ["deepseek/deepseek-r1"],
+        messages: [{ role: "user", content: "hello" }],
+      });
+
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed[0].content).toBe("");
+    });
   });
 
   // === pyreez_scores ===
@@ -608,6 +779,167 @@ describe("PyreezMcpServer", () => {
       expect(result.isError).toBeUndefined();
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed).toHaveLength(0);
+    });
+
+    it("should sort by score DESC and return top N when dimension and top specified", async () => {
+      const registry = stubRegistry({
+        getAll: mock(() => [
+          {
+            id: "model-a",
+            name: "Model A",
+            contextWindow: 128000,
+            capabilities: { REASONING: 6 },
+            confidence: { REASONING: 0.7 },
+            cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
+            supportsToolCalling: true,
+          },
+          {
+            id: "model-b",
+            name: "Model B",
+            contextWindow: 128000,
+            capabilities: { REASONING: 9 },
+            confidence: { REASONING: 0.9 },
+            cost: { inputPer1M: 2.0, outputPer1M: 4.0 },
+            supportsToolCalling: true,
+          },
+          {
+            id: "model-c",
+            name: "Model C",
+            contextWindow: 128000,
+            capabilities: { REASONING: 7 },
+            confidence: { REASONING: 0.8 },
+            cost: { inputPer1M: 1.5, outputPer1M: 3.0 },
+            supportsToolCalling: true,
+          },
+        ]),
+      });
+      const server = new PyreezMcpServer(validConfig({ registry }));
+
+      const result = await server.handleScores({
+        dimension: "REASONING",
+        top: 2,
+      });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0].id).toBe("model-b");
+      expect(parsed[0].score).toBe(9);
+      expect(parsed[1].id).toBe("model-c");
+      expect(parsed[1].score).toBe(7);
+    });
+
+    it("should return only top 1 model by score when top is 1", async () => {
+      const registry = stubRegistry({
+        getAll: mock(() => [
+          {
+            id: "model-a",
+            name: "Model A",
+            contextWindow: 128000,
+            capabilities: { CODE_GENERATION: 5 },
+            confidence: { CODE_GENERATION: 0.6 },
+            cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
+            supportsToolCalling: true,
+          },
+          {
+            id: "model-b",
+            name: "Model B",
+            contextWindow: 128000,
+            capabilities: { CODE_GENERATION: 10 },
+            confidence: { CODE_GENERATION: 0.95 },
+            cost: { inputPer1M: 3.0, outputPer1M: 6.0 },
+            supportsToolCalling: true,
+          },
+        ]),
+      });
+      const server = new PyreezMcpServer(validConfig({ registry }));
+
+      const result = await server.handleScores({
+        dimension: "CODE_GENERATION",
+        top: 1,
+      });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].id).toBe("model-b");
+      expect(parsed[0].score).toBe(10);
+    });
+
+    it("should ignore top when dimension is not specified", async () => {
+      const registry = stubRegistry();
+      const server = new PyreezMcpServer(validConfig({ registry }));
+
+      const result = await server.handleScores({ top: 1 });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed).toHaveLength(2);
+    });
+
+    it("should return empty array when top is 0 with dimension", async () => {
+      const registry = stubRegistry({
+        getAll: mock(() => [
+          {
+            id: "model-a",
+            name: "Model A",
+            contextWindow: 128000,
+            capabilities: { REASONING: 8 },
+            confidence: { REASONING: 0.8 },
+            cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
+            supportsToolCalling: true,
+          },
+        ]),
+      });
+      const server = new PyreezMcpServer(validConfig({ registry }));
+
+      const result = await server.handleScores({
+        dimension: "REASONING",
+        top: 0,
+      });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed).toHaveLength(0);
+    });
+
+    it("should return all models when top exceeds model count", async () => {
+      const registry = stubRegistry({
+        getAll: mock(() => [
+          {
+            id: "model-a",
+            name: "Model A",
+            contextWindow: 128000,
+            capabilities: { REASONING: 8 },
+            confidence: { REASONING: 0.8 },
+            cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
+            supportsToolCalling: true,
+          },
+          {
+            id: "model-b",
+            name: "Model B",
+            contextWindow: 128000,
+            capabilities: { REASONING: 6 },
+            confidence: { REASONING: 0.7 },
+            cost: { inputPer1M: 0.5, outputPer1M: 1.0 },
+            supportsToolCalling: true,
+          },
+        ]),
+      });
+      const server = new PyreezMcpServer(validConfig({ registry }));
+
+      const result = await server.handleScores({
+        dimension: "REASONING",
+        top: 100,
+      });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0].id).toBe("model-a");
+      expect(parsed[0].score).toBe(8);
+      expect(parsed[1].id).toBe("model-b");
+      expect(parsed[1].score).toBe(6);
     });
   });
 
