@@ -527,6 +527,7 @@
       "name": "Claude Opus 4.6",
       "contextWindow": 200000,
       "supportsToolCalling": true,
+      "available": false,
       "cost": { "inputPer1M": 15.0, "outputPer1M": 75.0 },
       "scores": {
         "REASONING": { "score": 10, "confidence": 0.3, "dataPoints": 0 },
@@ -556,6 +557,7 @@
       "name": "Gemini 3.1 Pro",
       "contextWindow": 2000000,
       "supportsToolCalling": true,
+      "available": false,
       "cost": { "inputPer1M": 1.25, "outputPer1M": 5.0 },
       "scores": {
         "REASONING": { "score": 9, "confidence": 0.3, "dataPoints": 0 },
@@ -585,6 +587,7 @@
       "name": "GPT-5.3",
       "contextWindow": 1000000,
       "supportsToolCalling": true,
+      "available": false,
       "cost": { "inputPer1M": 5.0, "outputPer1M": 15.0 },
       "scores": {
         "REASONING": { "score": 10, "confidence": 0.3, "dataPoints": 0 },

@@ -455,12 +455,27 @@ export class PyreezMcpServer {
 
     if (args.dimension) {
       const dim = args.dimension;
-      let scored = models.map((m) => ({
-        id: m.id,
-        name: m.name,
-        score: (m.capabilities as Record<string, number>)[dim] ?? 0,
-        confidence: (m.confidence as Record<string, number>)[dim] ?? 0,
-      }));
+      let scored = models.map((m) => {
+        const raw = (m.capabilities as Record<string, unknown>)[dim];
+        let score: number;
+        let conf: number;
+        if (raw != null && typeof raw === "object" && "mu" in raw) {
+          // BT format: { mu, sigma, comparisons }
+          const bt = raw as { mu: number; sigma: number };
+          score = bt.mu;
+          conf = Math.round(Math.max(0, 1 - bt.sigma / 350) * 100) / 100;
+        } else {
+          // Legacy format: plain number + separate confidence map
+          score = typeof raw === "number" ? raw : 0;
+          conf = (m.confidence as Record<string, number> | undefined)?.[dim] ?? 0;
+        }
+        return {
+          id: m.id,
+          name: m.name,
+          score,
+          confidence: conf,
+        };
+      });
       if (args.top != null) {
         scored = scored
           .sort((a, b) => b.score - a.score)

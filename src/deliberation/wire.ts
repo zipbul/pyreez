@@ -33,6 +33,7 @@ import {
 export interface WireDeps {
   readonly registry: {
     getAll(): ModelInfo[];
+    getAvailable(): ModelInfo[];
     getById(id: string): ModelInfo | undefined;
   };
   readonly chat: (model: string, messages: ChatMessage[]) => Promise<string>;
@@ -143,9 +144,9 @@ export function createDeliberateFn(
         : undefined,
     };
 
-    // 2. Compose team via registry
+    // 2. Compose team via registry (available models only)
     const team = composeTeam(teamOptions, {
-      getModels: () => deps.registry.getAll(),
+      getModels: () => deps.registry.getAvailable(),
       getById: (id) => deps.registry.getById(id),
     });
 

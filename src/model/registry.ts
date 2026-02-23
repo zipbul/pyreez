@@ -34,6 +34,7 @@ interface JsonModelEntry {
   supportsToolCalling: boolean;
   cost: { inputPer1M: number; outputPer1M: number };
   scores: Record<string, ScoreEntry>;
+  available?: boolean;
 }
 
 interface ModelsJsonSchema {
@@ -83,6 +84,7 @@ function parseModels(data: ModelsJsonSchema): ModelInfo[] {
       capabilities: capabilities as ModelCapabilities,
       cost: entry.cost,
       supportsToolCalling: entry.supportsToolCalling,
+      available: entry.available !== false,
     });
   }
 
@@ -108,6 +110,11 @@ export class ModelRegistry {
   /** Return all registered models. */
   getAll(): ModelInfo[] {
     return [...this.models.values()];
+  }
+
+  /** Return only models available in the API. */
+  getAvailable(): ModelInfo[] {
+    return this.getAll().filter((m) => m.available !== false);
   }
 
   /** Look up a model by its ID. */

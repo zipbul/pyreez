@@ -276,5 +276,6 @@ export function profileTask(
     requiresStructuredOutput,
     requiresKorean,
     requiresToolCalling,
+    criticality: classifyResult.criticality,
   };
 }

@@ -43,7 +43,7 @@ function defaultDeps(): RouteDeps {
     classify: classifyByRules,
     profile: profileTask,
     select: selectModel,
-    getModels: () => new ModelRegistry().getAll(),
+    getModels: () => new ModelRegistry().getAvailable(),
   };
 }
 

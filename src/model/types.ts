@@ -143,4 +143,6 @@ export interface ModelInfo {
   cost: ModelCost;
   /** Whether the model supports tool/function calling. */
   supportsToolCalling: boolean;
+  /** Whether the model is currently available in the API. Defaults to true if omitted. */
+  available?: boolean;
 }

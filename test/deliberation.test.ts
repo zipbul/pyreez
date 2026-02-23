@@ -90,6 +90,7 @@ const FIXTURE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 function fixtureRegistry() {
   return {
     getAll: () => [...FIXTURE_MODELS],
+    getAvailable: () => [...FIXTURE_MODELS],
     getById: (id: string) => FIXTURE_MODELS.find((m) => m.id === id),
   };
 }

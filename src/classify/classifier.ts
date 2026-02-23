@@ -377,13 +377,42 @@ function estimateComplexity(
   return complexity;
 }
 
+// -- Criticality keyword boost --
+
+/** Keywords that elevate criticality to "high" when present in prompt. */
+const HIGH_CRITICALITY_KEYWORDS: readonly string[] = [
+  "보안이 중요", "보안이 매우", "security critical", "security important",
+  "프로덕션", "production", "mission-critical", "mission critical",
+  "매우 중요", "절대 실패", "장애 방지", "zero downtime",
+  "compliance", "규정 준수", "인증 시스템", "결제 시스템", "payment",
+];
+
+/** Keywords that elevate criticality to "critical". */
+const CRITICAL_KEYWORDS: readonly string[] = [
+  "보안 취약점", "vulnerability", "exploit",
+  "인시던트", "incident", "장애 대응",
+  "데이터 유출", "data breach", "data leak",
+];
+
+/** Boost criticality based on prompt keywords. */
+function boostCriticality(prompt: string, base: Criticality): Criticality {
+  const lower = prompt.toLowerCase();
+  if (CRITICAL_KEYWORDS.some((kw) => lower.includes(kw))) return "critical";
+  if (HIGH_CRITICALITY_KEYWORDS.some((kw) => lower.includes(kw))) {
+    if (base === "low" || base === "medium") return "high";
+  }
+  return base;
+}
+
 // -- Criticality lookup --
 
 function lookupCriticality(
   domain: TaskDomain,
   taskType: TaskType,
+  prompt: string,
 ): Criticality {
-  return TASK_CRITICALITY_OVERRIDES[taskType] ?? DOMAIN_CRITICALITY[domain];
+  const base = TASK_CRITICALITY_OVERRIDES[taskType] ?? DOMAIN_CRITICALITY[domain];
+  return boostCriticality(prompt, base);
 }
 
 // -- Public API --
@@ -400,7 +429,7 @@ export function classifyByRules(prompt: string): ClassifyResult | null {
   for (const [domain, rules] of KEYWORD_RULES) {
     for (const [taskType, keywords] of rules) {
       if (keywords.some((kw) => lower.includes(kw))) {
-        const criticality = lookupCriticality(domain, taskType);
+        const criticality = lookupCriticality(domain, taskType, prompt);
         return {
           domain,
           taskType,
