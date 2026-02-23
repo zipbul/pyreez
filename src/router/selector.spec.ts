@@ -1,11 +1,12 @@
 /**
  * Unit tests for selectModel — SELECT phase.
- * PRUNE final list: 17 tests.
+ * PRUNE final list: 17 tests (base) + 15 tests (D6 adaptive).
  */
 
 import { describe, it, expect } from "bun:test";
 import { selectModel } from "./selector";
 import type { ModelInfo, ModelCapabilities, ModelConfidence } from "../model/types";
+import type { AdaptiveWeightProvider } from "./types";
 import type { TaskRequirement } from "../profile/types";
 import type { BudgetConfig, SelectResult, FallbackSelectResult } from "./types";
 
@@ -447,5 +448,238 @@ describe("selectModel", () => {
 
     // Assert
     expect(result1.model.id).toBe(result2.model.id);
+  });
+
+  // === D6: Adaptive Routing ===
+
+  describe("adaptive boost", () => {
+    it("should use existing score when adaptive is not provided", () => {
+      // Arrange
+      const model = makeModel({
+        id: "test/model-a",
+        capabilities: makeCapabilities({ CODE_GENERATION: 9, REASONING: 8 }),
+      });
+
+      // Act
+      const withoutAdaptive = selectModel([model], makeRequirement(), DEFAULT_BUDGET);
+      const withNull = selectModel([model], makeRequirement(), DEFAULT_BUDGET, undefined);
+
+      // Assert
+      expect(withoutAdaptive.score).toBe(withNull.score);
+    });
+
+    it("should keep same score when boost is 0", () => {
+      // Arrange
+      const model = makeModel({ id: "m1" });
+      const adaptive: AdaptiveWeightProvider = { getBoost: () => 0 };
+
+      // Act
+      const baseline = selectModel([model], makeRequirement(), DEFAULT_BUDGET);
+      const boosted = selectModel([model], makeRequirement(), DEFAULT_BUDGET, adaptive);
+
+      // Assert
+      expect(boosted.score).toBe(baseline.score);
+    });
+
+    it("should increase model score when boost is positive", () => {
+      // Arrange
+      const model = makeModel({ id: "m1" });
+      const adaptive: AdaptiveWeightProvider = { getBoost: () => 0.2 };
+
+      // Act
+      const baseline = selectModel([model], makeRequirement(), DEFAULT_BUDGET);
+      const boosted = selectModel([model], makeRequirement(), DEFAULT_BUDGET, adaptive);
+
+      // Assert
+      expect(boosted.score).toBeGreaterThan(baseline.score);
+    });
+
+    it("should decrease model score when boost is negative", () => {
+      // Arrange
+      const model = makeModel({ id: "m1" });
+      const adaptive: AdaptiveWeightProvider = { getBoost: () => -0.2 };
+
+      // Act
+      const baseline = selectModel([model], makeRequirement(), DEFAULT_BUDGET);
+      const boosted = selectModel([model], makeRequirement(), DEFAULT_BUDGET, adaptive);
+
+      // Assert
+      expect(boosted.score).toBeLessThan(baseline.score);
+    });
+
+    it("should reverse ranking when inferior model gets higher boost", () => {
+      // Arrange — model B has lower capability but will get higher boost
+      const modelA = makeModel({
+        id: "a",
+        capabilities: makeCapabilities({ CODE_GENERATION: 9 }),
+        cost: { inputPer1M: 1.0, outputPer1M: 4.0 },
+      });
+      const modelB = makeModel({
+        id: "b",
+        capabilities: makeCapabilities({ CODE_GENERATION: 6 }),
+        cost: { inputPer1M: 1.0, outputPer1M: 4.0 },
+      });
+      const adaptive: AdaptiveWeightProvider = {
+        getBoost: (modelId: string) => (modelId === "b" ? 0.8 : -0.5),
+      };
+
+      // Act — without adaptive, A wins; with adaptive, B should win
+      const baseline = selectModel([modelA, modelB], makeRequirement(), DEFAULT_BUDGET);
+      const boosted = selectModel([modelA, modelB], makeRequirement(), DEFAULT_BUDGET, adaptive);
+
+      // Assert
+      expect(baseline.model.id).toBe("a");
+      expect(boosted.model.id).toBe("b");
+    });
+
+    it("should change costEfficiency when boost affects score", () => {
+      // Arrange
+      const model = makeModel({ id: "m1" });
+      const adaptive: AdaptiveWeightProvider = { getBoost: () => 0.5 };
+
+      // Act
+      const baseline = selectModel([model], makeRequirement(), DEFAULT_BUDGET);
+      const boosted = selectModel([model], makeRequirement(), DEFAULT_BUDGET, adaptive);
+
+      // Assert
+      expect(boosted.costEfficiency).toBeGreaterThan(baseline.costEfficiency);
+    });
+
+    it("should double score when boost is 1", () => {
+      // Arrange
+      const model = makeModel({ id: "m1" });
+      const adaptive: AdaptiveWeightProvider = { getBoost: () => 1 };
+
+      // Act
+      const baseline = selectModel([model], makeRequirement(), DEFAULT_BUDGET);
+      const boosted = selectModel([model], makeRequirement(), DEFAULT_BUDGET, adaptive);
+
+      // Assert
+      expect(boosted.score).toBeCloseTo(baseline.score * 2, 5);
+    });
+
+    it("should zero score when boost is -1", () => {
+      // Arrange
+      const model = makeModel({ id: "m1" });
+      const adaptive: AdaptiveWeightProvider = { getBoost: () => -1 };
+
+      // Act
+      const boosted = selectModel([model], makeRequirement(), DEFAULT_BUDGET, adaptive);
+
+      // Assert
+      expect(boosted.score).toBe(0);
+    });
+
+    it("should clamp boost to 1 when boost exceeds 1", () => {
+      // Arrange
+      const model = makeModel({ id: "m1" });
+      const boostOver: AdaptiveWeightProvider = { getBoost: () => 5.0 };
+      const boostExact: AdaptiveWeightProvider = { getBoost: () => 1.0 };
+
+      // Act
+      const overResult = selectModel([model], makeRequirement(), DEFAULT_BUDGET, boostOver);
+      const exactResult = selectModel([model], makeRequirement(), DEFAULT_BUDGET, boostExact);
+
+      // Assert
+      expect(overResult.score).toBeCloseTo(exactResult.score, 5);
+    });
+
+    it("should clamp boost to -1 when boost is below -1", () => {
+      // Arrange
+      const model = makeModel({ id: "m1" });
+      const boostUnder: AdaptiveWeightProvider = { getBoost: () => -3.0 };
+      const boostExact: AdaptiveWeightProvider = { getBoost: () => -1.0 };
+
+      // Act
+      const underResult = selectModel([model], makeRequirement(), DEFAULT_BUDGET, boostUnder);
+      const exactResult = selectModel([model], makeRequirement(), DEFAULT_BUDGET, boostExact);
+
+      // Assert
+      expect(underResult.score).toBeCloseTo(exactResult.score, 5);
+    });
+
+    it("should make all scores zero when all models get boost=-1", () => {
+      // Arrange
+      const modelA = makeModel({ id: "a", cost: { inputPer1M: 0.1, outputPer1M: 0.4 } });
+      const modelB = makeModel({ id: "b", cost: { inputPer1M: 1.0, outputPer1M: 4.0 } });
+      const adaptive: AdaptiveWeightProvider = { getBoost: () => -1 };
+
+      // Act
+      const result = selectModel([modelA, modelB], makeRequirement(), DEFAULT_BUDGET, adaptive);
+
+      // Assert
+      expect(result.score).toBe(0);
+    });
+
+    it("should ignore boost when all models fail hardFilter (fallback)", () => {
+      // Arrange — budget=0 forces fallback
+      const model = makeModel({ id: "m1" });
+      const adaptive: AdaptiveWeightProvider = { getBoost: () => 1.0 };
+
+      // Act
+      const result = selectModel([model], makeRequirement(), { perRequest: 0 }, adaptive);
+
+      // Assert — fallback result has relaxedConstraints
+      expect((result as any).relaxedConstraints).toBeDefined();
+    });
+
+    it("should use score as tiebreak when boost causes CE tie", () => {
+      // Arrange — same cost, same boost, different base scores → score tiebreak
+      const modelA = makeModel({
+        id: "a",
+        capabilities: makeCapabilities({ CODE_GENERATION: 9 }),
+        cost: { inputPer1M: 1.0, outputPer1M: 4.0 },
+      });
+      const modelB = makeModel({
+        id: "b",
+        capabilities: makeCapabilities({ CODE_GENERATION: 7 }),
+        cost: { inputPer1M: 1.0, outputPer1M: 4.0 },
+      });
+      const adaptive: AdaptiveWeightProvider = { getBoost: () => 0 };
+
+      // Act
+      const result = selectModel([modelA, modelB], makeRequirement(), DEFAULT_BUDGET, adaptive);
+
+      // Assert — A has higher score, should win tiebreak
+      expect(result.model.id).toBe("a");
+    });
+
+    it("should return identical result for identical inputs with adaptive", () => {
+      // Arrange
+      const model = makeModel({ id: "m1" });
+      const adaptive: AdaptiveWeightProvider = { getBoost: () => 0.3 };
+
+      // Act
+      const r1 = selectModel([model], makeRequirement(), DEFAULT_BUDGET, adaptive);
+      const r2 = selectModel([model], makeRequirement(), DEFAULT_BUDGET, adaptive);
+
+      // Assert
+      expect(r1.score).toBe(r2.score);
+      expect(r1.model.id).toBe(r2.model.id);
+    });
+
+    it("should return same result regardless of models array order with adaptive", () => {
+      // Arrange
+      const modelA = makeModel({
+        id: "a",
+        capabilities: makeCapabilities({ CODE_GENERATION: 9 }),
+        cost: { inputPer1M: 0.1, outputPer1M: 0.4 },
+      });
+      const modelB = makeModel({
+        id: "b",
+        capabilities: makeCapabilities({ CODE_GENERATION: 5 }),
+        cost: { inputPer1M: 1.0, outputPer1M: 4.0 },
+      });
+      const adaptive: AdaptiveWeightProvider = {
+        getBoost: (modelId: string) => (modelId === "a" ? 0.1 : 0.3),
+      };
+
+      // Act
+      const r1 = selectModel([modelA, modelB], makeRequirement(), DEFAULT_BUDGET, adaptive);
+      const r2 = selectModel([modelB, modelA], makeRequirement(), DEFAULT_BUDGET, adaptive);
+
+      // Assert
+      expect(r1.model.id).toBe(r2.model.id);
+    });
   });
 });

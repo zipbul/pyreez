@@ -5,7 +5,13 @@
 
 import type { ModelInfo, CapabilityDimension } from "../model/types";
 import type { TaskRequirement, CapabilityRequirement } from "../profile/types";
-import type { BudgetConfig, SelectResult, FallbackSelectResult } from "./types";
+import type {
+  BudgetConfig,
+  SelectResult,
+  FallbackSelectResult,
+  AdaptiveWeightProvider,
+} from "./types";
+import { nullAdaptiveWeight } from "./types";
 
 // -- Cost calculation --
 
@@ -85,6 +91,8 @@ function hardFilter(
 function compositeScore(
   model: ModelInfo,
   requiredCapabilities: CapabilityRequirement[],
+  adaptive: AdaptiveWeightProvider,
+  taskType: string,
 ): number {
   let score = 0;
   for (const cap of requiredCapabilities) {
@@ -93,7 +101,8 @@ function compositeScore(
     const confidenceFactor = 0.5 + 0.5 * confidence;
     score += dimScore * confidenceFactor * cap.weight;
   }
-  return score;
+  const boost = Math.max(-1, Math.min(1, adaptive.getBoost(model.id, taskType)));
+  return score * (1 + boost);
 }
 
 // -- Step 3: COST-EFFICIENCY --
@@ -108,9 +117,11 @@ interface ScoredModel {
 function scoredAndRanked(
   filtered: FilteredModel[],
   requiredCapabilities: CapabilityRequirement[],
+  adaptive: AdaptiveWeightProvider,
+  taskType: string,
 ): ScoredModel[] {
   const scored = filtered.map(({ model, expectedCost }) => {
-    const score = compositeScore(model, requiredCapabilities);
+    const score = compositeScore(model, requiredCapabilities, adaptive, taskType);
     const costEfficiency = expectedCost > 0 ? score / expectedCost : Infinity;
     return { model, score, expectedCost, costEfficiency };
   });
@@ -167,7 +178,7 @@ function fallbackResult(
     requirement.estimatedOutputTokens,
   );
 
-  const score = compositeScore(cheapest, requirement.requiredCapabilities);
+  const score = compositeScore(cheapest, requirement.requiredCapabilities, nullAdaptiveWeight, requirement.taskType);
 
   return {
     model: cheapest,
@@ -195,7 +206,9 @@ export function selectModel(
   models: ModelInfo[],
   requirement: TaskRequirement,
   budget: BudgetConfig,
+  adaptive?: AdaptiveWeightProvider,
 ): SelectResult | FallbackSelectResult {
+  const effectiveAdaptive = adaptive ?? nullAdaptiveWeight;
   // Step 1: HARD FILTER
   const filtered = hardFilter(models, requirement, budget);
 
@@ -205,7 +218,12 @@ export function selectModel(
   }
 
   // Step 2 + 3: COMPOSITE SCORE → COST-EFFICIENCY ranking
-  const ranked = scoredAndRanked(filtered, requirement.requiredCapabilities);
+  const ranked = scoredAndRanked(
+    filtered,
+    requirement.requiredCapabilities,
+    effectiveAdaptive,
+    requirement.taskType,
+  );
 
   // Step 4: return top candidate (simplified budget-aware — always CE-first for now)
   const best = ranked[0]!;

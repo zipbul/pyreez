@@ -37,3 +37,17 @@ export interface FallbackSelectResult extends SelectResult {
   /** Warning message. */
   warning: string;
 }
+
+/**
+ * Adaptive weight provider — supplies per-model boost based on historical performance.
+ * D6: Adaptive Routing frame. Returns 0 when no data is available (graceful degradation).
+ */
+export interface AdaptiveWeightProvider {
+  /** Performance boost for a model+taskType pair. Range clamped to [-1, +1]. 0 = no effect. */
+  getBoost(modelId: string, taskType: string): number;
+}
+
+/** No-op adaptive weight — always returns 0 (existing routing behavior). */
+export const nullAdaptiveWeight: AdaptiveWeightProvider = {
+  getBoost: () => 0,
+};
