@@ -454,9 +454,9 @@ interface DeliberateOutput {
 
 | 단위 | 내용 | 상태 |
 |---|---|---|
-| E1 | D6 Activation — `ReportBasedAdaptiveWeight` 구현 (report.record 데이터 기반 compositeScore 부스트 자동 계산) | ❌ |
-| E2 | Critical 태스크 라우팅 개선 — 비용효율(CE) 편향 보정. complex/critical 태스크에 최소 모델 등급(capability threshold) 제약 추가 | ❌ |
-| E3 | Confidence 보정 메커니즘 — 현재 전 모델 confidence=0.3 고정. 실사용 record 데이터 기반으로 신뢰도 자동 갱신 | ❌ |
+| E1 | D6 Activation — `ReportBasedAdaptiveWeight` 구현 (report.record 데이터 기반 compositeScore 부스트 자동 계산) | ✅ → F6 흡수 |
+| E2 | Critical 태스크 라우팅 개선 — 비용효율(CE) 편향 보정. complex/critical 태스크에 최소 모델 등급(capability threshold) 제약 추가 | ✅ → F3 흡수 |
+| E3 | Confidence 보정 메커니즘 — 현재 전 모델 confidence=0.3 고정. 실사용 record 데이터 기반으로 신뢰도 자동 갱신 | ✅ → F1 흡수 |
 
 #### 필드테스트 발견 사항 (2026-02-23)
 
@@ -465,6 +465,138 @@ interface DeliberateOutput {
 | 비용효율 편향 | complex/critical 보안 리뷰(SECURITY_REVIEW)에 GPT-4.1 nano가 선택됨. CE 우선 알고리즘이 고능력 모델을 필요로 하는 태스크에 저비용 모델 과도 선호 | E2로 대응 |
 | confidence 고정 | 전 모델 confidence 값이 0.3으로 초기값에 고정. 점수 신뢰도 반영 안 됨 | E3로 대응 |
 | D6 미활성 | AdaptiveWeightProvider 프레임만 존재. nullAdaptiveWeight = 항상 boost 0. 학습 라우팅 미작동 | E1로 대응 |
+
+### Phase F: 점수 체계 혁신 + 벤치마크 시스템 (Scoring & Evaluation Overhaul)
+
+> **근본 문제:** 378개 점수가 전부 인간 추정치(dataPoints=0, confidence=0.3). 측정 없는 시스템에서 스케일/가중치 조정은 무의미. CE-first 정렬이 비용을 품질 위에 배치.
+>
+> **학술 근거:** 16개 논문/프레임워크 교차 검증 완료. 모든 핵심 설계가 학계 SOTA와 일치 확인.
+
+#### 핵심 전환: 0-10 정수 → Bradley-Terry Dimensional Rating
+
+현재 `ModelCapabilities`의 0-10 정수 스케일을 BT(Bradley-Terry) 레이팅으로 교체한다.
+
+| 현재 | 전환 후 |
+|---|---|
+| `score: number` (0-10 정수) | `DimensionRating { mu, sigma, comparisons }` |
+| `confidence: number` (0.0-1.0, 전부 0.3 고정) | sigma가 자연스럽게 신뢰도 표현 (비교 많을수록 sigma↓) |
+| `dataPoints: number` (전부 0) | `comparisons: number` (실측 쌍대비교 횟수) |
+| 가중합 `Σ(score × weight)` | BT coefficient 기반 모델 강도 순위 |
+
+근거: LMSYS Chatbot Arena (arXiv:2403.04132) — MLE 기반 BT estimation, Bootstrap CI. Arena-Hard (arXiv:2406.11939) — 동일 방법론, 98.6% human correlation.
+
+#### F 로드맵
+
+| 단위 | 내용 | 의존 | 상태 |
+|---|---|---|---|
+| F1 | **BT Dimensional Rating** — `DimensionRating { mu, sigma, comparisons }` 타입 도입. `ModelCapabilities` 0-10 → BT mu/sigma 전환. `compositeScore` BT 기반 재설계. `scores/models.json` 스키마 마이그레이션 | — | ❌ |
+| F2 | **Benchmark Anchoring** — 공개 벤치마크(Open LLM Leaderboard 6종 + HumanEval+ + SWE-bench) 결과 수집 → 18모델 초기 BT mu 설정. 인간 추정치 대체 | F1 | ❌ |
+| F3 | **2-Track Selection** — criticality 기반 분기: critical/high → quality-first, low/medium → cost-first. CE-first 편향 해소. E2 흡수 | F1 | ❌ |
+| F4 | **Preference Router** — RouteLLM Matrix Factorization 방식. deliberation에서 수집된 preference data로 쿼리→모델 라우팅 학습 | F1, F8 | ❌ |
+| F5 | **MoE Dimension Gating** — ArmoRM 방식 MoE로 태스크별 차원 가중치 자동 결정. 수동 weight 관리 제거 | F1, F8 | ❌ |
+| F6 | **Adaptive Weight (Cascade)** — FrugalGPT LLM Cascade. 쿼리별 모델 조합 학습. Confidence Gate 기반 에스컬레이션. E1 흡수 | F1, F8 | ❌ |
+| F7 | **Calibration Loop** — 실사용 결과 → BT 레이팅 자동 갱신. sigma 수렴 모니터링. 이상치 탐지 | F1, F8 | ❌ |
+| F8 | **Evaluation Suite** — 4-Layer 벤치마크 시스템 (아래 상세). 프롬프트 셋 + LLM-as-Judge + Pairwise Comparison 파이프라인 | F1 | ❌ |
+| F9 | **모델 확장** — Opus 4.6, Gemini 3.1 Pro, GPT 5.3 등 누락 모델 추가. F2 앵커링 즉시 적용 | F1, F2 | ❌ |
+| F10 | **LLM-as-Judge Pipeline** — MT-Bench/Arena-Hard 방식 자동 평가. Position swap, 5-outcome scoring, length bias 보정 | F8 | ❌ |
+
+의존 그래프:
+```
+F1 ──→ F2 ──→ F9
+ │       │
+ │       └──→ F8 ──→ F4, F5, F6, F7, F10
+ │             │
+ └──→ F3      └──→ F10
+```
+
+**착수 순서:** F1 → F2 → F8 → F3 → F10 → F7 → F4/F5/F6 → F9
+
+#### F8 상세: 4-Layer Evaluation Suite
+
+> 학술 근거: Arena-Hard BenchBuilder (arXiv:2406.11939), WildBench (arXiv:2406.04770), MixEval (arXiv:2406.06565), LiveBench (arXiv:2406.19314), HELM (arXiv:2211.09110), IFEval (arXiv:2311.07911)
+
+**Layer 1: 공개 벤치마크 앵커 수집** (F2 연동)
+
+| 벤치마크 | 평가 대상 | pyreez 차원 매핑 |
+|---|---|---|
+| IFEval | 지시 따르기 | L1(자연어이해), L3(지시따르기) |
+| BBH (23 subtasks) | 추론, 알고리즘 | C1(논리추론), C2(분석) |
+| MATH Level 5 | 수학 | C3(수학연산) |
+| GPQA | 전문 지식 QA | C4(도메인전문성) |
+| MuSR | 장문 복합 추론 | C1(논리추론), C6(맥락처리) |
+| MMLU-PRO (10 choices) | 다분야 지식 | C4(도메인전문성) |
+| HumanEval Plus | 코드 생성 | T1(코드생성) |
+| SWE-bench Verified | 실제 이슈 해결 | T1(코드생성), T3(디버깅) |
+
+**Layer 2: pyreez 도메인 맞춤 프롬프트 셋** (Arena-Hard BenchBuilder 방법론)
+
+프롬프트 설계 기준 — Arena-Hard 7 Key Criteria:
+1. Specificity — 구체적 출력 명세
+2. Domain Knowledge — 도메인 전문성 요구
+3. Complexity — 다단계 추론/변수
+4. Problem-Solving — 능동적 문제해결
+5. Creativity — 창의적 접근
+6. Technical Accuracy — 기술적 정확성
+7. Real-world Application — 실세계 적용
+
+프롬프트 셋 구조:
+```
+12 도메인 × 3 난이도(simple/moderate/complex) × 최소 3 프롬프트 = 108+
+
+각 프롬프트에는:
+- 7 Key Criteria 점수 (0-7)
+- Task-specific checklist (WildBench 방법론 — 자동 생성 평가 기준)
+- 기대 출력 형태
+- 해당 차원 매핑 (21차원 중 어떤 것을 측정하는지)
+```
+
+난이도 분포 (Arena-Hard 분석 기반, 높은 점수 = 높은 separability):
+| 난이도 | 7-Criteria 목표 | 목적 |
+|---|---|---|
+| simple | 1-3점 | 바닥 성능 확인 (모든 모델 pass 기대) |
+| moderate | 4-5점 | 중간 모델 분리 |
+| complex | 6-7점 | 최상위 모델만 유의미 차이 |
+
+**Layer 3: Pairwise Comparison 기반 BT 갱신** (Arena-Hard + Chatbot Arena 방법론)
+
+| 단계 | 내용 |
+|---|---|
+| 기준 모델 설정 | 가장 강한 모델(예: o3)을 anchor |
+| 응답 수집 | 모든 모델에 동일 프롬프트, 응답 수집 |
+| Pairwise 평가 | LLM-as-Judge가 5-outcome: A≫B, A>B, A≈B, B>A, B≫A |
+| Position swap | 같은 쌍을 순서 바꿔 2회 평가 (편향 방지) |
+| BT 계산 | A≫B, B≫A = 강한 신호. A>B, B>A = 약한 신호. MLE → BT coefficient |
+| 신뢰도 | Bootstrap 100회 → 95% CI |
+
+**Layer 4: 동적 갱신** (LiveBench + WildBench 방법론)
+
+| 메커니즘 | 내용 |
+|---|---|
+| 월간 프롬프트 갱신 | 최신 기술 이슈 반영, 오염 방지 |
+| 실사용 로그 수확 | MCP 호출 로그에서 고품질 프롬프트 자동 수집 |
+| 객관적 정답 우선 | 코딩/수학은 자동 검증, 개방형만 LLM judge |
+| 한국어 IFEval | 25 verifiable instruction types 한국어 버전 |
+
+#### 리서치 레퍼런스
+
+| # | 논문/프레임워크 | 핵심 기여 | pyreez 적용 |
+|---|---|---|---|
+| R1 | Chatbot Arena BT Model (arXiv:2403.04132) | MLE 기반 BT rating, Bootstrap CI | F1 — 점수 체계 |
+| R2 | Arena-Hard BenchBuilder (arXiv:2406.11939) | 7 Key Criteria 프롬프트 큐레이션, 98.6% human correlation | F8 Layer 2, F10 |
+| R3 | RouteLLM (arXiv:2406.18665) | Matrix Factorization Router, 75% cost reduction | F4 — Preference Router |
+| R4 | FrugalGPT (arXiv:2305.05176) | LLM Cascade, 98% cost reduction | F6 — Cascade |
+| R5 | ArmoRM (arXiv:2406.12845) | MoE Reward Model, RewardBench SOTA | F5 — MoE Gating |
+| R6 | RouterBench (arXiv:2403.12031) | 405K inference outcomes, Pareto frontier | F4 — 평가 프레임워크 |
+| R7 | Hybrid LLM (arXiv:2404.14618, ICLR 2024) | Query difficulty routing, dynamic quality threshold | F3 — 2-Track |
+| R8 | WildBench (arXiv:2406.04770) | Task-specific checklists, Pearson 0.98 | F8 Layer 2 |
+| R9 | MixEval (arXiv:2406.06565, NeurIPS 2024) | Real-world distribution matching, 0.96 correlation | F8 Layer 1 |
+| R10 | LiveBench (arXiv:2406.19314, ICLR 2025) | Contamination-free monthly update, objective scoring | F8 Layer 4 |
+| R11 | HELM (arXiv:2211.09110) | 7 metrics × 42 scenarios holistic evaluation | F8 다차원 설계 |
+| R12 | MT-Bench (arXiv:2306.05685, NeurIPS 2023) | LLM-as-Judge, 80% human agreement, multi-turn | F10 — Judge |
+| R13 | IFEval (arXiv:2311.07911) | 25 verifiable instruction types, objective metrics | F8 Layer 2 한국어 |
+| R14 | AlpacaEval LC (arXiv:2404.04475, COLM 2024) | Length bias correction via GLM, Spearman 0.98 | F10 편향 보정 |
+| R15 | Open LLM Leaderboard (HuggingFace) | IFEval+BBH+MATH+GPQA+MuSR+MMLU-PRO 표준 | F2 — 앵커 |
+| R16 | Elo Uncovered (arXiv:2311.17295) | K factor sensitivity, reliability axioms | F1 — rating 설계 |
 
 ---
 
@@ -540,7 +672,7 @@ interface DeliberateOutput {
 | B | 요청당 예산만 — 기본 $1, override 가능 |
 | C | 자동 예산 — complexity에서 산출 (simple=$0.10, moderate=$0.50, complex=$2.00) |
 
-**결정:** 미확정
+**결정:** ✅ 확정
 
 ---
 
@@ -554,7 +686,7 @@ interface DeliberateOutput {
 | B | 분류 검증 게이트 (규칙 기반 교차 검증) |
 | C | Checkpoint 복구 |
 
-**결정:** 미확정
+**결정:** ✅ 확정
 
 ---
 
@@ -595,7 +727,7 @@ interface DeliberateOutput {
 | A | Phase별 타임아웃 — CLASSIFY 5s, PROFILE 1s, SELECT 1s |
 | B | 전체 타임아웃만 — route 10s |
 
-**결정:** 미확정
+**결정:** ✅ 확정
 
 ---
 
@@ -642,7 +774,7 @@ interface DeliberateOutput {
 | B | 21차원 전체 명시 |
 | C | Top-N만 사용, 나머지 가중치=0 |
 
-**결정:** 미확정
+**결정:** ✅ 확정
 
 ---
 
@@ -659,7 +791,7 @@ interface DeliberateOutput {
 5. context 제약은 완화 불가
 6. 여전히 0개 → 최저가 + 경고
 
-**결정:** 미확정
+**결정:** ✅ 확정
 
 ---
 
@@ -673,7 +805,7 @@ interface DeliberateOutput {
 | B | 도메인 단위 순차 추가 |
 | C | 62유형 모두 타입 정의, 분류는 점진 정밀화 |
 
-**결정:** 미확정
+**결정:** ✅ 확정
 
 ---
 
@@ -687,7 +819,7 @@ interface DeliberateOutput {
 | B | 태스크별 on-demand 갱신 |
 | C | 전체 동일 주기 |
 
-**결정:** 미확정
+**결정:** ✅ 확정
 
 ---
 
@@ -765,7 +897,7 @@ interface DeliberateOutput {
 
 | # | 항목 | 상태 |
 |---|------|------|
-| E | MCP notification 실시간 표시 가능 여부 검증 | 미확정 |
+| E | MCP notification 실시간 표시 가능 여부 검증 | ✅ |
 
 ---
 
@@ -773,6 +905,7 @@ interface DeliberateOutput {
 
 | 일자 | 내용 |
 |---|---|
+| 2026-02-23 | **Phase F 추가** — 점수 체계 혁신(0-10→BT Rating) + 4-Layer Evaluation Suite. 16개 논문/프레임워크 교차 검증. E1→F6, E2→F3, E3→F1 흡수. F1~F10 로드맵, 리서치 레퍼런스 R1~R16. |
 | 2026-02-23 | C4 ✅ (분류 정확도 벤치마크 하네스 — runBenchmark, SEED_CASES 25개 12도메인). 필드테스트 완료 — MCP 6/6 도구 정상. 라우팅 비용효율 편향·confidence 고정·D6 미활성 발견. Phase E 신규 추가. 513 tests GREEN. |
 | 2026-02-23 | C3/C5/C6 ✅, D6 Adaptive Routing 프레임 ✅. DR-009 확정(B), DR-020 확정(B). FileRunLogger+logRun 래퍼, stripThinkTags 전역, scores top, AdaptiveWeightProvider+nullAdaptiveWeight+compositeScore boost. 493 tests GREEN. |
 | 2026-02-23 | Phase C5/C6 추가 (think 태그 전역 적용, scores top 파라미터). DR-007/012/013 확정. C1/C2 ✅. Complexity 키워드 상승, DeepSeek think strip, Rate Limit 재시도, 에러 핸들링 개선. GitHub 레포 공개 (zipbul/pyreez). 452 tests GREEN. |

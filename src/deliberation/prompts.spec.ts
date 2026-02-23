@@ -1,8 +1,5 @@
 /**
  * Unit tests for prompts.ts — Deliberation prompt builders.
- *
- * PRUNE final: 29 tests across 3 exported functions + cross-function.
- * @see PLAN.md Section 2 (Deliberation 프로세스)
  */
 
 import { describe, it, expect } from "bun:test";

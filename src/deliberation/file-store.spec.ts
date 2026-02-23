@@ -3,8 +3,6 @@
  *
  * SUT: FileDeliberationStore (file-store.ts)
  * All FileIO operations are test-doubled via DI injection.
- *
- * PRUNE final list: 22 tests
  */
 
 import { describe, it, expect, mock, beforeEach } from "bun:test";

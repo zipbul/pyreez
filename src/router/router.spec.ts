@@ -1,6 +1,5 @@
 /**
  * Unit tests for route() — pipeline integration.
- * PRUNE final list: 8 tests.
  * Uses DI injection (TST-MOCK-STRATEGY priority 1) to avoid mock.module pollution.
  */
 

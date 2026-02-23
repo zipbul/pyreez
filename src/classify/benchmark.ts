@@ -1,6 +1,6 @@
 /**
  * Classification benchmark harness — measures classifyByRules accuracy.
- * Phase C4: Classification 사전 검증.
+ * Classification 사전 검증.
  */
 
 import type {

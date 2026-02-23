@@ -1,6 +1,5 @@
 /**
  * Unit tests for runBenchmark.
- * PRUNE final list: 20 tests.
  */
 
 import { describe, it, expect } from "bun:test";

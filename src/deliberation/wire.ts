@@ -7,7 +7,7 @@
  *   createDeliberateFn — factory returning (DeliberateInput) => Promise<DeliberateOutput>
  *   WireDeps — dependency interface for the factory
  *
- * @see PLAN.md Section 2 (Deliberation 프로세스)
+ * @module Deliberation Wire
  */
 
 import type { ChatMessage, ChatCompletionResponse } from "../llm/types";

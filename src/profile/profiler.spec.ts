@@ -1,6 +1,5 @@
 /**
- * Unit tests for profileTask — PROFILE phase.
- * PRUNE final list: 17 tests.
+ * Unit tests for profileTask.
  */
 
 import { describe, it, expect } from "bun:test";

@@ -1,8 +1,5 @@
 /**
  * Unit tests for engine.ts — Deliberation Engine.
- *
- * PRUNE final: 43 tests across 5 exported functions.
- * @see PLAN.md Section 2 (Deliberation 프로세스), Section 9 Phase D3
  */
 
 import { describe, it, expect, mock } from "bun:test";

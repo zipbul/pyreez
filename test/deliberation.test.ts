@@ -15,7 +15,7 @@ import type { ChatMessage } from "../src/llm/types";
 import type {
   ModelInfo,
   ModelCapabilities,
-  ModelConfidence,
+  DimensionRating,
   CapabilityDimension,
 } from "../src/model/types";
 import { ALL_DIMENSIONS } from "../src/model/types";
@@ -24,22 +24,19 @@ import { ALL_DIMENSIONS } from "../src/model/types";
 // Fixtures — 3 providers × 1 model each (diversity guarantee)
 // ============================================================
 
+const DEFAULT_RATING: DimensionRating = { mu: 500, sigma: 350, comparisons: 0 };
+
 function makeCapabilities(
   overrides: Partial<Record<CapabilityDimension, number>> = {},
 ): ModelCapabilities {
-  const caps = {} as Record<CapabilityDimension, number>;
+  const caps = {} as Record<CapabilityDimension, DimensionRating>;
   for (const dim of ALL_DIMENSIONS) {
-    caps[dim] = overrides[dim] ?? 5;
+    const v = overrides[dim];
+    caps[dim] = v !== undefined
+      ? { mu: v * 100, sigma: 350, comparisons: 0 }
+      : DEFAULT_RATING;
   }
   return caps as ModelCapabilities;
-}
-
-function makeConfidence(value = 0.8): ModelConfidence {
-  const conf = {} as Record<CapabilityDimension, number>;
-  for (const dim of ALL_DIMENSIONS) {
-    conf[dim] = value;
-  }
-  return conf as ModelConfidence;
 }
 
 const MODEL_A: ModelInfo = {
@@ -54,7 +51,6 @@ const MODEL_A: ModelInfo = {
     CREATIVITY: 8,
     ANALYSIS: 8,
   }),
-  confidence: makeConfidence(0.9),
   cost: { inputPer1M: 2, outputPer1M: 8 },
   supportsToolCalling: true,
 };
@@ -70,7 +66,6 @@ const MODEL_B: ModelInfo = {
     SPEED: 9,
     SYSTEM_THINKING: 8,
   }),
-  confidence: makeConfidence(0.8),
   cost: { inputPer1M: 0.5, outputPer1M: 1 },
   supportsToolCalling: true,
 };
@@ -86,7 +81,6 @@ const MODEL_C: ModelInfo = {
     SELF_CONSISTENCY: 8,
     CODE_UNDERSTANDING: 8,
   }),
-  confidence: makeConfidence(0.85),
   cost: { inputPer1M: 2, outputPer1M: 6 },
   supportsToolCalling: true,
 };

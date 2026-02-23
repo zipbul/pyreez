@@ -7,7 +7,7 @@
  *   buildLeaderMessages — build ChatMessage[] for the leader LLM
  *
  * Pure functions: SharedContext in → ChatMessage[] out.
- * @see PLAN.md Section 2 (Deliberation 프로세스)
+ * @module Deliberation Prompts
  */
 
 import type { ChatMessage } from "../llm/types";

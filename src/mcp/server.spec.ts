@@ -1126,7 +1126,7 @@ describe("PyreezMcpServer", () => {
       expect(recordCall.leaderId).toBeUndefined();
     });
 
-    // -- query_deliberation (D7) --
+    // -- query_deliberation --
 
     it("should query deliberation store and return results", async () => {
       const mockRecords = [

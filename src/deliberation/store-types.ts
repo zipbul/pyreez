@@ -1,7 +1,7 @@
 /**
  * Deliberation Store types — record persistence and query for stigmergic reports.
  *
- * @see PLAN.md D7 (Stigmergic Report 확장)
+ * @module Deliberation Store Types
  */
 
 /**

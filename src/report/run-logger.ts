@@ -9,7 +9,7 @@
  * - JSONL format (one JSON object per line)
  * - Date-based file partitioning
  *
- * @see PLAN.md C3 (로깅/모니터링), DR-009 Option B
+ * @module Run Logger
  */
 
 import type { FileIO } from "./types";

@@ -4,10 +4,11 @@
  * Composes a heterogeneous team (producer, reviewers, leader) with
  * diversity guarantee (≥3 different providers when possible).
  *
- * @see PLAN.md Section 2 (Diversity Engine), Section 9 Phase D2
+ * @module Diversity Engine
  */
 
 import type { ModelInfo, CapabilityDimension } from "../model/types";
+import { SIGMA_BASE } from "../model/types";
 import type { TeamComposition, TeamMember } from "./types";
 
 // -- Public types --
@@ -140,7 +141,7 @@ export function perspectiveToDimensions(
 
 /**
  * Score a model against weighted dimensions.
- * Uses confidence-adjusted scoring: score = capability * (0.5 + 0.5 * confidence) * weight
+ * Uses BT uncertainty penalty: score = mu * (1 / (1 + sigma / SIGMA_BASE)) * weight
  */
 export function scoreDimensions(
   model: ModelInfo,
@@ -148,10 +149,9 @@ export function scoreDimensions(
 ): number {
   let total = 0;
   for (const { dimension, weight } of dims) {
-    const capability = model.capabilities[dimension];
-    const confidence = model.confidence[dimension];
-    const confidenceFactor = 0.5 + 0.5 * confidence;
-    total += capability * confidenceFactor * weight;
+    const rating = model.capabilities[dimension];
+    const uncertaintyPenalty = 1 / (1 + rating.sigma / SIGMA_BASE);
+    total += rating.mu * uncertaintyPenalty * weight;
   }
   return total;
 }

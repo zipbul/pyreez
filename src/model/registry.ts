@@ -6,15 +6,23 @@
 import type {
   ModelInfo,
   ModelCapabilities,
-  ModelConfidence,
+  DimensionRating,
   CapabilityDimension,
 } from "./types";
-import { ALL_DIMENSIONS } from "./types";
+import { ALL_DIMENSIONS, SIGMA_BASE } from "./types";
 import modelsJson from "../../scores/models.json";
 
 // -- JSON → ModelInfo parser --
 
+/** V2 score entry: BT dimensional rating. */
 interface ScoreEntry {
+  mu: number;
+  sigma: number;
+  comparisons: number;
+}
+
+/** V1 legacy score entry (auto-migrated). */
+interface LegacyScoreEntry {
   score: number;
   confidence: number;
   dataPoints: number;
@@ -33,17 +41,39 @@ interface ModelsJsonSchema {
   models: Record<string, JsonModelEntry>;
 }
 
+/** Default DimensionRating for missing entries. */
+const DEFAULT_RATING: DimensionRating = { mu: 0, sigma: SIGMA_BASE, comparisons: 0 };
+
+/** Detect if entry is legacy v1 format (has 'score' key). */
+function isLegacy(entry: unknown): entry is LegacyScoreEntry {
+  return typeof entry === "object" && entry !== null && "score" in entry;
+}
+
 function parseModels(data: ModelsJsonSchema): ModelInfo[] {
   const result: ModelInfo[] = [];
 
   for (const [id, entry] of Object.entries(data.models)) {
-    const capabilities: Record<string, number> = {};
-    const confidence: Record<string, number> = {};
+    const capabilities: Record<string, DimensionRating> = {};
 
     for (const dim of ALL_DIMENSIONS) {
-      const scoreEntry = entry.scores[dim];
-      capabilities[dim] = scoreEntry?.score ?? 0;
-      confidence[dim] = scoreEntry?.confidence ?? 0.3;
+      const raw = entry.scores[dim] as unknown;
+      if (!raw) {
+        capabilities[dim] = { ...DEFAULT_RATING };
+      } else if (isLegacy(raw)) {
+        // V1 → V2 migration: score×100 → mu, confidence unused, dataPoints → comparisons
+        capabilities[dim] = {
+          mu: raw.score * 100,
+          sigma: SIGMA_BASE,
+          comparisons: raw.dataPoints,
+        };
+      } else {
+        const v2 = raw as ScoreEntry;
+        capabilities[dim] = {
+          mu: v2.mu ?? 0,
+          sigma: v2.sigma ?? SIGMA_BASE,
+          comparisons: v2.comparisons ?? 0,
+        };
+      }
     }
 
     result.push({
@@ -51,7 +81,6 @@ function parseModels(data: ModelsJsonSchema): ModelInfo[] {
       name: entry.name,
       contextWindow: entry.contextWindow,
       capabilities: capabilities as ModelCapabilities,
-      confidence: confidence as ModelConfidence,
       cost: entry.cost,
       supportsToolCalling: entry.supportsToolCalling,
     });
@@ -106,10 +135,10 @@ export class ModelRegistry {
     return this.getAll().filter((m) => m.supportsToolCalling);
   }
 
-  /** Filter models by minimum MULTILINGUAL capability score. */
+  /** Filter models by minimum MULTILINGUAL mu score. */
   filterByMultilingual(minScore: number): ModelInfo[] {
     return this.getAll().filter(
-      (m) => m.capabilities.MULTILINGUAL >= minScore,
+      (m) => m.capabilities.MULTILINGUAL.mu >= minScore,
     );
   }
 }

@@ -1,9 +1,10 @@
 /**
- * Model selector — SELECT phase (PLAN.md Section 6 Phase 4).
+ * Model selector — SELECT phase.
  * 5-step algorithm: HARD FILTER → COMPOSITE SCORE → COST-EFFICIENCY → BUDGET-AWARE → FALLBACK.
  */
 
 import type { ModelInfo, CapabilityDimension } from "../model/types";
+import { SIGMA_BASE } from "../model/types";
 import type { TaskRequirement, CapabilityRequirement } from "../profile/types";
 import type {
   BudgetConfig,
@@ -54,14 +55,14 @@ function hardFilter(
       return false;
 
     // Korean / multilingual check
-    if (requirement.requiresKorean && model.capabilities.MULTILINGUAL < 5)
+    if (requirement.requiresKorean && model.capabilities.MULTILINGUAL.mu < 500)
       return false;
 
     // Minimum capability thresholds
     for (const cap of requirement.requiredCapabilities) {
       if (
         cap.minimum !== undefined &&
-        model.capabilities[cap.dimension] < cap.minimum
+        model.capabilities[cap.dimension].mu < cap.minimum
       ) {
         return false;
       }
@@ -96,10 +97,9 @@ function compositeScore(
 ): number {
   let score = 0;
   for (const cap of requiredCapabilities) {
-    const dimScore = model.capabilities[cap.dimension];
-    const confidence = model.confidence[cap.dimension];
-    const confidenceFactor = 0.5 + 0.5 * confidence;
-    score += dimScore * confidenceFactor * cap.weight;
+    const rating = model.capabilities[cap.dimension];
+    const uncertaintyPenalty = 1 / (1 + rating.sigma / SIGMA_BASE);
+    score += rating.mu * uncertaintyPenalty * cap.weight;
   }
   const boost = Math.max(-1, Math.min(1, adaptive.getBoost(model.id, taskType)));
   return score * (1 + boost);
@@ -151,7 +151,6 @@ function fallbackResult(
         name: "No Model Available",
         contextWindow: 0,
         capabilities: {} as any,
-        confidence: {} as any,
         cost: { inputPer1M: 0, outputPer1M: 0 },
         supportsToolCalling: false,
       },
@@ -200,7 +199,7 @@ function fallbackResult(
 
 /**
  * Select the best model for a task requirement within budget.
- * Implements the 5-step SELECT algorithm from PLAN.md Section 6 Phase 4.
+ * Implements the 5-step SELECT algorithm.
  */
 export function selectModel(
   models: ModelInfo[],

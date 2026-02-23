@@ -40,7 +40,7 @@ export interface FallbackSelectResult extends SelectResult {
 
 /**
  * Adaptive weight provider — supplies per-model boost based on historical performance.
- * D6: Adaptive Routing frame. Returns 0 when no data is available (graceful degradation).
+ * Adaptive Routing frame. Returns 0 when no data is available (graceful degradation).
  */
 export interface AdaptiveWeightProvider {
   /** Performance boost for a model+taskType pair. Range clamped to [-1, +1]. 0 = no effect. */

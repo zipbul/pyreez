@@ -1,5 +1,5 @@
 /**
- * Task profiler — PROFILE phase (PLAN.md Section 6 Phase 3).
+ * Task profiler — maps ClassifyResult to TaskRequirement.
  * Maps ClassifyResult → TaskRequirement using domain defaults + task overrides.
  */
 
@@ -142,7 +142,7 @@ const DOMAIN_DEFAULTS: Record<TaskDomain, CapProfile> = {
   ],
 };
 
-// -- Task type overrides (PLAN.md Section 4) --
+// -- Task type overrides --
 // Only defined for tasks that differ from their domain default.
 
 const TASK_OVERRIDES: Partial<Record<TaskType, CapProfile>> = {

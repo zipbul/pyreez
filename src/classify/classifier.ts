@@ -1,6 +1,6 @@
 /**
  * Task classifier — hybrid keyword rules + (future) LLM fallback.
- * Phase 1: CLASSIFY from PLAN.md Section 6.
+ * Hybrid keyword rules + (future) LLM fallback.
  */
 
 import type {

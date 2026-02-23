@@ -7,7 +7,7 @@
  *   deliberate — multi-round loop with consensus check
  *
  * DI: all LLM calls and prompt building injected via EngineDeps.
- * @see PLAN.md Section 2 (Deliberation 프로세스)
+ * @module Deliberation Engine
  */
 
 import type { ChatMessage } from "../llm/types";

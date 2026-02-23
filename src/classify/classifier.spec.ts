@@ -1,6 +1,5 @@
 /**
  * Unit tests for classifyByRules.
- * PRUNE final list: 38 tests.
  */
 
 import { describe, it, expect } from "bun:test";

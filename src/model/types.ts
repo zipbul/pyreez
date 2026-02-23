@@ -90,18 +90,30 @@ export const ALL_DIMENSIONS: readonly CapabilityDimension[] = [
   "COST_EFFICIENCY",
 ] as const;
 
+// -- BT Dimensional Rating --
+
+/** Initial sigma for new/uncompared dimensions. */
+export const SIGMA_BASE = 350;
+
+/**
+ * Bradley-Terry dimensional rating.
+ * Replaces the old 0-10 integer + separate confidence.
+ */
+export interface DimensionRating {
+  /** Strength parameter (mu). Scale 0-1000 (old 0-10 × 100). */
+  mu: number;
+  /** Uncertainty (sigma). Starts at SIGMA_BASE, decreases with comparisons. */
+  sigma: number;
+  /** Number of pairwise comparisons used to derive this rating. */
+  comparisons: number;
+}
+
 // -- Model Capabilities --
 
 /**
- * Capability scores for a model (0-10 scale per dimension).
+ * Capability ratings for a model — DimensionRating per dimension.
  */
-export type ModelCapabilities = Record<CapabilityDimension, number>;
-
-/**
- * Confidence per dimension (0.0 - 1.0).
- * confidence = min(1.0, testCount / 10).
- */
-export type ModelConfidence = Record<CapabilityDimension, number>;
+export type ModelCapabilities = Record<CapabilityDimension, DimensionRating>;
 
 // -- Model Cost --
 
@@ -125,10 +137,8 @@ export interface ModelInfo {
   name: string;
   /** Context window size in tokens. */
   contextWindow: number;
-  /** Capability scores (0-10). */
+  /** Capability ratings (BT DimensionRating per dimension). */
   capabilities: ModelCapabilities;
-  /** Confidence per dimension (0.0-1.0). */
-  confidence: ModelConfidence;
   /** Pricing info. */
   cost: ModelCost;
   /** Whether the model supports tool/function calling. */

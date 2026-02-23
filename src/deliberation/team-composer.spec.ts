@@ -1,8 +1,8 @@
 /**
  * Unit tests for team-composer.ts — Team Composer (Diversity Engine).
  *
- * PRUNE final: 37 tests across 5 exported functions.
- * @see PLAN.md Section 9 Phase D2
+ * 37 tests across 5 exported functions.
+ * @module Diversity Engine
  */
 
 import { describe, it, expect } from "bun:test";
@@ -14,29 +14,36 @@ import {
   composeTeam,
   type ComposeTeamDeps,
 } from "./team-composer";
-import type { ModelInfo, CapabilityDimension } from "../model/types";
-import { ALL_DIMENSIONS } from "../model/types";
+import type { ModelInfo, CapabilityDimension, DimensionRating } from "../model/types";
+import { ALL_DIMENSIONS, SIGMA_BASE } from "../model/types";
 
 // -- Fixtures --
 
-/** Create a ModelInfo with specified overrides. */
+/** Default DimensionRating for test models. sigma=350 matches SIGMA_BASE. */
+const TEST_DEFAULT_RATING: DimensionRating = { mu: 500, sigma: 350, comparisons: 0 };
+
+/**
+ * Create a ModelInfo with DimensionRating capabilities.
+ * Number values in overrides are treated as old 0-10 scale (×100 → mu).
+ */
 function makeModel(overrides: {
   id: string;
   capabilities?: Partial<Record<CapabilityDimension, number>>;
-  confidence?: Partial<Record<CapabilityDimension, number>>;
 }): ModelInfo {
-  const caps: Record<string, number> = {};
-  const conf: Record<string, number> = {};
+  const caps: Record<string, DimensionRating> = {};
   for (const dim of ALL_DIMENSIONS) {
-    caps[dim] = overrides.capabilities?.[dim] ?? 5;
-    conf[dim] = overrides.confidence?.[dim] ?? 0.8;
+    const val = overrides.capabilities?.[dim as CapabilityDimension];
+    if (val !== undefined) {
+      caps[dim] = { mu: val * 100, sigma: SIGMA_BASE, comparisons: 0 };
+    } else {
+      caps[dim] = { ...TEST_DEFAULT_RATING };
+    }
   }
   return {
     id: overrides.id,
     name: overrides.id.split("/")[1] ?? overrides.id,
     contextWindow: 128_000,
     capabilities: caps as any,
-    confidence: conf as any,
     cost: { inputPer1M: 2, outputPer1M: 8 },
     supportsToolCalling: true,
   };
@@ -185,31 +192,31 @@ describe("perspectiveToDimensions", () => {
 
 describe("scoreDimensions", () => {
   it("should compute weighted sum for single dimension", () => {
+    // mu=900, sigma=SIGMA_BASE → penalty=0.5
     const model = makeModel({
       id: "openai/gpt-4.1",
       capabilities: { CODE_GENERATION: 9 },
-      confidence: { CODE_GENERATION: 1.0 },
     });
     const score = scoreDimensions(model, [
       { dimension: "CODE_GENERATION", weight: 1.0 },
     ]);
-    // score = capability * (0.5 + 0.5 * confidence) * weight
-    // = 9 * (0.5 + 0.5 * 1.0) * 1.0 = 9
-    expect(score).toBe(9);
+    // score = 900 * (1/(1+350/350)) * 1.0 = 900 * 0.5 = 450
+    expect(score).toBeCloseTo(450, 0);
   });
 
   it("should compute weighted sum for multiple dimensions", () => {
+    // CODE_GENERATION: mu=800, sigma=350 → penalty=0.5
+    // CREATIVITY: mu=600, sigma=350 → penalty=0.5
     const model = makeModel({
       id: "openai/gpt-4.1",
       capabilities: { CODE_GENERATION: 8, CREATIVITY: 6 },
-      confidence: { CODE_GENERATION: 1.0, CREATIVITY: 1.0 },
     });
     const score = scoreDimensions(model, [
       { dimension: "CODE_GENERATION", weight: 0.6 },
       { dimension: "CREATIVITY", weight: 0.4 },
     ]);
-    // = 8*1.0*0.6 + 6*1.0*0.4 = 4.8 + 2.4 = 7.2
-    expect(score).toBeCloseTo(7.2, 5);
+    // = 800*0.5*0.6 + 600*0.5*0.4 = 240 + 120 = 360
+    expect(score).toBeCloseTo(360, 0);
   });
 
   it("should return 0 for empty dimensions array", () => {
@@ -656,5 +663,117 @@ describe("composeTeam", () => {
       expect(team.reviewers[1]!.perspective).toBe("성능 최적화");
       expect(team.reviewers[2]!.perspective).toBe("코드 품질");
     });
+  });
+});
+
+// ================================================================
+// scoreDimensions — BT Dimensional Rating
+// ================================================================
+
+/**
+ * BT Rating tests for scoreDimensions.
+ * Uses DimensionRating { mu, sigma, comparisons }.
+ * Expected formula: mu * (1 / (1 + sigma / SIGMA_BASE)) * weight
+ * SIGMA_BASE = 350.
+ */
+
+const SIGMA_BASE = 350;
+
+/** Create a ModelInfo with DimensionRating-style capabilities for BT rating. */
+function makeBTModel(overrides: {
+  id: string;
+  capabilities?: Partial<
+    Record<CapabilityDimension, { mu: number; sigma: number; comparisons: number }>
+  >;
+}): ModelInfo {
+  const caps: Record<string, { mu: number; sigma: number; comparisons: number }> = {};
+  for (const dim of ALL_DIMENSIONS) {
+    caps[dim] = overrides.capabilities?.[dim] ?? { mu: 500, sigma: 350, comparisons: 0 };
+  }
+  // Cast to ModelInfo — capabilities shape is intentionally DimensionRating.
+  // This will cause runtime failures until SUT is updated (RED).
+  return {
+    id: overrides.id,
+    name: overrides.id.split("/")[1] ?? overrides.id,
+    contextWindow: 128_000,
+    capabilities: caps as any,
+    
+    cost: { inputPer1M: 2, outputPer1M: 8 },
+    supportsToolCalling: true,
+  };
+}
+
+describe("scoreDimensions (BT rating)", () => {
+  it("should compute weighted sum using mu and sigma", () => {
+    // Arrange — mu=800, sigma=350 → penalty = 1/(1+350/350) = 0.5
+    const model = makeBTModel({
+      id: "test/bt-model",
+      capabilities: {
+        CODE_GENERATION: { mu: 800, sigma: 350, comparisons: 10 },
+      },
+    });
+
+    // Act
+    const score = scoreDimensions(model, [
+      { dimension: "CODE_GENERATION", weight: 1.0 },
+    ]);
+
+    // Assert — 800 * 0.5 * 1.0 = 400
+    expect(score).toBeCloseTo(400, 1);
+  });
+
+  it("should return 0 for empty dimensions", () => {
+    // Arrange
+    const model = makeBTModel({ id: "test/empty-dims" });
+
+    // Act
+    const score = scoreDimensions(model, []);
+
+    // Assert
+    expect(score).toBe(0);
+  });
+
+  it("should use penalty=1 when sigma=0", () => {
+    // Arrange — sigma=0 → penalty = 1/(1+0/350) = 1
+    const model = makeBTModel({
+      id: "test/full-confidence",
+      capabilities: {
+        REASONING: { mu: 900, sigma: 0, comparisons: 100 },
+      },
+    });
+
+    // Act
+    const score = scoreDimensions(model, [
+      { dimension: "REASONING", weight: 1.0 },
+    ]);
+
+    // Assert — 900 * 1.0 * 1.0 = 900
+    expect(score).toBeCloseTo(900, 1);
+  });
+
+  it("should produce same result regardless of dimension order", () => {
+    // Arrange
+    const model = makeBTModel({
+      id: "test/order",
+      capabilities: {
+        CODE_GENERATION: { mu: 800, sigma: 100, comparisons: 20 },
+        REASONING: { mu: 600, sigma: 200, comparisons: 15 },
+      },
+    });
+    const dimsAB = [
+      { dimension: "CODE_GENERATION" as CapabilityDimension, weight: 0.6 },
+      { dimension: "REASONING" as CapabilityDimension, weight: 0.4 },
+    ];
+    const dimsBA = [
+      { dimension: "REASONING" as CapabilityDimension, weight: 0.4 },
+      { dimension: "CODE_GENERATION" as CapabilityDimension, weight: 0.6 },
+    ];
+
+    // Act
+    const scoreAB = scoreDimensions(model, dimsAB);
+    const scoreBA = scoreDimensions(model, dimsBA);
+
+    // Assert
+    expect(scoreAB).toBeCloseTo(scoreBA, 5);
   });
 });

@@ -6,7 +6,7 @@
  * - JSONL format (one JSON object per line)
  * - Date-based file partitioning
  *
- * @see PLAN.md D7 (Stigmergic Report 확장)
+ * @module Deliberation File Store
  */
 
 import type { FileIO } from "../report/types";

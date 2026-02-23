@@ -4,7 +4,7 @@
  * These types define the core data model for pyreez's consensus-based
  * heterogeneous model deliberation system.
  *
- * @see PLAN.md Section 2 (아키텍처: 합의 기반 이종 모델 숙의)
+ * @module Deliberation Types
  */
 
 // -- Team Composition --
