@@ -427,7 +427,7 @@ interface DeliberateOutput {
 | C1 | 레이트 리밋 관리 (GitHub API 한도 대응) | ✅ |
 | C2 | 에러 핸들링 강화 (Phase별 재시도/폴백) | ✅ |
 | C3 | 로깅/모니터링 (실행 아카이브) | ✅ |
-| C4 | Classification 사전 검증 (분류 모델 정확도 벤치마크) | ❌ |
+| C4 | Classification 사전 검증 (분류 모델 정확도 벤치마크) | ✅ |
 | C5 | `<think>` 태그 전역 적용 (ask/ask_many 응답에도 stripThinkTags) | ✅ |
 | C6 | `scores` 도구 `top` 파라미터 추가 (정렬 + 슬라이스) | ✅ |
 
