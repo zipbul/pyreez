@@ -11,9 +11,9 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 995.7080924904278,
-          "sigma": 309.85248349999995,
-          "comparisons": 4
+          "mu": 1000,
+          "sigma": 242.8448263484032,
+          "comparisons": 12
         },
         "MATH_REASONING": {
           "mu": 800,
@@ -127,9 +127,9 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 843.8414613476021,
-          "sigma": 291.5402017251499,
-          "comparisons": 6
+          "mu": 874.7900315662744,
+          "sigma": 242.8448263484032,
+          "comparisons": 12
         },
         "MATH_REASONING": {
           "mu": 700,
@@ -243,9 +243,9 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 587.940718314092,
-          "sigma": 282.79399567339544,
-          "comparisons": 7
+          "mu": 535.9603315407269,
+          "sigma": 214.98877871193986,
+          "comparisons": 16
         },
         "MATH_REASONING": {
           "mu": 500,
@@ -939,9 +939,9 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 770.7677921927805,
-          "sigma": 309.85248349999995,
-          "comparisons": 4
+          "mu": 725.3832399727625,
+          "sigma": 258.0984444132248,
+          "comparisons": 10
         },
         "MATH_REASONING": {
           "mu": 700,
