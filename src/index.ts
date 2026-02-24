@@ -14,6 +14,7 @@ import { FileDeliberationStore } from "./deliberation/file-store";
 import { LLMClient } from "./llm/client";
 import { PyreezMcpServer } from "./mcp/server";
 import { ModelRegistry } from "./model/registry";
+import { calibrate, extractRatingsMap, persistRatings } from "./model/calibration";
 import { BunFileIO } from "./report/bun-file-io";
 import { FileReporter } from "./report/file-reporter";
 import { route } from "./router/router";
@@ -43,6 +44,14 @@ async function main(): Promise<void> {
     summaryFn: () => reporter.summary(),
     deliberateFn,
     deliberationStore,
+    calibrateFn: async () => {
+      const records = await reporter.getAll();
+      const models = registry.getAll();
+      const ratings = extractRatingsMap(models);
+      const result = calibrate(ratings, [...records]);
+      await persistRatings("scores/models.json", ratings, fileIO);
+      return result;
+    },
   });
 
   const transport = new StdioServerTransport();

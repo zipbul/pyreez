@@ -186,6 +186,7 @@ export function createDeliberateFn(
           producerInstructions: input.producerInstructions,
           leaderInstructions: input.leaderInstructions,
           consensus: input.consensus,
+          rounds: [...result.deliberationLog.rounds],
         });
       } catch {
         // best-effort save — do not fail the deliberation

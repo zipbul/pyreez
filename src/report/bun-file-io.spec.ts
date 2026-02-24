@@ -12,6 +12,7 @@ const mockReadFile = mock(() => Promise.resolve(""));
 const mockMkdir = mock(() => Promise.resolve());
 const mockReaddir = mock(() => Promise.resolve([] as string[]));
 const mockUnlink = mock(() => Promise.resolve());
+const mockWriteFile = mock(() => Promise.resolve());
 
 mock.module("node:fs/promises", () => ({
   appendFile: mockAppendFile,
@@ -19,6 +20,7 @@ mock.module("node:fs/promises", () => ({
   mkdir: mockMkdir,
   readdir: mockReaddir,
   unlink: mockUnlink,
+  writeFile: mockWriteFile,
 }));
 
 // SUT must be imported AFTER mock.module
@@ -33,6 +35,7 @@ describe("BunFileIO", () => {
     mockMkdir.mockClear();
     mockReaddir.mockClear();
     mockUnlink.mockClear();
+    mockWriteFile.mockClear();
 
     // Reset to defaults
     mockAppendFile.mockImplementation(() => Promise.resolve());
@@ -40,6 +43,7 @@ describe("BunFileIO", () => {
     mockMkdir.mockImplementation(() => Promise.resolve());
     mockReaddir.mockImplementation(() => Promise.resolve([]));
     mockUnlink.mockImplementation(() => Promise.resolve());
+    mockWriteFile.mockImplementation(() => Promise.resolve());
 
     io = new BunFileIO();
   });
@@ -235,5 +239,40 @@ describe("BunFileIO", () => {
 
     await io.removeGlob("dir/*.jsonl");
     expect(mockUnlink).toHaveBeenCalledTimes(1); // no additional unlink
+  });
+
+  // === writeFile ===
+
+  it("should delegate writeFile to fs.writeFile with utf-8 encoding", async () => {
+    // Arrange
+    const path = "/tmp/models.json";
+    const data = JSON.stringify({ version: 2, models: {} }, null, 2);
+
+    // Act
+    await io.writeFile(path, data);
+
+    // Assert
+    expect(mockWriteFile).toHaveBeenCalledTimes(1);
+    expect(mockWriteFile).toHaveBeenCalledWith(path, data, "utf-8");
+  });
+
+  it("should propagate underlying writeFile error", async () => {
+    // Arrange
+    mockWriteFile.mockImplementation(() =>
+      Promise.reject(new Error("EACCES: permission denied")),
+    );
+
+    // Act + Assert
+    await expect(io.writeFile("/readonly/models.json", "data")).rejects.toThrow(
+      "EACCES: permission denied",
+    );
+  });
+
+  it("should delegate writeFile with empty string data", async () => {
+    // Arrange / Act
+    await io.writeFile("/tmp/empty.json", "");
+
+    // Assert
+    expect(mockWriteFile).toHaveBeenCalledWith("/tmp/empty.json", "", "utf-8");
   });
 });

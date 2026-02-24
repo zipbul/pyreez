@@ -4,6 +4,8 @@
  * @module Deliberation Store Types
  */
 
+import type { Round } from "./types";
+
 /**
  * A persisted record of a completed deliberation session.
  */
@@ -21,6 +23,8 @@ export interface DeliberationRecord {
   readonly producerInstructions?: string;
   readonly leaderInstructions?: string;
   readonly consensus?: string;
+  /** Full round-by-round conversation log (production → reviews → synthesis). */
+  readonly rounds?: readonly Round[];
 }
 
 /**

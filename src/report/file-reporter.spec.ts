@@ -19,6 +19,7 @@ function stubFileIO(overrides: Partial<FileIO> = {}): FileIO {
   return {
     appendFile: mock(() => Promise.resolve()),
     readFile: mock(() => Promise.resolve("")),
+    writeFile: mock(() => Promise.resolve()),
     mkdir: mock(() => Promise.resolve()),
     glob: mock(() => Promise.resolve([])),
     removeGlob: mock(() => Promise.resolve()),

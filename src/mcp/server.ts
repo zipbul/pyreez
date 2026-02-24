@@ -19,6 +19,7 @@ import type { BudgetConfig } from "../router/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 import type { DeliberationStore } from "../deliberation/store-types";
 import { stripThinkTags } from "../deliberation/wire";
+import type { CalibrationResult } from "../model/calibration";
 
 export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
@@ -30,6 +31,7 @@ export interface PyreezMcpServerConfig {
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
   deliberationStore?: DeliberationStore;
   runLogger?: RunLogger;
+  calibrateFn?: () => Promise<CalibrationResult>;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -44,6 +46,7 @@ export class PyreezMcpServer {
   private readonly deliberateFn?: PyreezMcpServerConfig["deliberateFn"];
   private readonly deliberationStore?: DeliberationStore;
   private readonly runLogger?: RunLogger;
+  private readonly calibrateFn?: () => Promise<CalibrationResult>;
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -71,6 +74,7 @@ export class PyreezMcpServer {
     this.deliberateFn = config.deliberateFn;
     this.deliberationStore = config.deliberationStore;
     this.runLogger = config.runLogger;
+    this.calibrateFn = config.calibrateFn;
 
     this.registerTools();
   }
@@ -277,6 +281,17 @@ export class PyreezMcpServer {
         }),
       },
       async (args) => this.handleDeliberate(args),
+    );
+
+    this.mcpServer.registerTool(
+      "pyreez_calibrate",
+      {
+        title: "Pyreez Calibrate",
+        description:
+          "Run a calibration cycle to update BT ratings from usage data and persist results",
+        inputSchema: z.object({}),
+      },
+      async () => this.handleCalibrate(),
     );
   }
 
@@ -625,6 +640,22 @@ export class PyreezMcpServer {
   }
 
   // --- Lifecycle (server) ---
+
+  async handleCalibrate(): Promise<CallToolResult> {
+    return this.logRun("calibrate", async () => {
+      if (!this.calibrateFn) {
+        return this.errorResult("Error: calibration not available");
+      }
+      try {
+        const result = await this.calibrateFn();
+        return this.textResult(JSON.stringify(result, null, 2));
+      } catch (error) {
+        return this.errorResult(
+          `Error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    });
+  }
 
   async start(transport: Transport): Promise<void> {
     await this.mcpServer.connect(transport);

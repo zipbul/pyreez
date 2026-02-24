@@ -51,6 +51,8 @@ export interface FileIO {
   appendFile(path: string, data: string): Promise<void>;
   /** Read entire file as string. */
   readFile(path: string): Promise<string>;
+  /** Write entire file as string (overwrites). */
+  writeFile(path: string, data: string): Promise<void>;
   /** Create directory recursively. */
   mkdir(path: string): Promise<void>;
   /** Return file paths matching a glob pattern. Sorted ascending. */

@@ -13,6 +13,7 @@
 
 import type { CapabilityDimension, DimensionRating } from "../model/types";
 import { SIGMA_BASE } from "../model/types";
+import type { ModelInfo } from "../model/types";
 import type { CallRecord } from "../report/types";
 import type { PairwiseOutcome, PairwiseResult } from "../evaluation/types";
 import {
@@ -188,4 +189,68 @@ export function calibrate(
     converged,
     stale,
   };
+}
+
+// -- Ratings Map Extraction --
+
+/**
+ * Build a RatingsMap from ModelInfo array.
+ * Copies mu/sigma/comparisons from each model's capabilities.
+ */
+export function extractRatingsMap(models: ModelInfo[]): RatingsMap {
+  const map: RatingsMap = new Map();
+  for (const model of models) {
+    const dimMap = new Map<CapabilityDimension, DimensionRating>();
+    for (const [dim, rating] of Object.entries(model.capabilities ?? {})) {
+      dimMap.set(dim as CapabilityDimension, rating as DimensionRating);
+    }
+    map.set(model.id, dimMap);
+  }
+  return map;
+}
+
+// -- Persist Ratings --
+
+/**
+ * Minimal I/O interface for persistRatings.
+ * Kept separate from FileIO to avoid coupling calibration to report module.
+ */
+export interface PersistIO {
+  readFile(path: string): Promise<string>;
+  writeFile(path: string, data: string): Promise<void>;
+}
+
+/**
+ * Write updated BT ratings back into models.json.
+ * Reads the current JSON, patches matching dim entries, then writes.
+ */
+export async function persistRatings(
+  filePath: string,
+  ratings: RatingsMap,
+  io: PersistIO,
+): Promise<void> {
+  const raw = await io.readFile(filePath);
+  const json = JSON.parse(raw) as {
+    version: number;
+    models?: Record<
+      string,
+      { scores?: Record<string, { mu: number; sigma: number; comparisons: number }> }
+    >;
+  };
+
+  for (const [modelId, dims] of ratings) {
+    const modelEntry = json.models?.[modelId];
+    if (!modelEntry) continue;
+
+    for (const [dim, rating] of dims) {
+      if (!modelEntry.scores?.[dim]) continue;
+      modelEntry.scores[dim] = {
+        mu: rating.mu,
+        sigma: rating.sigma,
+        comparisons: rating.comparisons,
+      };
+    }
+  }
+
+  await io.writeFile(filePath, JSON.stringify(json, null, 2));
 }

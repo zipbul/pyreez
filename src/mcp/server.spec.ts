@@ -10,6 +10,7 @@ import type { RouteResult } from "../router/router";
 import type { BudgetConfig } from "../router/types";
 import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
+import type { CalibrationResult } from "../model/calibration";
 
 // --- Test Doubles ---
 
@@ -164,12 +165,12 @@ describe("PyreezMcpServer", () => {
   // === Constructor ===
 
   describe("constructor", () => {
-    it("should create instance and register 6 tools when config is valid", () => {
+    it("should create instance and register 7 tools when config is valid", () => {
       const mcp = stubMcpServer();
       const server = new PyreezMcpServer(validConfig({ mcpServer: mcp }));
 
       expect(server).toBeInstanceOf(PyreezMcpServer);
-      expect(mcp.registerTool).toHaveBeenCalledTimes(6);
+      expect(mcp.registerTool).toHaveBeenCalledTimes(7);
 
       const calls = (mcp.registerTool as ReturnType<typeof mock>).mock.calls;
       const toolNames = calls.map((c: unknown[]) => c[0]);
@@ -179,6 +180,7 @@ describe("PyreezMcpServer", () => {
       expect(toolNames).toContain("pyreez_scores");
       expect(toolNames).toContain("pyreez_report");
       expect(toolNames).toContain("pyreez_deliberate");
+      expect(toolNames).toContain("pyreez_calibrate");
     });
 
     it('should throw "mcpServer is required" when mcpServer is missing', () => {
@@ -1634,6 +1636,102 @@ describe("PyreezMcpServer", () => {
       const text = (result.content[0] as { text: string }).text;
       expect(text).toContain("LLM API down");
       expect(text).not.toContain("log write failed");
+    });
+  });
+
+  // === pyreez_calibrate ===
+
+  describe("pyreez_calibrate", () => {
+    const CALIBRATION_RESULT: CalibrationResult = {
+      comparisonsProcessed: 5,
+      anomalies: [],
+      converged: [{ modelId: "openai/gpt-4.1", dimension: "REASONING", sigma: 80 }],
+      stale: [],
+    };
+
+    function stubCalibrateFn(
+      result?: CalibrationResult,
+      error?: unknown,
+    ): () => Promise<CalibrationResult> {
+      if (error !== undefined) {
+        return mock(() => Promise.reject(error)) as any;
+      }
+      return mock(() => Promise.resolve(result ?? CALIBRATION_RESULT)) as any;
+    }
+
+    it("should return CalibrationResult JSON when calibrateFn succeeds", async () => {
+      // Arrange
+      const calibrateFn = stubCalibrateFn();
+      const server = new PyreezMcpServer(validConfig({ calibrateFn }));
+
+      // Act
+      const result = await server.handleCalibrate();
+
+      // Assert
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.comparisonsProcessed).toBe(5);
+      expect(parsed.converged).toHaveLength(1);
+      expect(parsed.converged[0].modelId).toBe("openai/gpt-4.1");
+    });
+
+    it("should include all CalibrationResult fields in response", async () => {
+      // Arrange
+      const full: CalibrationResult = {
+        comparisonsProcessed: 3,
+        anomalies: [{ modelId: "m1", dimension: "REASONING", muDelta: 150 }],
+        converged: [],
+        stale: [{ modelId: "m2", dimension: "CODE_GENERATION", sigma: 400 }],
+      };
+      const server = new PyreezMcpServer(validConfig({ calibrateFn: stubCalibrateFn(full) }));
+
+      // Act
+      const result = await server.handleCalibrate();
+
+      // Assert
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.anomalies).toHaveLength(1);
+      expect(parsed.stale).toHaveLength(1);
+    });
+
+    it("should return error when calibrateFn is not configured", async () => {
+      // Arrange — no calibrateFn in config
+      const server = new PyreezMcpServer(validConfig());
+
+      // Act
+      const result = await server.handleCalibrate();
+
+      // Assert
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("calibration not available");
+    });
+
+    it("should return error with Error.message when calibrateFn throws Error", async () => {
+      // Arrange
+      const server = new PyreezMcpServer(
+        validConfig({ calibrateFn: stubCalibrateFn(undefined, new Error("persist failed")) }),
+      );
+
+      // Act
+      const result = await server.handleCalibrate();
+
+      // Assert
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("persist failed");
+    });
+
+    it("should return valid JSON when comparisonsProcessed is 0", async () => {
+      // Arrange
+      const empty: CalibrationResult = { comparisonsProcessed: 0, anomalies: [], converged: [], stale: [] };
+      const server = new PyreezMcpServer(validConfig({ calibrateFn: stubCalibrateFn(empty) }));
+
+      // Act
+      const result = await server.handleCalibrate();
+
+      // Assert
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.comparisonsProcessed).toBe(0);
     });
   });
 });

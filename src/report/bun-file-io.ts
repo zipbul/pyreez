@@ -13,6 +13,7 @@ import {
   mkdir,
   readdir,
   unlink,
+  writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
 import type { FileIO } from "./types";
@@ -24,6 +25,10 @@ export class BunFileIO implements FileIO {
 
   async readFile(path: string): Promise<string> {
     return readFile(path, "utf-8");
+  }
+
+  async writeFile(path: string, data: string): Promise<void> {
+    await writeFile(path, data, "utf-8");
   }
 
   async mkdir(path: string): Promise<void> {

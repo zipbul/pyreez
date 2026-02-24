@@ -13,6 +13,7 @@ import type {
   DeliberateOutput,
   TeamComposition,
   SharedContext,
+  Round,
 } from "./types";
 import type { ModelInfo } from "../model/types";
 
@@ -607,6 +608,86 @@ describe("createDeliberateFn", () => {
 
     // Assert
     expect(result).toEqual(STUB_OUTPUT);
+
+    // Cleanup
+    mockComposeTeam.mockReset();
+    mockDeliberate.mockReset();
+  });
+
+  // -- Store rounds persistence (P0-5) --
+
+  it("should include deliberationLog.rounds in store.save call when rounds exist", async () => {
+    // Arrange
+    const stubRound1: Round = {
+      number: 1,
+      production: { model: "openai/gpt-4.1", content: "content 1" },
+      reviews: [],
+      synthesis: undefined,
+    };
+    const stubRound2: Round = {
+      number: 2,
+      production: { model: "openai/gpt-4.1", content: "content 2" },
+      reviews: [],
+      synthesis: undefined,
+    };
+    const outputWithRounds: DeliberateOutput = {
+      ...STUB_OUTPUT,
+      deliberationLog: { ...STUB_OUTPUT.deliberationLog, rounds: [stubRound1, stubRound2] },
+    };
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => outputWithRounds);
+
+    const storeSave = mock(() => Promise.resolve());
+    const registry = {
+      getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
+      getById: () => stubModel("a/1"),
+    };
+    const fn = createDeliberateFn({
+      registry,
+      chat: mock(async () => ""),
+      store: { save: storeSave, query: mock(), getById: mock() },
+    });
+
+    // Act
+    await fn({ task: "test", perspectives: ["보안", "성능"] });
+
+    // Assert
+    expect(storeSave).toHaveBeenCalledTimes(1);
+    const savedRecord = (storeSave as ReturnType<typeof mock>).mock.calls[0]![0] as any;
+    expect(savedRecord.rounds).toHaveLength(2);
+    expect(savedRecord.rounds[0]).toEqual(stubRound1);
+    expect(savedRecord.rounds[1]).toEqual(stubRound2);
+
+    // Cleanup
+    mockComposeTeam.mockReset();
+    mockDeliberate.mockReset();
+  });
+
+  it("should include empty rounds array in store.save call when deliberationLog.rounds is empty", async () => {
+    // Arrange — STUB_OUTPUT has deliberationLog.rounds = []
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_OUTPUT);
+
+    const storeSave = mock(() => Promise.resolve());
+    const registry = {
+      getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
+      getById: () => stubModel("a/1"),
+    };
+    const fn = createDeliberateFn({
+      registry,
+      chat: mock(async () => ""),
+      store: { save: storeSave, query: mock(), getById: mock() },
+    });
+
+    // Act
+    await fn({ task: "test", perspectives: ["보안", "성능"] });
+
+    // Assert
+    expect(storeSave).toHaveBeenCalledTimes(1);
+    const savedRecord = (storeSave as ReturnType<typeof mock>).mock.calls[0]![0] as any;
+    expect(savedRecord.rounds).toEqual([]);
 
     // Cleanup
     mockComposeTeam.mockReset();
