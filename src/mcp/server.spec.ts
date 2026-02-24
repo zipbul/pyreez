@@ -165,12 +165,12 @@ describe("PyreezMcpServer", () => {
   // === Constructor ===
 
   describe("constructor", () => {
-    it("should create instance and register 7 tools when config is valid", () => {
+    it("should create instance and register 8 tools when config is valid", () => {
       const mcp = stubMcpServer();
       const server = new PyreezMcpServer(validConfig({ mcpServer: mcp }));
 
       expect(server).toBeInstanceOf(PyreezMcpServer);
-      expect(mcp.registerTool).toHaveBeenCalledTimes(7);
+      expect(mcp.registerTool).toHaveBeenCalledTimes(8);
 
       const calls = (mcp.registerTool as ReturnType<typeof mock>).mock.calls;
       const toolNames = calls.map((c: unknown[]) => c[0]);
@@ -181,6 +181,7 @@ describe("PyreezMcpServer", () => {
       expect(toolNames).toContain("pyreez_report");
       expect(toolNames).toContain("pyreez_deliberate");
       expect(toolNames).toContain("pyreez_calibrate");
+      expect(toolNames).toContain("pyreez_benchmark");
     });
 
     it('should throw "mcpServer is required" when mcpServer is missing', () => {
@@ -1732,6 +1733,151 @@ describe("PyreezMcpServer", () => {
       expect(result.isError).toBeUndefined();
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed.comparisonsProcessed).toBe(0);
+    });
+  });
+
+  // === pyreez_benchmark ===
+
+  describe("pyreez_benchmark", () => {
+    const BENCHMARK_RESULT = {
+      suiteResult: {
+        timestamp: "2026-02-24T00:00:00Z",
+        promptCount: 5,
+        modelCount: 3,
+        pairwiseResults: [],
+        btUpdates: [],
+        consistencyRate: 0.9,
+      },
+      ratingsUpdated: 10,
+      modelsPersisted: true,
+    };
+
+    function stubBenchmarkFn(
+      result?: typeof BENCHMARK_RESULT,
+      error?: unknown,
+    ): (config: any) => Promise<typeof BENCHMARK_RESULT> {
+      if (error !== undefined) {
+        return mock(() => Promise.reject(error)) as any;
+      }
+      return mock(() => Promise.resolve(result ?? BENCHMARK_RESULT)) as any;
+    }
+
+    it("should return JSON result for valid benchmark handler call", async () => {
+      // Arrange
+      const benchmarkFn = stubBenchmarkFn();
+      const server = new PyreezMcpServer(validConfig({ benchmarkFn }));
+
+      // Act
+      const result = await server.handleBenchmark({
+        modelIds: ["model-a", "model-b"],
+        anchorModelId: "anchor",
+      });
+
+      // Assert
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.ratingsUpdated).toBe(10);
+      expect(parsed.modelsPersisted).toBe(true);
+      expect(parsed.suiteResult.promptCount).toBe(5);
+    });
+
+    it("should forward optional params as undefined when omitted", async () => {
+      // Arrange
+      let capturedConfig: any;
+      const benchmarkFn = mock(async (cfg: any) => {
+        capturedConfig = cfg;
+        return BENCHMARK_RESULT;
+      }) as any;
+      const server = new PyreezMcpServer(validConfig({ benchmarkFn }));
+
+      // Act
+      await server.handleBenchmark({
+        modelIds: ["model-a"],
+        anchorModelId: "anchor",
+      });
+
+      // Assert
+      expect(capturedConfig.domains).toBeUndefined();
+      expect(capturedConfig.difficulties).toBeUndefined();
+    });
+
+    it("should error when benchmarkFn not configured", async () => {
+      // Arrange — no benchmarkFn
+      const server = new PyreezMcpServer(validConfig());
+
+      // Act
+      const result = await server.handleBenchmark({
+        modelIds: ["model-a"],
+        anchorModelId: "anchor",
+      });
+
+      // Assert
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("benchmark not available");
+    });
+
+    it("should error when modelIds empty", async () => {
+      // Arrange
+      const server = new PyreezMcpServer(validConfig({ benchmarkFn: stubBenchmarkFn() }));
+
+      // Act
+      const result = await server.handleBenchmark({
+        modelIds: [],
+        anchorModelId: "anchor",
+      });
+
+      // Assert
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("modelIds");
+    });
+
+    it("should error when anchorModelId missing", async () => {
+      // Arrange
+      const server = new PyreezMcpServer(validConfig({ benchmarkFn: stubBenchmarkFn() }));
+
+      // Act
+      const result = await server.handleBenchmark({
+        modelIds: ["model-a"],
+        anchorModelId: "",
+      });
+
+      // Assert
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("anchorModelId");
+    });
+
+    it("should format Error throws in handler", async () => {
+      // Arrange
+      const server = new PyreezMcpServer(
+        validConfig({ benchmarkFn: stubBenchmarkFn(undefined, new Error("suite exploded")) }),
+      );
+
+      // Act
+      const result = await server.handleBenchmark({
+        modelIds: ["model-a"],
+        anchorModelId: "anchor",
+      });
+
+      // Assert
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("suite exploded");
+    });
+
+    it("should stringify non-Error throws in handler", async () => {
+      // Arrange
+      const server = new PyreezMcpServer(
+        validConfig({ benchmarkFn: stubBenchmarkFn(undefined, "raw string error") }),
+      );
+
+      // Act
+      const result = await server.handleBenchmark({
+        modelIds: ["model-a"],
+        anchorModelId: "anchor",
+      });
+
+      // Assert
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("raw string error");
     });
   });
 });

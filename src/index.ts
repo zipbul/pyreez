@@ -12,6 +12,11 @@ import { loadConfigFromEnv } from "./config";
 import { createChatAdapter, createDeliberateFn } from "./deliberation/wire";
 import { FileDeliberationStore } from "./deliberation/file-store";
 import { LLMClient } from "./llm/client";
+import { runBenchmarkPipeline } from "./evaluation/pipeline";
+import type { BenchmarkPipelineDeps } from "./evaluation/pipeline";
+import { runEvalSuite } from "./evaluation/suite";
+import { createLLMJudge } from "./evaluation/judge";
+import type { EvalResponse } from "./evaluation/types";
 import { PyreezMcpServer } from "./mcp/server";
 import { ModelRegistry } from "./model/registry";
 import { calibrate, extractRatingsMap, persistRatings } from "./model/calibration";
@@ -51,6 +56,64 @@ async function main(): Promise<void> {
       const result = calibrate(ratings, [...records]);
       await persistRatings("scores/models.json", ratings, fileIO);
       return result;
+    },
+    benchmarkFn: async (cfg) => {
+      const runner = {
+        generate: async (modelId: string, prompt: string): Promise<EvalResponse> => {
+          const resp = await llmClient.chat({
+            model: modelId,
+            messages: [{ role: "user", content: prompt }],
+          });
+          const content = resp.choices?.[0]?.message?.content ?? "";
+          return {
+            promptId: "",
+            modelId,
+            response: content,
+            latencyMs: 0,
+            tokenUsage: { prompt: 0, completion: 0 },
+          };
+        },
+      };
+      const judge = createLLMJudge(async (model, prompt, judgeCfg) => {
+        const resp = await llmClient.chat({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: judgeCfg.temperature,
+          max_tokens: judgeCfg.maxTokens,
+        });
+        return resp.choices?.[0]?.message?.content ?? "";
+      });
+      const defaultJudgeConfig = {
+        judgeModel: config.llm.model,
+        temperature: 0,
+        maxTokens: 4000,
+        lengthBiasCorrection: true,
+      };
+      const deps: BenchmarkPipelineDeps = {
+        runner,
+        judge,
+        loadPrompts: () => {
+          throw new Error("No prompt source configured. Provide evaluation prompts.");
+        },
+        loadModels: () => registry.getAll(),
+        persistIO: fileIO,
+        runEvalSuite,
+        extractRatingsMap,
+        persistRatings,
+      };
+      return runBenchmarkPipeline(
+        {
+          modelIds: cfg.modelIds,
+          anchorModelId: cfg.anchorModelId,
+          judgeConfig: defaultJudgeConfig,
+          concurrency: 2,
+          positionSwap: cfg.positionSwap ?? false,
+          modelsPath: "scores/models.json",
+          domains: cfg.domains as any,
+          difficulties: cfg.difficulties as any,
+        },
+        deps,
+      );
     },
   });
 

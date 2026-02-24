@@ -375,6 +375,45 @@ describe("executeRound", () => {
     // Leader last
     expect(callOrder[3]).toBe("leader/model");
   });
+
+  it("should pass roundInfo to all builder calls", async () => {
+    const captured: { fn: string; roundInfo: unknown }[] = [];
+    const chat = chatSequence([
+      PRODUCTION_JSON,
+      REVIEW_APPROVE_JSON,
+      SYNTHESIS_APPROVE_JSON,
+    ]);
+    const deps = makeDeps({
+      chat,
+      buildProducerMessages: mock((_ctx: any, _inst?: string, roundInfo?: any) => {
+        captured.push({ fn: "producer", roundInfo });
+        return [{ role: "user" as const, content: "produce" }];
+      }),
+      buildReviewerMessages: mock((_ctx: any, _persp: string, roundInfo?: any) => {
+        captured.push({ fn: "reviewer", roundInfo });
+        return [{ role: "user" as const, content: "review" }];
+      }),
+      buildLeaderMessages: mock((_ctx: any, _inst?: string, roundInfo?: any) => {
+        captured.push({ fn: "leader", roundInfo });
+        return [{ role: "user" as const, content: "lead" }];
+      }),
+    });
+    const team = makeTeam(1);
+    const input = makeInput();
+
+    await executeRound(
+      { task: input.task, team, rounds: [] },
+      1,
+      deps,
+      { maxRounds: 5, consensus: "leader_decides" },
+      input,
+    );
+
+    const expected = { current: 1, max: 5 };
+    expect(captured.find((c) => c.fn === "producer")!.roundInfo).toEqual(expected);
+    expect(captured.find((c) => c.fn === "reviewer")!.roundInfo).toEqual(expected);
+    expect(captured.find((c) => c.fn === "leader")!.roundInfo).toEqual(expected);
+  });
 });
 
 // ================================================================

@@ -434,3 +434,121 @@ describe("cross-function", () => {
     expect(messages[1]!.content).not.toContain("**Production**");
   });
 });
+
+// ================================================================
+// P2: Round budget & convergence guidance
+// ================================================================
+
+describe("buildProducerMessages (roundInfo)", () => {
+  it("should include round budget when roundInfo provided", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const messages = buildProducerMessages(ctx, undefined, { current: 2, max: 3 });
+    const user = messages[1]!.content!;
+
+    expect(user).toContain("Round 2");
+    expect(user).toContain("3");
+  });
+
+  it("should include FINAL marker when current equals max with single-round budget", () => {
+    const ctx = makeCtx();
+    const messages = buildProducerMessages(ctx, undefined, { current: 1, max: 1 });
+    const user = messages[1]!.content!;
+
+    expect(user).toContain("Round 1");
+    expect(user).toContain("1");
+    expect(user).toMatch(/final/i);
+  });
+
+  it("should place budget after history before instructions", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const messages = buildProducerMessages(ctx, "Do extra work", { current: 2, max: 3 });
+    const user = messages[1]!.content!;
+
+    const historyPos = user.indexOf("Production content round 1");
+    const budgetPos = user.indexOf("Round 2");
+    const instructionsPos = user.indexOf("Do extra work");
+    expect(historyPos).toBeLessThan(budgetPos);
+    expect(budgetPos).toBeLessThan(instructionsPos);
+  });
+});
+
+describe("buildReviewerMessages (roundInfo)", () => {
+  it("should include round budget when roundInfo provided", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const messages = buildReviewerMessages(ctx, "코드 품질", { current: 2, max: 3 });
+    const user = messages[1]!.content!;
+
+    expect(user).toContain("Round 2");
+    expect(user).toContain("3");
+  });
+});
+
+describe("buildLeaderMessages (roundInfo)", () => {
+  it("should include round budget when roundInfo provided", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const messages = buildLeaderMessages(ctx, undefined, { current: 2, max: 3 });
+    const user = messages[1]!.content!;
+
+    expect(user).toContain("Round 2");
+    expect(user).toContain("3");
+  });
+
+  it("should include FINAL round marker when current equals max", () => {
+    const ctx = makeCtx([makeRound(1), makeRound(2)]);
+    const messages = buildLeaderMessages(ctx, undefined, { current: 3, max: 3 });
+    const user = messages[1]!.content!;
+
+    expect(user).toMatch(/final/i);
+  });
+
+  it("should not include FINAL marker when current less than max", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const messages = buildLeaderMessages(ctx, undefined, { current: 1, max: 3 });
+    const user = messages[1]!.content!;
+
+    expect(user).not.toMatch(/final/i);
+  });
+
+  it("should include both roundInfo and instructions when both provided", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const messages = buildLeaderMessages(ctx, "Be strict", { current: 2, max: 3 });
+    const user = messages[1]!.content!;
+
+    expect(user).toContain("Round 2");
+    expect(user).toContain("Be strict");
+  });
+
+  it("should place budget after history before instructions", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const messages = buildLeaderMessages(ctx, "Focus on security", { current: 2, max: 3 });
+    const user = messages[1]!.content!;
+
+    const historyPos = user.indexOf("Production content round 1");
+    const budgetPos = user.indexOf("Round 2");
+    const instructionsPos = user.indexOf("Focus on security");
+    expect(historyPos).toBeLessThan(budgetPos);
+    expect(budgetPos).toBeLessThan(instructionsPos);
+  });
+});
+
+describe("LEADER_SYSTEM convergence", () => {
+  it("should contain convergence guidance about minor issues", () => {
+    // LEADER_SYSTEM is used as system message; check via buildLeaderMessages
+    const ctx = makeCtx([makeRound(1)]);
+    const messages = buildLeaderMessages(ctx);
+    const system = messages[0]!.content!;
+
+    expect(system).toMatch(/minor|suggestion/i);
+    expect(system).toMatch(/approve/i);
+  });
+});
+
+describe("reviewerSystem improvement acknowledgment", () => {
+  it("should contain improvement acknowledgment instruction", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const messages = buildReviewerMessages(ctx, "코드 품질");
+    const system = messages[0]!.content!;
+
+    expect(system).toMatch(/improv|acknowledge|이전|개선/i);
+  });
+});

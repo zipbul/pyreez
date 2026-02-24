@@ -15,6 +15,11 @@ import type { Round, SharedContext } from "./types";
 
 // -- System Prompts --
 
+export interface RoundInfo {
+  readonly current: number;
+  readonly max: number;
+}
+
 const PRODUCER_SYSTEM = `You are a Producer in a multi-model deliberation team.
 Your role is to generate high-quality content that addresses the given task.
 If previous rounds exist, incorporate feedback from reviewers and the leader's action items.
@@ -30,6 +35,7 @@ function reviewerSystem(perspective: string): string {
 Your review perspective is: ${perspective}
 Evaluate the producer's output strictly from your assigned perspective.
 Identify issues, provide reasoning, and decide whether to approve.
+If previous rounds exist, acknowledge improvements made since the last round before listing new issues.
 
 Respond in JSON format:
 {
@@ -42,6 +48,7 @@ Respond in JSON format:
 const LEADER_SYSTEM = `You are the Leader in a multi-model deliberation team.
 Your role is to synthesize all reviewer feedback, identify consensus, and decide the next step.
 Evaluate whether the team has reached agreement or needs another round.
+If only minor or suggestion-level issues remain and no critical/major issues exist, prefer deciding "approve".
 
 Respond in JSON format:
 {
@@ -111,11 +118,21 @@ function serializeHistory(rounds: readonly Round[]): string {
 export function buildProducerMessages(
   ctx: SharedContext,
   instructions?: string,
+  roundInfo?: RoundInfo,
 ): ChatMessage[] {
   const userParts: string[] = [`## Task\n${ctx.task}`];
 
   if (ctx.rounds.length > 0) {
     userParts.push(`## Previous Rounds\n${serializeHistory(ctx.rounds)}`);
+  }
+
+  if (roundInfo) {
+    const budget = `## Round Budget\nRound ${roundInfo.current} of ${roundInfo.max}`;
+    userParts.push(
+      roundInfo.current === roundInfo.max
+        ? `${budget}\n⚠️ This is the FINAL round.`
+        : budget,
+    );
   }
 
   if (instructions) {
@@ -140,6 +157,7 @@ export function buildProducerMessages(
 export function buildReviewerMessages(
   ctx: SharedContext,
   perspective: string,
+  roundInfo?: RoundInfo,
 ): ChatMessage[] {
   const userParts: string[] = [`## Task\n${ctx.task}`];
 
@@ -148,6 +166,15 @@ export function buildReviewerMessages(
   }
 
   userParts.push(`## Your Perspective\nReview from the perspective of: **${perspective}**`);
+
+  if (roundInfo) {
+    const budget = `## Round Budget\nRound ${roundInfo.current} of ${roundInfo.max}`;
+    userParts.push(
+      roundInfo.current === roundInfo.max
+        ? `${budget}\n⚠️ This is the FINAL round.`
+        : budget,
+    );
+  }
 
   return [
     { role: "system", content: reviewerSystem(perspective) },
@@ -167,11 +194,21 @@ export function buildReviewerMessages(
 export function buildLeaderMessages(
   ctx: SharedContext,
   instructions?: string,
+  roundInfo?: RoundInfo,
 ): ChatMessage[] {
   const userParts: string[] = [`## Task\n${ctx.task}`];
 
   if (ctx.rounds.length > 0) {
     userParts.push(`## Deliberation History\n${serializeHistory(ctx.rounds)}`);
+  }
+
+  if (roundInfo) {
+    const budget = `## Round Budget\nRound ${roundInfo.current} of ${roundInfo.max}`;
+    userParts.push(
+      roundInfo.current === roundInfo.max
+        ? `${budget}\n⚠️ This is the FINAL round.`
+        : budget,
+    );
   }
 
   if (instructions) {

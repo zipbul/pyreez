@@ -29,6 +29,8 @@ import {
   modelsUsed,
 } from "./shared-context";
 
+import type { RoundInfo } from "./prompts";
+
 // -- Public Interfaces --
 
 /**
@@ -43,14 +45,17 @@ export interface EngineDeps {
   readonly buildProducerMessages: (
     ctx: SharedContext,
     instructions?: string,
+    roundInfo?: RoundInfo,
   ) => ChatMessage[];
   readonly buildReviewerMessages: (
     ctx: SharedContext,
     perspective: string,
+    roundInfo?: RoundInfo,
   ) => ChatMessage[];
   readonly buildLeaderMessages: (
     ctx: SharedContext,
     instructions?: string,
+    roundInfo?: RoundInfo,
   ) => ChatMessage[];
 }
 
@@ -207,10 +212,13 @@ export async function executeRound(
   config: EngineConfig,
   input: DeliberateInput,
 ): Promise<Round> {
+  const roundInfo: RoundInfo = { current: roundNumber, max: config.maxRounds };
+
   // 1. Producer
   const producerMessages = deps.buildProducerMessages(
     ctx,
     input.producerInstructions,
+    roundInfo,
   );
   const producerResponse = await deps.chat(
     ctx.team.producer.model,
@@ -229,7 +237,7 @@ export async function executeRound(
   };
   const reviewerPromises = ctx.team.reviewers.map(async (reviewer) => {
     const perspective = reviewer.perspective ?? "general";
-    const messages = deps.buildReviewerMessages(ctxForReviewers, perspective);
+    const messages = deps.buildReviewerMessages(ctxForReviewers, perspective, roundInfo);
     const response = await deps.chat(reviewer.model, messages);
     return parseReview(reviewer.model, perspective, response);
   });
@@ -254,6 +262,7 @@ export async function executeRound(
   const leaderMessages = deps.buildLeaderMessages(
     ctxForLeader,
     input.leaderInstructions,
+    roundInfo,
   );
   const leaderResponse = await deps.chat(
     ctx.team.leader.model,
