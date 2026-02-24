@@ -85,9 +85,9 @@ const KEYWORD_RULES: readonly DomainRules[] = [
       ["DESIGN_REVIEW", ["설계 리뷰", "설계 검토", "design review"]],
       [
         "CODE_REVIEW",
-        ["코드 리뷰", "코드 검토", "code review", "리뷰", "검토"],
+        ["코드 리뷰", "코드 검토", "code review", "리뷰", "검토", "review", "messy", "code quality"],
       ],
-      ["COMPARISON", ["비교", "compare", "comparison"]],
+      ["COMPARISON", ["비교", "compare", "comparison", "pros and cons"]],
       ["CRITIQUE", ["비평", "비판", "critique"]],
       [
         "STANDARDS_COMPLIANCE",
@@ -251,7 +251,7 @@ const KEYWORD_RULES: readonly DomainRules[] = [
       ["CONFLICT_DETECTION", ["요구 충돌", "conflict"]],
       [
         "ACCEPTANCE_CRITERIA",
-        ["인수 조건", "acceptance criteria", "요구사항", "스펙"],
+        ["인수 조건", "acceptance criteria", "요구사항", "스펙", "want", "need"],
       ],
     ],
   ],

@@ -45,7 +45,7 @@ async function main(): Promise<void> {
     llmClient,
     registry,
     reporter,
-    routeFn: route,
+    routeFn: (prompt, budget, hints) => route(prompt, budget, undefined, hints),
     summaryFn: () => reporter.summary(),
     deliberateFn,
     deliberationStore,

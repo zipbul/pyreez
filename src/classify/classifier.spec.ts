@@ -566,4 +566,33 @@ describe("classifyByRules", () => {
     expect(result!.domain).toBe("CODING");
     expect(result!.taskType).toBe("IMPLEMENT_FEATURE");
   });
+
+  // -- Additional English keyword coverage --
+
+  it('should classify "Review this code for bugs" as REVIEW/CODE_REVIEW', () => {
+    const result = classifyByRules("Review this code for bugs");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("REVIEW");
+    expect(result!.taskType).toBe("CODE_REVIEW");
+  });
+
+  it('should classify "the codebase is messy" as REVIEW/CODE_REVIEW', () => {
+    const result = classifyByRules("the codebase is messy and needs cleanup");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("REVIEW");
+    expect(result!.taskType).toBe("CODE_REVIEW");
+  });
+
+  it('should classify "the client wants a simple tool" as REQUIREMENTS', () => {
+    const result = classifyByRules("the client wants a simple tool for the team");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("REQUIREMENTS");
+  });
+
+  it('should classify "compare pros and cons" as REVIEW/COMPARISON', () => {
+    const result = classifyByRules("compare the pros and cons of SQLite vs PostgreSQL");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("REVIEW");
+    expect(result!.taskType).toBe("COMPARISON");
+  });
 });
