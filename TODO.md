@@ -13,9 +13,9 @@
 ## P1 — 데이터 품질
 
 - [x] 벤치마크 자동화 — 수동 점수 입력 → 자동 측정 파이프라인
-- [ ] 프로파일러 한국어 토큰 팽창 실측 보정
+- [x] 프로파일러 비라틴 토큰 팽창 보정 (koreanRatio → nonLatinRatio 일반화)
 
 ## P2 — 숙의 품질 개선
 
 - [x] 숙의 합의 도달률 개선 — 프롬프트/라운드 전략 조정 (현재 3건 중 1건만 합의)
-- [ ] rate limit 재시도 전략 강화 (DeepSeek 등 외부 API)
+- [x] rate limit 재시도 전략 강화 (RetryEvent + onRetry 텔레메트리, retryableStatuses DI)
