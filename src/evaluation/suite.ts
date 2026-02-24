@@ -16,7 +16,8 @@ import type {
 } from "./types";
 import type { CapabilityDimension } from "../model/types";
 import { PromptRegistry } from "./prompts";
-import { runMatrix } from "./runner";
+import { runMatrix as defaultRunMatrix } from "./runner";
+import type { ProgressCallback } from "./runner";
 import { anchorPairings, runPairwise } from "./pairwise";
 import {
   batchUpdate,
@@ -30,12 +31,21 @@ import {
  * 2. Run pairwise comparisons (each model vs anchor)
  * 3. Update BT ratings
  */
+export type RunMatrixFn = (
+  runner: ModelRunner,
+  prompts: EvalPrompt[],
+  modelIds: string[],
+  concurrency?: number,
+  onProgress?: ProgressCallback,
+) => Promise<EvalResponse[]>;
+
 export async function runEvalSuite(
   registry: PromptRegistry,
   runner: ModelRunner,
   judge: PairwiseJudge,
   config: EvalSuiteConfig,
   ratings: RatingsMap,
+  _runMatrix: RunMatrixFn = defaultRunMatrix,
 ): Promise<EvalSuiteResult> {
   // 1. Select prompts
   const prompts = registry.query({
@@ -51,7 +61,7 @@ export async function runEvalSuite(
   const allModelIds = [
     ...new Set([config.anchorModelId, ...config.modelIds]),
   ];
-  const responses = await runMatrix(
+  const responses = await _runMatrix(
     runner,
     prompts,
     allModelIds,

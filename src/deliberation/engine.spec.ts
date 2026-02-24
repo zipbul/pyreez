@@ -9,11 +9,14 @@ import {
   parseSynthesis,
   executeRound,
   deliberate,
+  RoundExecutionError,
   type EngineDeps,
   type EngineConfig,
+  type RetryDeps,
 } from "./engine";
 import type { ChatMessage } from "../llm/types";
 import type { TeamComposition, DeliberateInput } from "./types";
+import { createCooldownManager } from "./cooldown";
 
 // -- Fixtures --
 
@@ -1047,5 +1050,330 @@ describe("deliberate", () => {
       // Assert
       expect(result.content).toBe("hello");
     });
+  });
+});
+
+// ================================================================
+// RoundExecutionError — producer/leader identification
+// ================================================================
+
+describe("RoundExecutionError", () => {
+  it("should throw RoundExecutionError with producer role on producer chat failure", async () => {
+    // Arrange — producer chat throws, reviewers and leader would succeed
+    const chat = mock(async (model: string) => {
+      if (model === "producer/model") throw new Error("rate limit");
+      return PRODUCTION_JSON;
+    });
+    const team = makeTeam(2);
+    const input = makeInput();
+
+    // Act & Assert
+    try {
+      await executeRound(
+        { task: input.task, team, rounds: [] },
+        1,
+        makeDeps({ chat }),
+        { maxRounds: 3, consensus: "leader_decides" },
+        input,
+      );
+      expect(true).toBe(false); // should not reach here
+    } catch (error) {
+      expect(error).toBeInstanceOf(RoundExecutionError);
+      expect((error as RoundExecutionError).role).toBe("producer");
+      expect((error as RoundExecutionError).modelId).toBe("producer/model");
+    }
+  });
+
+  it("should throw RoundExecutionError with leader role on leader chat failure", async () => {
+    // Arrange — producer + reviewers succeed, leader throws
+    let callCount = 0;
+    const chat = mock(async (model: string) => {
+      callCount++;
+      if (model === "leader/model") throw new Error("timeout");
+      // Producer call
+      if (callCount === 1) return PRODUCTION_JSON;
+      // Reviewer calls
+      return REVIEW_APPROVE_JSON;
+    });
+    const team = makeTeam(2);
+    const input = makeInput();
+
+    // Act & Assert
+    try {
+      await executeRound(
+        { task: input.task, team, rounds: [] },
+        1,
+        makeDeps({ chat }),
+        { maxRounds: 3, consensus: "leader_decides" },
+        input,
+      );
+      expect(true).toBe(false);
+    } catch (error) {
+      expect(error).toBeInstanceOf(RoundExecutionError);
+      expect((error as RoundExecutionError).role).toBe("leader");
+      expect((error as RoundExecutionError).modelId).toBe("leader/model");
+    }
+  });
+});
+
+// ================================================================
+// deliberate — retry with recomposition
+// ================================================================
+
+describe("deliberate retry", () => {
+  // Helper: model info factory for retry deps
+  function makeModelInfo(id: string) {
+    return {
+      id,
+      name: id,
+      contextWindow: 100_000,
+      capabilities: {
+        REASONING: { mu: 800, sigma: 350, comparisons: 0 },
+        MATH_REASONING: { mu: 800, sigma: 350, comparisons: 0 },
+        MULTI_STEP_DEPTH: { mu: 800, sigma: 350, comparisons: 0 },
+        CREATIVITY: { mu: 800, sigma: 350, comparisons: 0 },
+        ANALYSIS: { mu: 800, sigma: 350, comparisons: 0 },
+        JUDGMENT: { mu: 800, sigma: 350, comparisons: 0 },
+        CODE_GENERATION: { mu: 800, sigma: 350, comparisons: 0 },
+        CODE_UNDERSTANDING: { mu: 800, sigma: 350, comparisons: 0 },
+        DEBUGGING: { mu: 800, sigma: 350, comparisons: 0 },
+        SYSTEM_THINKING: { mu: 800, sigma: 350, comparisons: 0 },
+        TOOL_USE: { mu: 800, sigma: 350, comparisons: 0 },
+        HALLUCINATION_RESISTANCE: { mu: 800, sigma: 350, comparisons: 0 },
+        CONFIDENCE_CALIBRATION: { mu: 800, sigma: 350, comparisons: 0 },
+        SELF_CONSISTENCY: { mu: 800, sigma: 350, comparisons: 0 },
+        AMBIGUITY_HANDLING: { mu: 800, sigma: 350, comparisons: 0 },
+        INSTRUCTION_FOLLOWING: { mu: 800, sigma: 350, comparisons: 0 },
+        STRUCTURED_OUTPUT: { mu: 800, sigma: 350, comparisons: 0 },
+        LONG_CONTEXT: { mu: 800, sigma: 350, comparisons: 0 },
+        MULTILINGUAL: { mu: 800, sigma: 350, comparisons: 0 },
+        SPEED: { mu: 800, sigma: 350, comparisons: 0 },
+        COST_EFFICIENCY: { mu: 800, sigma: 350, comparisons: 0 },
+      },
+      confidence: {},
+      cost: { inputPer1M: 1, outputPer1M: 2 },
+      supportsToolCalling: true,
+    } as any;
+  }
+
+  function makeRetryDeps(modelIds: string[]): RetryDeps {
+    return {
+      cooldown: createCooldownManager(60_000),
+      getModels: () => modelIds.map(makeModelInfo),
+    };
+  }
+
+  it("should retry with replacement when producer fails", async () => {
+    // Arrange — producer fails first, replacement model succeeds
+    const failedModel = "producer/bad";
+    const replacementModel = "producer/good";
+    let producerCallCount = 0;
+    const chat = mock(async (model: string) => {
+      if (model === failedModel) {
+        producerCallCount++;
+        throw new Error("rate limit");
+      }
+      if (model === replacementModel) return PRODUCTION_JSON;
+      if (model.startsWith("reviewer/")) return REVIEW_APPROVE_JSON;
+      if (model === "leader/model") return SYNTHESIS_APPROVE_JSON;
+      return "{}";
+    });
+
+    const team: TeamComposition = {
+      producer: { model: failedModel, role: "producer" },
+      reviewers: [
+        { model: "reviewer/model-0", role: "reviewer", perspective: "quality" },
+        { model: "reviewer/model-1", role: "reviewer", perspective: "security" },
+      ],
+      leader: { model: "leader/model", role: "leader" },
+    };
+
+    const result = await deliberate(
+      team,
+      makeInput(),
+      makeDeps({ chat }),
+      { maxRounds: 1, consensus: "leader_decides" },
+      makeRetryDeps([replacementModel, "reviewer/model-0", "reviewer/model-1", "leader/model"]),
+    );
+
+    expect(result.roundsExecuted).toBe(1);
+    expect(result.consensusReached).toBe(true);
+    expect(producerCallCount).toBe(1); // failed once, then replaced
+  });
+
+  it("should retry with replacement when leader fails", async () => {
+    // Arrange — leader fails, replacement model succeeds
+    const failedLeader = "leader/bad";
+    const replacementLeader = "leader/good";
+    const chat = mock(async (model: string) => {
+      if (model === failedLeader) throw new Error("timeout");
+      if (model === replacementLeader) return SYNTHESIS_APPROVE_JSON;
+      if (model.startsWith("producer/")) return PRODUCTION_JSON;
+      if (model.startsWith("reviewer/")) return REVIEW_APPROVE_JSON;
+      return "{}";
+    });
+
+    const team: TeamComposition = {
+      producer: { model: "producer/model", role: "producer" },
+      reviewers: [
+        { model: "reviewer/model-0", role: "reviewer", perspective: "quality" },
+        { model: "reviewer/model-1", role: "reviewer", perspective: "security" },
+      ],
+      leader: { model: failedLeader, role: "leader" },
+    };
+
+    const result = await deliberate(
+      team,
+      makeInput(),
+      makeDeps({ chat }),
+      { maxRounds: 1, consensus: "leader_decides" },
+      makeRetryDeps(["producer/model", "reviewer/model-0", "reviewer/model-1", replacementLeader]),
+    );
+
+    expect(result.roundsExecuted).toBe(1);
+    expect(result.consensusReached).toBe(true);
+  });
+
+  it("should execute normally when retryDeps provided but no failure occurs", async () => {
+    // Arrange — all succeed
+    const chat = chatSequence([
+      PRODUCTION_JSON,
+      REVIEW_APPROVE_JSON,
+      REVIEW_APPROVE_JSON,
+      SYNTHESIS_APPROVE_JSON,
+    ]);
+    const team = makeTeam(2);
+
+    const result = await deliberate(
+      team,
+      makeInput(),
+      makeDeps({ chat }),
+      { maxRounds: 3, consensus: "leader_decides" },
+      makeRetryDeps(["producer/model", "reviewer/model-0", "reviewer/model-1", "leader/model"]),
+    );
+
+    expect(result.roundsExecuted).toBe(1);
+    expect(result.consensusReached).toBe(true);
+  });
+
+  it("should propagate error when producer fails and no replacement available", async () => {
+    // Arrange — producer fails, only the same model available (already cooled down)
+    const chat = mock(async (model: string) => {
+      if (model === "producer/model") throw new Error("rate limit");
+      return PRODUCTION_JSON;
+    });
+    const team = makeTeam(2);
+
+    // Only the failed model in pool → no replacement
+    await expect(
+      deliberate(
+        team,
+        makeInput(),
+        makeDeps({ chat }),
+        { maxRounds: 1, consensus: "leader_decides" },
+        makeRetryDeps(["producer/model"]),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("should propagate error when retryDeps not provided and producer fails", async () => {
+    // Arrange — no retry deps, error propagates as before
+    const chat = mock(async (model: string) => {
+      if (model === "producer/model") throw new Error("rate limit");
+      return PRODUCTION_JSON;
+    });
+
+    await expect(
+      deliberate(
+        makeTeam(2),
+        makeInput(),
+        makeDeps({ chat }),
+        { maxRounds: 1, consensus: "leader_decides" },
+      ),
+    ).rejects.toThrow("rate limit");
+  });
+
+  it("should propagate error when leader fails and no replacement available", async () => {
+    // Arrange — leader fails, only same model in pool
+    let callCount = 0;
+    const chat = mock(async (model: string) => {
+      callCount++;
+      if (model === "leader/model") throw new Error("timeout");
+      if (callCount === 1) return PRODUCTION_JSON;
+      return REVIEW_APPROVE_JSON;
+    });
+
+    await expect(
+      deliberate(
+        makeTeam(2),
+        makeInput(),
+        makeDeps({ chat }),
+        { maxRounds: 1, consensus: "leader_decides" },
+        makeRetryDeps(["producer/model", "reviewer/model-0", "reviewer/model-1", "leader/model"]),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("should cooldown failed model preventing reselection", async () => {
+    // Arrange — producer fails, retryDeps has the failed model + a replacement
+    const failedModel = "producer/bad";
+    const replacementModel = "producer/good";
+    const retryDeps = makeRetryDeps([failedModel, replacementModel, "reviewer/model-0", "reviewer/model-1", "leader/model"]);
+
+    const chat = mock(async (model: string) => {
+      if (model === failedModel) throw new Error("rate limit");
+      if (model === replacementModel) return PRODUCTION_JSON;
+      if (model.startsWith("reviewer/")) return REVIEW_APPROVE_JSON;
+      return SYNTHESIS_APPROVE_JSON;
+    });
+
+    const team: TeamComposition = {
+      producer: { model: failedModel, role: "producer" },
+      reviewers: [
+        { model: "reviewer/model-0", role: "reviewer", perspective: "quality" },
+        { model: "reviewer/model-1", role: "reviewer", perspective: "security" },
+      ],
+      leader: { model: "leader/model", role: "leader" },
+    };
+
+    await deliberate(
+      team,
+      makeInput(),
+      makeDeps({ chat }),
+      { maxRounds: 1, consensus: "leader_decides" },
+      retryDeps,
+    );
+
+    // Assert — failed model should be on cooldown
+    expect(retryDeps.cooldown.isOnCooldown(failedModel)).toBe(true);
+    expect(retryDeps.cooldown.isOnCooldown(replacementModel)).toBe(false);
+  });
+
+  it("should propagate error when replacement also fails at max retries", async () => {
+    // Arrange — producer fails, replacement also fails
+    const chat = mock(async (model: string) => {
+      if (model.startsWith("producer/")) throw new Error("all producers down");
+      if (model.startsWith("reviewer/")) return REVIEW_APPROVE_JSON;
+      return SYNTHESIS_APPROVE_JSON;
+    });
+
+    const team: TeamComposition = {
+      producer: { model: "producer/bad1", role: "producer" },
+      reviewers: [
+        { model: "reviewer/model-0", role: "reviewer", perspective: "quality" },
+        { model: "reviewer/model-1", role: "reviewer", perspective: "security" },
+      ],
+      leader: { model: "leader/model", role: "leader" },
+    };
+
+    await expect(
+      deliberate(
+        team,
+        makeInput(),
+        makeDeps({ chat }),
+        { maxRounds: 1, consensus: "leader_decides" },
+        makeRetryDeps(["producer/bad1", "producer/bad2", "reviewer/model-0", "reviewer/model-1", "leader/model"]),
+      ),
+    ).rejects.toThrow();
   });
 });

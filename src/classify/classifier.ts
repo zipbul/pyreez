@@ -55,7 +55,7 @@ const KEYWORD_RULES: readonly DomainRules[] = [
       ["ROOT_CAUSE", ["원인 분석", "root cause", "근본 원인", "에러 원인"]],
       [
         "ERROR_DIAGNOSIS",
-        ["에러 분석", "에러 진단", "error diagnosis", "오류 분석"],
+        ["에러 분석", "에러 진단", "error diagnosis", "오류 분석", "troubleshoot"],
       ],
       ["LOG_ANALYSIS", ["로그 분석", "log analysis"]],
       ["REPRODUCTION", ["재현", "reproduce", "reproduction"]],
@@ -102,7 +102,7 @@ const KEYWORD_RULES: readonly DomainRules[] = [
     [
       [
         "SYSTEM_DESIGN",
-        ["시스템 설계", "system design", "아키텍처 설계", "아키텍처"],
+        ["시스템 설계", "system design", "아키텍처 설계", "아키텍처", "design"],
       ],
       ["MODULE_DESIGN", ["모듈 설계", "module design", "컴포넌트 설계"]],
       [
@@ -174,6 +174,11 @@ const KEYWORD_RULES: readonly DomainRules[] = [
           "만들어",
           "개발",
           "기능",
+          "write",
+          "build",
+          "generate",
+          "develop",
+          "parse",
         ],
       ],
     ],
@@ -200,7 +205,7 @@ const KEYWORD_RULES: readonly DomainRules[] = [
     [
       ["DEPLOY_PLAN", ["배포", "deploy", "deployment"]],
       ["CI_CD_CONFIG", ["ci/cd", "cicd", "ci cd", "파이프라인"]],
-      ["ENVIRONMENT_SETUP", ["환경 설정", "environment setup"]],
+      ["ENVIRONMENT_SETUP", ["환경 설정", "environment setup", "set up", "setup", "configure"]],
       ["MONITORING_SETUP", ["모니터링", "monitoring"]],
       ["INCIDENT_RESPONSE", ["장애 대응", "incident", "사고 대응"]],
     ],
@@ -255,7 +260,7 @@ const KEYWORD_RULES: readonly DomainRules[] = [
   [
     "DOCUMENTATION",
     [
-      ["API_DOC", ["api 문서", "api doc", "api documentation"]],
+      ["API_DOC", ["api 문서", "api doc", "api documentation", "document"]],
       ["TUTORIAL", ["튜토리얼", "tutorial", "가이드", "guide"]],
       ["COMMENT_WRITE", ["주석", "comment"]],
       ["CHANGELOG", ["변경 로그", "changelog", "릴리즈 노트"]],
@@ -278,7 +283,7 @@ const KEYWORD_RULES: readonly DomainRules[] = [
       ["TREND_ANALYSIS", ["트렌드", "trend"]],
       [
         "TECH_RESEARCH",
-        ["리서치", "조사", "research", "기술 조사"],
+        ["리서치", "조사", "research", "기술 조사", "investigate", "explore", "analyze"],
       ],
     ],
   ],

@@ -163,8 +163,8 @@ export interface ClassifyResult {
   taskType: TaskType;
   complexity: Complexity;
   criticality: Criticality;
-  /** "rule" if classified by keyword rules, "llm" if LLM fallback was used. */
-  method: "rule" | "llm";
+  /** "rule" if classified by keyword rules, "llm" if LLM fallback was used, "hint" if host agent provided domain_hint. */
+  method: "rule" | "llm" | "hint";
 }
 
 // -- Domain ↔ TaskType mapping --

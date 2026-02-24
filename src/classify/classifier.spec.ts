@@ -452,4 +452,118 @@ describe("classifyByRules", () => {
     expect(result).not.toBeNull();
     expect(result!.criticality).toBe("critical");
   });
+
+  // -- English keyword expansion --
+
+  it('should classify "write a function" as CODING/IMPLEMENT_FEATURE', () => {
+    const result = classifyByRules("write a function");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("CODING");
+    expect(result!.taskType).toBe("IMPLEMENT_FEATURE");
+  });
+
+  it('should classify "build a REST API" as CODING/IMPLEMENT_FEATURE', () => {
+    const result = classifyByRules("build a REST API");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("CODING");
+    expect(result!.taskType).toBe("IMPLEMENT_FEATURE");
+  });
+
+  it('should classify "generate a report" as CODING/IMPLEMENT_FEATURE', () => {
+    const result = classifyByRules("generate a report");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("CODING");
+    expect(result!.taskType).toBe("IMPLEMENT_FEATURE");
+  });
+
+  it('should classify "develop a CLI tool" as CODING/IMPLEMENT_FEATURE', () => {
+    const result = classifyByRules("develop a CLI tool");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("CODING");
+    expect(result!.taskType).toBe("IMPLEMENT_FEATURE");
+  });
+
+  it('should classify "design a plugin system" as ARCHITECTURE/SYSTEM_DESIGN', () => {
+    const result = classifyByRules("design a plugin system");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("ARCHITECTURE");
+    expect(result!.taskType).toBe("SYSTEM_DESIGN");
+  });
+
+  it('should classify "parse the JSON response" as CODING/IMPLEMENT_FEATURE', () => {
+    const result = classifyByRules("parse the JSON response");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("CODING");
+    expect(result!.taskType).toBe("IMPLEMENT_FEATURE");
+  });
+
+  it('should classify "set up the project" as OPERATIONS/ENVIRONMENT_SETUP', () => {
+    const result = classifyByRules("set up the project");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("OPERATIONS");
+    expect(result!.taskType).toBe("ENVIRONMENT_SETUP");
+  });
+
+  it('should classify "configure the database" as OPERATIONS/ENVIRONMENT_SETUP', () => {
+    const result = classifyByRules("configure the database");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("OPERATIONS");
+    expect(result!.taskType).toBe("ENVIRONMENT_SETUP");
+  });
+
+  it('should classify "investigate the memory leak" as RESEARCH/TECH_RESEARCH', () => {
+    const result = classifyByRules("investigate the memory leak");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("RESEARCH");
+    expect(result!.taskType).toBe("TECH_RESEARCH");
+  });
+
+  it('should classify "explore caching strategies" as RESEARCH/TECH_RESEARCH', () => {
+    const result = classifyByRules("explore caching strategies");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("RESEARCH");
+    expect(result!.taskType).toBe("TECH_RESEARCH");
+  });
+
+  it('should classify "troubleshoot connection errors" as DEBUGGING/ERROR_DIAGNOSIS', () => {
+    const result = classifyByRules("troubleshoot connection errors");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("DEBUGGING");
+    expect(result!.taskType).toBe("ERROR_DIAGNOSIS");
+  });
+
+  it('should classify "document the API endpoints" as DOCUMENTATION/API_DOC', () => {
+    const result = classifyByRules("document the API endpoints");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("DOCUMENTATION");
+    expect(result!.taskType).toBe("API_DOC");
+  });
+
+  it('should classify "analyze the performance data" as RESEARCH/TECH_RESEARCH', () => {
+    const result = classifyByRules("analyze the performance data");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("RESEARCH");
+    expect(result!.taskType).toBe("TECH_RESEARCH");
+  });
+
+  it('should classify "design and write a service" as ARCHITECTURE when both domain keywords present', () => {
+    // Arrange — "design" → ARCHITECTURE, "write" → CODING. ARCHITECTURE before CODING in KEYWORD_RULES.
+    const result = classifyByRules("design and write a service");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("ARCHITECTURE");
+  });
+
+  it('should classify "troubleshoot and build the server" as DEBUGGING when both domain keywords present', () => {
+    // Arrange — "troubleshoot" → DEBUGGING, "build" → CODING. DEBUGGING before CODING in KEYWORD_RULES.
+    const result = classifyByRules("troubleshoot and build the server");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("DEBUGGING");
+  });
+
+  it('should classify "WRITE A CLI TOOL" as CODING case-insensitively', () => {
+    const result = classifyByRules("WRITE A CLI TOOL");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("CODING");
+    expect(result!.taskType).toBe("IMPLEMENT_FEATURE");
+  });
 });

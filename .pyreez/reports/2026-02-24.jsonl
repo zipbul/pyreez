@@ -1,0 +1,2 @@
+{"model":"openai/gpt-4.1-mini","taskType":"IMPLEMENT_FEATURE","quality":8,"latencyMs":1200,"tokens":{"input":150,"output":300}}
+{"model":"openai/gpt-4.1","taskType":"SYSTEM_DESIGN","quality":9,"latencyMs":3500,"tokens":{"input":500,"output":1000},"context":{"windowSize":1048576,"utilization":0.0014}}

@@ -7,10 +7,10 @@ import { classifyByRules } from "../classify/classifier";
 import { profileTask } from "../profile/profiler";
 import { selectModel } from "./selector";
 import { ModelRegistry } from "../model/registry";
-import type { ClassifyResult } from "../classify/types";
+import type { ClassifyResult, TaskDomain, Complexity } from "../classify/types";
 import type { ModelInfo } from "../model/types";
 import type { TaskRequirement } from "../profile/types";
-import type { BudgetConfig, SelectResult, FallbackSelectResult } from "./types";
+import type { BudgetConfig, SelectResult, FallbackSelectResult, RouteHints } from "./types";
 
 /**
  * Complete route result including all pipeline phases.
@@ -47,18 +47,55 @@ function defaultDeps(): RouteDeps {
   };
 }
 
+/** Default task types per domain — used when domain_hint provides domain without specific taskType. */
+const DEFAULT_DOMAIN_TASK_TYPE: Record<TaskDomain, string> = {
+  IDEATION: "BRAINSTORM",
+  PLANNING: "GOAL_DEFINITION",
+  REQUIREMENTS: "ACCEPTANCE_CRITERIA",
+  ARCHITECTURE: "SYSTEM_DESIGN",
+  CODING: "IMPLEMENT_FEATURE",
+  TESTING: "UNIT_TEST_WRITE",
+  REVIEW: "CODE_REVIEW",
+  DOCUMENTATION: "API_DOC",
+  DEBUGGING: "FIX_IMPLEMENT",
+  OPERATIONS: "DEPLOY_PLAN",
+  RESEARCH: "TECH_RESEARCH",
+  COMMUNICATION: "EXPLAIN",
+};
+
 /**
  * Route a user prompt through the full pipeline.
  * Returns null if the prompt cannot be classified (LLM fallback needed).
+ *
+ * When hints are provided:
+ * - domain_hint bypasses keyword classification entirely.
+ * - complexity_hint overrides the estimated complexity.
  */
 export function route(
   prompt: string,
   budget?: BudgetConfig,
   deps: RouteDeps = defaultDeps(),
+  hints?: RouteHints,
 ): RouteResult | null {
-  // Phase 1: CLASSIFY
-  const classification = deps.classify(prompt);
-  if (!classification) return null;
+  // Phase 1: CLASSIFY (with hint support)
+  let classification: ClassifyResult | null;
+
+  if (hints?.domain_hint) {
+    classification = {
+      domain: hints.domain_hint,
+      taskType: DEFAULT_DOMAIN_TASK_TYPE[hints.domain_hint] as any,
+      complexity: hints.complexity_hint ?? "moderate",
+      criticality: "medium",
+      method: "hint" as any,
+    };
+  } else {
+    classification = deps.classify(prompt);
+    if (!classification) return null;
+
+    if (hints?.complexity_hint) {
+      classification = { ...classification, complexity: hints.complexity_hint };
+    }
+  }
 
   // Phase 3: PROFILE
   const requirement = deps.profile(classification, prompt);

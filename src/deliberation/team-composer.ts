@@ -35,14 +35,14 @@ interface WeightedDimension {
   weight: number;
 }
 
-const PRODUCER_DIMS: WeightedDimension[] = [
+export const PRODUCER_DIMS: WeightedDimension[] = [
   { dimension: "CODE_GENERATION", weight: 0.35 },
   { dimension: "CREATIVITY", weight: 0.25 },
   { dimension: "REASONING", weight: 0.2 },
   { dimension: "INSTRUCTION_FOLLOWING", weight: 0.2 },
 ];
 
-const LEADER_DIMS: WeightedDimension[] = [
+export const LEADER_DIMS: WeightedDimension[] = [
   { dimension: "JUDGMENT", weight: 0.4 },
   { dimension: "ANALYSIS", weight: 0.3 },
   { dimension: "REASONING", weight: 0.2 },

@@ -130,7 +130,7 @@ const DEFAULT_ROUTE_RESULT: RouteResult = {
 function stubRouteFn(
   result?: RouteResult | null,
   error?: unknown,
-): (prompt: string, budget?: BudgetConfig) => RouteResult | null {
+): (prompt: string, budget?: BudgetConfig, hints?: import("../router/types").RouteHints) => RouteResult | null {
   if (error !== undefined) {
     return mock(() => {
       throw error;
@@ -262,7 +262,7 @@ describe("PyreezMcpServer", () => {
 
       await server.handleRoute({ task: "do something", budget: 0.5 });
 
-      expect(routeFn).toHaveBeenCalledWith("do something", { perRequest: 0.5 });
+      expect(routeFn).toHaveBeenCalledWith("do something", { perRequest: 0.5 }, { domain_hint: undefined, complexity_hint: undefined });
     });
 
     it("should return error when task is empty", async () => {
@@ -307,6 +307,32 @@ describe("PyreezMcpServer", () => {
       expect(result.isError).toBe(true);
       expect((result.content[0] as { text: string }).text).toContain(
         "raw string failure",
+      );
+    });
+
+    it("should forward domain_hint to routeFn when provided", async () => {
+      const routeFn = stubRouteFn();
+      const server = new PyreezMcpServer(validConfig({ routeFn }));
+
+      await server.handleRoute({ task: "build something", domain_hint: "CODING" });
+
+      expect(routeFn).toHaveBeenCalledWith(
+        "build something",
+        { perRequest: 1.0 },
+        { domain_hint: "CODING", complexity_hint: undefined },
+      );
+    });
+
+    it("should forward complexity_hint to routeFn when provided", async () => {
+      const routeFn = stubRouteFn();
+      const server = new PyreezMcpServer(validConfig({ routeFn }));
+
+      await server.handleRoute({ task: "hard task", complexity_hint: "complex" });
+
+      expect(routeFn).toHaveBeenCalledWith(
+        "hard task",
+        { perRequest: 1.0 },
+        { domain_hint: undefined, complexity_hint: "complex" },
       );
     });
   });

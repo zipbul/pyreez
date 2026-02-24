@@ -35,7 +35,7 @@ export interface PyreezMcpServerConfig {
   llmClient: LLMClient;
   registry: ModelRegistry;
   reporter: Reporter;
-  routeFn: (prompt: string, budget?: BudgetConfig) => RouteResult | null;
+  routeFn: (prompt: string, budget?: BudgetConfig, hints?: import("../router/types").RouteHints) => RouteResult | null;
   summaryFn?: () => Promise<import("../report/types").ReportSummary>;
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
   deliberationStore?: DeliberationStore;
@@ -104,6 +104,18 @@ export class PyreezMcpServer {
             .number()
             .optional()
             .describe("Max cost per request in USD (default: 1.0)"),
+          domain_hint: z
+            .string()
+            .optional()
+            .describe(
+              "Domain hint from host agent (e.g., CODING, ARCHITECTURE, TESTING). Bypasses keyword classification.",
+            ),
+          complexity_hint: z
+            .string()
+            .optional()
+            .describe(
+              'Complexity hint from host agent ("simple", "moderate", "complex"). Overrides estimated complexity.',
+            ),
         }),
       },
       async (args) => this.handleRoute(args),
@@ -386,6 +398,8 @@ export class PyreezMcpServer {
   async handleRoute(args: {
     task: string;
     budget?: number;
+    domain_hint?: string;
+    complexity_hint?: string;
   }): Promise<CallToolResult> {
     return this.logRun("route", async () => {
     if (!args.task) {
@@ -396,7 +410,11 @@ export class PyreezMcpServer {
       const budget: BudgetConfig = {
         perRequest: args.budget ?? DEFAULT_BUDGET.perRequest,
       };
-      const result = this.routeFn(args.task, budget);
+      const hints = {
+        domain_hint: args.domain_hint as any,
+        complexity_hint: args.complexity_hint as any,
+      };
+      const result = this.routeFn(args.task, budget, hints);
 
       if (!result) {
         return this.errorResult(

@@ -5,12 +5,14 @@
  *   parseProduction, parseReview, parseSynthesis — LLM JSON response parsers
  *   executeRound — single round execution (producer → reviewers → leader)
  *   deliberate — multi-round loop with consensus check
+ *   RoundExecutionError — identifies which role failed during a round
  *
  * DI: all LLM calls and prompt building injected via EngineDeps.
  * @module Deliberation Engine
  */
 
 import type { ChatMessage } from "../llm/types";
+import type { ModelInfo } from "../model/types";
 import type {
   ConsensusMode,
   DeliberateInput,
@@ -28,10 +30,39 @@ import {
   totalLLMCalls,
   modelsUsed,
 } from "./shared-context";
+import { selectTopModel, PRODUCER_DIMS, LEADER_DIMS } from "./team-composer";
+import type { CooldownManager } from "./cooldown";
 
 import type { RoundInfo } from "./prompts";
 
 // -- Public Interfaces --
+
+/**
+ * Error thrown by executeRound when a specific role's LLM call fails.
+ * Identifies the role (producer/leader) and model that caused the failure.
+ */
+export class RoundExecutionError extends Error {
+  constructor(
+    public readonly role: "producer" | "leader",
+    public readonly modelId: string,
+    public readonly cause: unknown,
+  ) {
+    super(
+      `${role} (${modelId}) failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    this.name = "RoundExecutionError";
+  }
+}
+
+/**
+ * Optional retry dependencies for automatic team recomposition on failure.
+ * When provided, deliberate() will attempt to replace failed models.
+ */
+export interface RetryDeps {
+  readonly cooldown: CooldownManager;
+  readonly getModels: () => ModelInfo[];
+  readonly maxRetries?: number;
+}
 
 /**
  * Dependency injection for the engine.
@@ -220,10 +251,15 @@ export async function executeRound(
     input.producerInstructions,
     roundInfo,
   );
-  const producerResponse = await deps.chat(
-    ctx.team.producer.model,
-    producerMessages,
-  );
+  let producerResponse: string;
+  try {
+    producerResponse = await deps.chat(
+      ctx.team.producer.model,
+      producerMessages,
+    );
+  } catch (error) {
+    throw new RoundExecutionError("producer", ctx.team.producer.model, error);
+  }
   const production = parseProduction(ctx.team.producer.model, producerResponse);
 
   // 2. Reviewers — parallel, partial failure tolerated
@@ -264,10 +300,15 @@ export async function executeRound(
     input.leaderInstructions,
     roundInfo,
   );
-  const leaderResponse = await deps.chat(
-    ctx.team.leader.model,
-    leaderMessages,
-  );
+  let leaderResponse: string;
+  try {
+    leaderResponse = await deps.chat(
+      ctx.team.leader.model,
+      leaderMessages,
+    );
+  } catch (error) {
+    throw new RoundExecutionError("leader", ctx.team.leader.model, error);
+  }
   const synthesis = parseSynthesis(ctx.team.leader.model, leaderResponse);
 
   return { number: roundNumber, production, reviews, synthesis };
@@ -282,28 +323,100 @@ export async function executeRound(
  * @param input - Task, perspectives, optional instructions.
  * @param deps - Injected LLM chat + prompt builders.
  * @param config - Optional engine config (defaults: maxRounds=3, leader_decides).
+ * @param retryDeps - Optional retry dependencies for automatic recomposition on failure.
  */
 export async function deliberate(
   team: TeamComposition,
   input: DeliberateInput,
   deps: EngineDeps,
   config?: EngineConfig,
+  retryDeps?: RetryDeps,
 ): Promise<DeliberateOutput> {
   const cfg = config ?? DEFAULT_CONFIG;
-  let ctx = createSharedContext(input.task, team);
+  const maxRetries = retryDeps?.maxRetries ?? 1;
+  let currentTeam = team;
+  let ctx = createSharedContext(input.task, currentTeam);
   let consensusReached = false;
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
-    const round = await executeRound(ctx, i, deps, cfg, input);
-    ctx = addRound(ctx, round);
+    let round: Round;
+
+    try {
+      round = await executeRound(ctx, i, deps, cfg, input);
+    } catch (error) {
+      if (retryDeps && error instanceof RoundExecutionError) {
+        // Cooldown the failed model
+        retryDeps.cooldown.add(error.modelId, error.message);
+        const cooledIds = retryDeps.cooldown.getCooledDownIds();
+
+        // Also exclude current team members to avoid role overlap
+        const teamMemberIds = new Set<string>([
+          ...cooledIds,
+          currentTeam.producer.model,
+          ...currentTeam.reviewers.map((r) => r.model),
+          currentTeam.leader.model,
+        ]);
+
+        let retried = false;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          if (error.role === "producer") {
+            const replacement = selectTopModel(
+              retryDeps.getModels(),
+              PRODUCER_DIMS,
+              teamMemberIds,
+            );
+            if (!replacement) break;
+            currentTeam = {
+              ...currentTeam,
+              producer: { model: replacement.id, role: "producer" },
+            };
+          } else {
+            const replacement = selectTopModel(
+              retryDeps.getModels(),
+              LEADER_DIMS,
+              teamMemberIds,
+            );
+            if (!replacement) break;
+            currentTeam = {
+              ...currentTeam,
+              leader: { model: replacement.id, role: "leader" },
+            };
+          }
+
+          // Rebuild context with updated team, preserving previous rounds
+          const previousRounds = [...ctx.rounds];
+          ctx = createSharedContext(input.task, currentTeam);
+          for (const prevRound of previousRounds) {
+            ctx = addRound(ctx, prevRound);
+          }
+
+          try {
+            round = await executeRound(ctx, i, deps, cfg, input);
+            retried = true;
+            break;
+          } catch (retryError) {
+            if (retryError instanceof RoundExecutionError) {
+              retryDeps.cooldown.add(retryError.modelId, retryError.message);
+            }
+            // Continue retry loop or fall through
+          }
+        }
+
+        if (!retried) throw error;
+      } else {
+        throw error;
+      }
+    }
+
+    ctx = addRound(ctx, round!);
 
     // Escalate — immediate stop, no consensus
-    if (round.synthesis?.decision === "escalate") {
+    if (round!.synthesis?.decision === "escalate") {
       break;
     }
 
     // Consensus check
-    if (checkConsensus(round, cfg.consensus)) {
+    if (checkConsensus(round!, cfg.consensus)) {
       consensusReached = true;
       break;
     }

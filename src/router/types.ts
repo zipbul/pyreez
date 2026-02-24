@@ -3,6 +3,18 @@
  */
 
 import type { ModelInfo } from "../model/types";
+import type { Complexity, TaskDomain } from "../classify/types";
+
+/**
+ * Optional hints from the host agent to assist routing.
+ * When provided, hints override or supplement the keyword classifier.
+ */
+export interface RouteHints {
+  /** Domain hint — bypasses keyword classification when provided. */
+  domain_hint?: TaskDomain;
+  /** Complexity hint — overrides estimated complexity when provided. */
+  complexity_hint?: Complexity;
+}
 
 /**
  * Budget configuration (USD).

@@ -8,7 +8,7 @@ import { route } from "./router";
 import type { RouteDeps } from "./router";
 import type { ClassifyResult } from "../classify/types";
 import type { TaskRequirement } from "../profile/types";
-import type { SelectResult, FallbackSelectResult, BudgetConfig } from "./types";
+import type { SelectResult, FallbackSelectResult, BudgetConfig, RouteHints } from "./types";
 import type { ModelInfo } from "../model/types";
 
 // -- Stub data --
@@ -196,5 +196,103 @@ describe("route", () => {
 
     // Assert
     expect(result1).toEqual(result2);
+  });
+
+  // -- Hints: domain_hint --
+
+  it("should use domain_hint to create classification when provided", () => {
+    // Arrange — domain_hint bypasses classify
+    const hints: RouteHints = { domain_hint: "CODING" };
+
+    // Act
+    const result = route("some unclassifiable text", undefined, makeDeps(), hints);
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.classification.domain).toBe("CODING");
+    expect(result!.classification.taskType).toBe("IMPLEMENT_FEATURE");
+    expect(result!.classification.method).toBe("hint");
+  });
+
+  it("should use complexity_hint to override complexity", () => {
+    // Arrange — classify returns moderate, but hint says complex
+    const hints: RouteHints = { complexity_hint: "complex" };
+
+    // Act
+    const result = route("함수 구현해줘", undefined, makeDeps(), hints);
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.classification.complexity).toBe("complex");
+  });
+
+  it("should use both domain_hint and complexity_hint together", () => {
+    // Arrange
+    const hints: RouteHints = { domain_hint: "ARCHITECTURE", complexity_hint: "simple" };
+
+    // Act
+    const result = route("random text", undefined, makeDeps(), hints);
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.classification.domain).toBe("ARCHITECTURE");
+    expect(result!.classification.taskType).toBe("SYSTEM_DESIGN");
+    expect(result!.classification.complexity).toBe("simple");
+  });
+
+  it("should succeed with domain_hint when classify returns null", () => {
+    // Arrange — classify returns null, but domain_hint saves it
+    classifyReturnValue = null;
+    const hints: RouteHints = { domain_hint: "TESTING" };
+
+    // Act
+    const result = route("xyzzy foobar", undefined, makeDeps(), hints);
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.classification.domain).toBe("TESTING");
+  });
+
+  it("should still forward budget when hints are provided", () => {
+    // Arrange
+    const hints: RouteHints = { domain_hint: "CODING" };
+    const budget: BudgetConfig = { perRequest: 0.3 };
+
+    // Act
+    route("some task", budget, makeDeps(), hints);
+
+    // Assert
+    expect(capturedBudget).toEqual({ perRequest: 0.3 });
+  });
+
+  it("should behave as before when hints is undefined", () => {
+    // Act
+    const result = route("함수 구현해줘", undefined, makeDeps(), undefined);
+
+    // Assert — same as existing test without hints param
+    expect(result).not.toBeNull();
+    expect(result!.classification).toEqual(stubClassifyResult);
+  });
+
+  it("should behave as before when hints is empty object", () => {
+    // Act
+    const result = route("함수 구현해줘", undefined, makeDeps(), {});
+
+    // Assert — empty hints = no override
+    expect(result).not.toBeNull();
+    expect(result!.classification).toEqual(stubClassifyResult);
+  });
+
+  it("should prefer domain_hint over classify result when both available", () => {
+    // Arrange — classify returns CODING, but hint says ARCHITECTURE
+    classifyReturnValue = stubClassifyResult; // CODING
+    const hints: RouteHints = { domain_hint: "ARCHITECTURE" };
+
+    // Act
+    const result = route("함수 구현해줘", undefined, makeDeps(), hints);
+
+    // Assert — hint wins
+    expect(result).not.toBeNull();
+    expect(result!.classification.domain).toBe("ARCHITECTURE");
   });
 });
