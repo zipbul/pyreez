@@ -61,15 +61,39 @@ type ChatFn = (
  * Retry configuration for the chat adapter.
  */
 export interface ChatAdapterOptions {
-  /** Maximum number of retries on 429. Default: 3. */
+  /** Maximum number of retries on retryable errors. Default: 3. */
   readonly maxRetries?: number;
   /** Base delay in ms for exponential backoff. Default: 1000. */
   readonly baseDelayMs?: number;
+  /** HTTP status codes that trigger retry. Default: [429]. */
+  readonly retryableStatuses?: readonly number[];
+  /** Random function for jitter (0~1). Default: Math.random. Injected for deterministic testing. */
+  readonly randomFn?: () => number;
+  /** Callback invoked on each retryable error. Use for telemetry/event collection. */
+  readonly onRetry?: (event: RetryEvent) => void;
 }
 
-const DEFAULT_ADAPTER_OPTIONS: Required<ChatAdapterOptions> = {
+/**
+ * Event emitted on each retryable error occurrence.
+ */
+export interface RetryEvent {
+  /** HTTP status code that triggered the event. */
+  readonly status: number;
+  /** Retry attempt number (1-based). */
+  readonly attempt: number;
+  /** Delay in ms before next retry (or 0 if willRetry=false). */
+  readonly delayMs: number;
+  /** Model ID that was being called. */
+  readonly model: string;
+  /** Whether a retry will be attempted after this event. */
+  readonly willRetry: boolean;
+}
+
+const DEFAULT_ADAPTER_OPTIONS = {
   maxRetries: 3,
   baseDelayMs: 1000,
+  retryableStatuses: [429] as readonly number[],
+  randomFn: Math.random,
 };
 
 /**
@@ -78,7 +102,8 @@ const DEFAULT_ADAPTER_OPTIONS: Required<ChatAdapterOptions> = {
  *
  * Features:
  *   - Strips `<think>` tags from responses (DeepSeek-R1 support)
- *   - Retries on 429 (rate limit) with exponential backoff
+ *   - Retries on retryable HTTP statuses with exponential backoff + jitter
+ *   - Emits RetryEvent via onRetry callback for telemetry
  */
 export function createChatAdapter(
   chatFn: ChatFn,
@@ -98,15 +123,31 @@ export function createChatAdapter(
       } catch (error) {
         lastError = error;
 
-        // Only retry on 429 rate limit
+        // Retryable error detection
         if (
           error instanceof LLMClientError &&
-          error.status === 429 &&
-          attempt < opts.maxRetries
+          opts.retryableStatuses.includes(error.status)
         ) {
-          const delay = error.retryAfterMs ?? opts.baseDelayMs * 2 ** attempt;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
+          const willRetry = attempt < opts.maxRetries;
+          const baseDelay = willRetry
+            ? (error.retryAfterMs ?? opts.baseDelayMs * 2 ** attempt)
+            : 0;
+          const jitter = willRetry ? 0.5 + opts.randomFn() * 0.5 : 1;
+          const delay = baseDelay * jitter;
+
+          // Emit retry event for telemetry
+          opts.onRetry?.({
+            status: error.status,
+            attempt: attempt + 1,
+            delayMs: delay,
+            model,
+            willRetry,
+          });
+
+          if (willRetry) {
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
         }
 
         throw error;

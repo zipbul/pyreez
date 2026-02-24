@@ -97,7 +97,7 @@ export class PyreezMcpServer {
       {
         title: "Pyreez Route",
         description:
-          "Route a task through CLASSIFY → PROFILE → SELECT pipeline to find the optimal model",
+          "Route a task through CLASSIFY → PROFILE → SELECT pipeline to find the optimal model. Submit task in English.",
         inputSchema: z.object({
           task: z.string().describe("Task description to route"),
           budget: z
@@ -113,7 +113,7 @@ export class PyreezMcpServer {
       "pyreez_ask",
       {
         title: "Pyreez Ask",
-        description: "Send a chat completion request to a specific model",
+        description: "Send a chat completion request to a specific model. Submit messages in English.",
         inputSchema: z.object({
           model: z.string().describe("Model ID (e.g., openai/gpt-4.1)"),
           messages: z
@@ -139,7 +139,7 @@ export class PyreezMcpServer {
       {
         title: "Pyreez Ask Many",
         description:
-          "Send the same chat request to multiple models in parallel",
+          "Send the same chat request to multiple models in parallel. Submit messages in English.",
         inputSchema: z.object({
           models: z
             .array(z.string())
@@ -268,7 +268,7 @@ export class PyreezMcpServer {
       {
         title: "Pyreez Deliberate",
         description:
-          "Run multi-model consensus-based deliberation on a task",
+          "Run multi-model consensus-based deliberation on a task. Submit task and instructions in English.",
         inputSchema: z.object({
           task: z.string().describe("Task to deliberate on"),
           perspectives: z
@@ -311,7 +311,7 @@ export class PyreezMcpServer {
       {
         title: "Pyreez Benchmark",
         description:
-          "Run automated benchmark pipeline: evaluation prompts → pairwise comparison → BT rating update → persist",
+          "Run automated benchmark pipeline: evaluation prompts → pairwise comparison → BT rating update → persist. Submit parameters in English.",
         inputSchema: z.object({
           modelIds: z
             .array(z.string())

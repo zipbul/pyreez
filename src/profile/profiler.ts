@@ -11,6 +11,23 @@ import type { CapabilityRequirement, TaskRequirement } from "./types";
 
 const KOREAN_REGEX = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/;
 
+/** Non-Latin token expansion factor — empirical multiplier for non-Latin text token estimates. */
+export const NON_LATIN_TOKEN_EXPANSION = 1.5;
+
+/** Regex matching non-Latin characters (code point > 0x7F). */
+const NON_LATIN_CHAR_REGEX = /[^\x00-\x7F]/g;
+
+/**
+ * Calculate the ratio of non-Latin characters in a text (0.0 ~ 1.0).
+ * Non-Latin = any character with code point > 0x7F (outside basic ASCII).
+ * Used for proportional token expansion.
+ */
+export function nonLatinRatio(text: string): number {
+  if (text.length === 0) return 0;
+  const matches = text.match(NON_LATIN_CHAR_REGEX);
+  return matches ? matches.length / text.length : 0;
+}
+
 // -- Token estimates by complexity --
 
 interface TokenEstimate {
@@ -262,6 +279,12 @@ export function profileTask(
   // Token estimates from complexity
   const tokens = COMPLEXITY_TOKENS[complexity] ?? COMPLEXITY_TOKENS.moderate!;
 
+  // Non-Latin token expansion — proportional to non-Latin character ratio
+  const ratio = nonLatinRatio(prompt);
+  const factor = ratio > 0 ? 1 + ratio * (NON_LATIN_TOKEN_EXPANSION - 1) : 1;
+  const expandedInput = Math.ceil(tokens.input * factor);
+  const expandedOutput = Math.ceil(tokens.output * factor);
+
   // Flags
   const requiresKorean = KOREAN_REGEX.test(prompt);
   const requiresStructuredOutput = STRUCTURED_OUTPUT_TASKS.has(taskType);
@@ -271,8 +294,8 @@ export function profileTask(
     taskType,
     domain,
     requiredCapabilities: capabilities,
-    estimatedInputTokens: tokens.input,
-    estimatedOutputTokens: tokens.output,
+    estimatedInputTokens: expandedInput,
+    estimatedOutputTokens: expandedOutput,
     requiresStructuredOutput,
     requiresKorean,
     requiresToolCalling,

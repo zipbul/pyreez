@@ -880,7 +880,7 @@ describe("createChatAdapter", () => {
       return Promise.resolve(okResponse("ok"));
     });
     const startTime = Date.now();
-    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1 });
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1, randomFn: () => 1 });
 
     // Act
     await adapter("m", [{ role: "user", content: "hi" }]);
@@ -901,7 +901,7 @@ describe("createChatAdapter", () => {
       return Promise.resolve(okResponse("ok"));
     });
     const startTime = Date.now();
-    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 10 });
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 10, randomFn: () => 1 });
 
     // Act
     await adapter("m", [{ role: "user", content: "hi" }]);
@@ -978,5 +978,354 @@ describe("createChatAdapter", () => {
     // Assert — 1 initial + 3 retries = 4 calls total
     expect(result).toBe("finally");
     expect(chatFn).toHaveBeenCalledTimes(4);
+  });
+
+  // =============================================================
+  // Retry 강화 — 503, jitter, retryableStatuses
+  // =============================================================
+
+  it("should retry on 503 and return result on success", async () => {
+    // Arrange — first call: 503, second call: success
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.reject(new LLMClientError(503, "Service Unavailable"));
+      }
+      return Promise.resolve(okResponse("recovered"));
+    });
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1, retryableStatuses: [429, 503], randomFn: () => 1 });
+
+    // Act
+    const result = await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert
+    expect(result).toBe("recovered");
+    expect(chatFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("should retry on 503 with Retry-After header delay", async () => {
+    // Arrange — 503 with retryAfterMs
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.reject(new LLMClientError(503, "Unavailable", undefined, 50));
+      }
+      return Promise.resolve(okResponse("ok"));
+    });
+    const startTime = Date.now();
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1, retryableStatuses: [429, 503], randomFn: () => 1 });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert — should wait at least ~50ms (retryAfterMs * jitter, jitter=1→factor=1.0)
+    const elapsed = Date.now() - startTime;
+    expect(elapsed).toBeGreaterThanOrEqual(40);
+    expect(chatFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("should retry when 429 and 503 errors alternate", async () => {
+    // Arrange — 429 → 503 → success
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1) return Promise.reject(new LLMClientError(429, "rate limit", "rate_limit_error"));
+      if (callCount === 2) return Promise.reject(new LLMClientError(503, "unavailable"));
+      return Promise.resolve(okResponse("finally"));
+    });
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1, retryableStatuses: [429, 503], randomFn: () => 1 });
+
+    // Act
+    const result = await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert
+    expect(result).toBe("finally");
+    expect(chatFn).toHaveBeenCalledTimes(3);
+  });
+
+  it("should use custom retryableStatuses list", async () => {
+    // Arrange — retryableStatuses=[429,503,502], error=502
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1) return Promise.reject(new LLMClientError(502, "Bad Gateway"));
+      return Promise.resolve(okResponse("ok"));
+    });
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      retryableStatuses: [429, 503, 502],
+      randomFn: () => 1,
+    });
+
+    // Act
+    const result = await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert
+    expect(result).toBe("ok");
+    expect(chatFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("should apply jitter to backoff delay", async () => {
+    // Arrange — randomFn returns 0 → jitter = (0.5 + 0 * 0.5) = 0.5 → delay halved
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1) return Promise.reject(new LLMClientError(429, "limit", "rate_limit_error"));
+      return Promise.resolve(okResponse("ok"));
+    });
+    const startTime = Date.now();
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 100,
+      randomFn: () => 0,
+    });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert — delay = 100 * (0.5 + 0*0.5) = 50ms (halved by jitter)
+    const elapsed = Date.now() - startTime;
+    expect(elapsed).toBeGreaterThanOrEqual(40);
+    expect(elapsed).toBeLessThan(100);
+  });
+
+  it("should throw after max retries exceeded on 503", async () => {
+    // Arrange — always 503
+    const chatFn = mock(() =>
+      Promise.reject(new LLMClientError(503, "Service Unavailable")),
+    );
+    const adapter = createChatAdapter(chatFn, { maxRetries: 2, baseDelayMs: 1, retryableStatuses: [429, 503], randomFn: () => 1 });
+
+    // Act & Assert
+    await expect(
+      adapter("m", [{ role: "user", content: "hi" }]),
+    ).rejects.toThrow("Service Unavailable");
+    expect(chatFn).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+  });
+
+  it("should throw immediately on non-retryable status when retryableStatuses=[429]", async () => {
+    // Arrange — 500 error, default retryableStatuses=[429]
+    const chatFn = mock(() =>
+      Promise.reject(new LLMClientError(500, "Server Error")),
+    );
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1, randomFn: () => 1 });
+
+    // Act & Assert
+    await expect(
+      adapter("m", [{ role: "user", content: "hi" }]),
+    ).rejects.toThrow("Server Error");
+    expect(chatFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("should throw immediately when retryableStatuses is empty", async () => {
+    // Arrange — empty retryableStatuses → no retry ever
+    const chatFn = mock(() =>
+      Promise.reject(new LLMClientError(429, "limit", "rate_limit_error")),
+    );
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      retryableStatuses: [],
+      randomFn: () => 1,
+    });
+
+    // Act & Assert
+    await expect(
+      adapter("m", [{ role: "user", content: "hi" }]),
+    ).rejects.toThrow("limit");
+    expect(chatFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("should retry exactly once when maxRetries=1 and 503 occurs", async () => {
+    // Arrange — maxRetries=1, 503 once then success
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1) return Promise.reject(new LLMClientError(503, "unavailable"));
+      return Promise.resolve(okResponse("ok"));
+    });
+    const adapter = createChatAdapter(chatFn, { maxRetries: 1, baseDelayMs: 1, retryableStatuses: [429, 503], randomFn: () => 1 });
+
+    // Act
+    const result = await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert
+    expect(result).toBe("ok");
+    expect(chatFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("should throw immediately for 429 when retryableStatuses=[503]", async () => {
+    // Arrange — only 503 is retryable, 429 is not
+    const chatFn = mock(() =>
+      Promise.reject(new LLMClientError(429, "rate limit", "rate_limit_error")),
+    );
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      retryableStatuses: [503],
+      randomFn: () => 1,
+    });
+
+    // Act & Assert
+    await expect(
+      adapter("m", [{ role: "user", content: "hi" }]),
+    ).rejects.toThrow("rate limit");
+    expect(chatFn).toHaveBeenCalledTimes(1);
+  });
+
+  // =============================================================
+  // RetryEvent + onRetry 콜백
+  // =============================================================
+
+  it("should call onRetry with correct RetryEvent fields on each retry", async () => {
+    // Arrange — 429 twice, then success
+    const events: import("./wire").RetryEvent[] = [];
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount <= 2) return Promise.reject(new LLMClientError(429, "limit", "rate_limit_error"));
+      return Promise.resolve(okResponse("ok"));
+    });
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      randomFn: () => 1,
+      onRetry: (e) => events.push(e),
+    });
+
+    // Act
+    await adapter("test-model", [{ role: "user", content: "hi" }]);
+
+    // Assert — 2 retryable errors → 2 onRetry calls
+    expect(events).toHaveLength(2);
+    expect(events[0]!.status).toBe(429);
+    expect(events[0]!.attempt).toBe(1);
+    expect(events[0]!.model).toBe("test-model");
+    expect(events[0]!.willRetry).toBe(true);
+    expect(events[0]!.delayMs).toBeGreaterThan(0);
+    expect(events[1]!.attempt).toBe(2);
+    expect(events[1]!.willRetry).toBe(true);
+  });
+
+  it("should call onRetry with willRetry=false on final retryable failure", async () => {
+    // Arrange — always 429, maxRetries=2
+    const events: import("./wire").RetryEvent[] = [];
+    const chatFn = mock(() =>
+      Promise.reject(new LLMClientError(429, "limit", "rate_limit_error")),
+    );
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 2,
+      baseDelayMs: 1,
+      randomFn: () => 1,
+      onRetry: (e) => events.push(e),
+    });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]).catch(() => {});
+
+    // Assert — 3 attempts (0,1,2): attempt 0,1 → willRetry=true; attempt 2 → willRetry=false
+    expect(events).toHaveLength(3);
+    expect(events[0]!.willRetry).toBe(true);
+    expect(events[1]!.willRetry).toBe(true);
+    expect(events[2]!.willRetry).toBe(false);
+    expect(events[2]!.delayMs).toBe(0);
+  });
+
+  it("should not retry 503 by default (retryableStatuses=[429])", async () => {
+    // Arrange — 503 error, default retryableStatuses
+    const chatFn = mock(() =>
+      Promise.reject(new LLMClientError(503, "Service Unavailable")),
+    );
+    const adapter = createChatAdapter(chatFn, { maxRetries: 3, baseDelayMs: 1, randomFn: () => 1 });
+
+    // Act & Assert — should throw immediately, no retry
+    await expect(
+      adapter("m", [{ role: "user", content: "hi" }]),
+    ).rejects.toThrow("Service Unavailable");
+    expect(chatFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("should not call onRetry on non-retryable error", async () => {
+    // Arrange — 500 error, not in retryableStatuses
+    const events: import("./wire").RetryEvent[] = [];
+    const chatFn = mock(() =>
+      Promise.reject(new LLMClientError(500, "Server Error")),
+    );
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      randomFn: () => 1,
+      onRetry: (e) => events.push(e),
+    });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]).catch(() => {});
+
+    // Assert — no onRetry calls
+    expect(events).toHaveLength(0);
+  });
+
+  it("should not call onRetry on first-attempt success", async () => {
+    // Arrange — immediate success
+    const events: import("./wire").RetryEvent[] = [];
+    const chatFn = mock(() => Promise.resolve(okResponse("ok")));
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      randomFn: () => 1,
+      onRetry: (e) => events.push(e),
+    });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert
+    expect(events).toHaveLength(0);
+  });
+
+  it("should propagate error when onRetry callback throws", async () => {
+    // Arrange — onRetry throws on call
+    let callCount = 0;
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1) return Promise.reject(new LLMClientError(429, "limit", "rate_limit_error"));
+      return Promise.resolve(okResponse("ok"));
+    });
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      randomFn: () => 1,
+      onRetry: () => { throw new Error("callback boom"); },
+    });
+
+    // Act & Assert — callback error propagates
+    await expect(
+      adapter("m", [{ role: "user", content: "hi" }]),
+    ).rejects.toThrow("callback boom");
+  });
+
+  it("should call onRetry with willRetry=false when maxRetries=0 and retryable error occurs", async () => {
+    // Arrange — maxRetries=0, retryable 429 error
+    const events: import("./wire").RetryEvent[] = [];
+    const chatFn = mock(() =>
+      Promise.reject(new LLMClientError(429, "limit", "rate_limit_error")),
+    );
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 0,
+      baseDelayMs: 1,
+      randomFn: () => 1,
+      onRetry: (e) => events.push(e),
+    });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]).catch(() => {});
+
+    // Assert — 1 call with willRetry=false (retryable but no retries allowed)
+    expect(events).toHaveLength(1);
+    expect(events[0]!.willRetry).toBe(false);
+    expect(events[0]!.delayMs).toBe(0);
   });
 });

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { profileTask } from "./profiler";
+import { profileTask, nonLatinRatio, NON_LATIN_TOKEN_EXPANSION } from "./profiler";
 import type { ClassifyResult } from "../classify/types";
 import type { TaskRequirement } from "./types";
 
@@ -319,5 +319,301 @@ describe("profileTask", () => {
     // Assert — moderate = { input: 2000, output: 1000 }
     expect(result.estimatedInputTokens).toBe(2000);
     expect(result.estimatedOutputTokens).toBe(1000);
+  });
+});
+
+// -- nonLatinRatio unit tests --
+
+describe("nonLatinRatio", () => {
+  // -- HP --
+
+  it("should return ~1.0 for fully Korean text", () => {
+    // Arrange
+    const text = "한국어입니다";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBeCloseTo(1.0, 1);
+  });
+
+  it("should return 0.0 for fully English text", () => {
+    // Arrange
+    const text = "hello world";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBe(0);
+  });
+
+  it("should return ratio between 0 and 1 for mixed text", () => {
+    // Arrange — 2 non-Latin + 5 ASCII = "안녕hello"
+    const text = "안녕hello";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBeGreaterThan(0);
+    expect(ratio).toBeLessThan(1);
+    expect(ratio).toBeCloseTo(2 / 7, 2);
+  });
+
+  it("should count Korean jamo characters as non-Latin", () => {
+    // Arrange — ㅎㅎㅎ (compatibility jamo \u3130-\u318F range)
+    const text = "ㅎㅎㅎ";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBeCloseTo(1.0, 1);
+  });
+
+  it("should return ~1.0 for CJK Chinese text", () => {
+    // Arrange
+    const text = "你好世界";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBeCloseTo(1.0, 1);
+  });
+
+  it("should return ~1.0 for Japanese hiragana text", () => {
+    // Arrange
+    const text = "こんにちは";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBeCloseTo(1.0, 1);
+  });
+
+  it("should return ~1.0 for Arabic text", () => {
+    // Arrange
+    const text = "مرحبا";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBeCloseTo(1.0, 1);
+  });
+
+  // -- NE --
+
+  it("should return 0.0 for empty string", () => {
+    // Arrange / Act
+    const ratio = nonLatinRatio("");
+
+    // Assert
+    expect(ratio).toBe(0);
+  });
+
+  it("should return 0.0 for whitespace-only text", () => {
+    // Arrange / Act
+    const ratio = nonLatinRatio("   ");
+
+    // Assert
+    expect(ratio).toBe(0);
+  });
+
+  it("should return 0.0 for special characters only", () => {
+    // Arrange / Act
+    const ratio = nonLatinRatio("!@#$%^&*()");
+
+    // Assert
+    expect(ratio).toBe(0);
+  });
+
+  // -- ED --
+
+  it("should return 1.0 for single emoji", () => {
+    // Arrange — emoji is non-ASCII (code point > 0x7F)
+    const text = "🎉";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBe(1.0);
+  });
+
+  it("should return 0.0 for ASCII tilde \\x7E", () => {
+    // Arrange — \x7E = "~", last ASCII printable character
+    const text = "~";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBe(0);
+  });
+
+  it("should return 1.0 for first non-ASCII \\x80", () => {
+    // Arrange — \x80 = first character above ASCII range
+    const text = "\x80";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBe(1.0);
+  });
+
+  it("should return partial ratio for accented Latin text", () => {
+    // Arrange — "caf\u00E9" = 3 ASCII + 1 non-ASCII (\u00E9)
+    const text = "caf\u00e9";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBeCloseTo(1 / 4, 2);
+  });
+
+  it("should recognize start of Korean unicode range \\uAC00", () => {
+    // Arrange — \uAC00 = "가", non-ASCII = non-Latin
+    const text = "\uAC00";
+
+    // Act
+    const ratio = nonLatinRatio(text);
+
+    // Assert
+    expect(ratio).toBe(1.0);
+  });
+});
+
+// -- profileTask non-Latin token expansion tests --
+
+describe("profileTask (non-Latin token expansion)", () => {
+  // -- HP --
+
+  it("should expand tokens for Korean prompt with simple complexity", () => {
+    // Arrange — simple base: input=500, output=200
+    const input = makeClassifyResult({ complexity: "simple" });
+    const prompt = "간단한 작업을 해주세요";
+
+    // Act
+    const result = profileTask(input, prompt);
+
+    // Assert — tokens should be greater than base due to expansion
+    expect(result.estimatedInputTokens).toBeGreaterThan(500);
+    expect(result.estimatedOutputTokens).toBeGreaterThan(200);
+    expect(result.requiresKorean).toBe(true);
+  });
+
+  it("should expand tokens for Korean prompt with moderate complexity", () => {
+    // Arrange — moderate base: input=2000, output=1000
+    const input = makeClassifyResult({ complexity: "moderate" });
+    const prompt = "중간 수준의 작업입니다";
+
+    // Act
+    const result = profileTask(input, prompt);
+
+    // Assert
+    expect(result.estimatedInputTokens).toBeGreaterThan(2000);
+    expect(result.estimatedOutputTokens).toBeGreaterThan(1000);
+  });
+
+  it("should expand tokens for Korean prompt with complex complexity", () => {
+    // Arrange — complex base: input=8000, output=4000
+    const input = makeClassifyResult({ complexity: "complex" });
+    const prompt = "복잡한 작업을 수행해주세요";
+
+    // Act
+    const result = profileTask(input, prompt);
+
+    // Assert
+    expect(result.estimatedInputTokens).toBeGreaterThan(8000);
+    expect(result.estimatedOutputTokens).toBeGreaterThan(4000);
+  });
+
+  it("should not expand tokens for English-only prompt", () => {
+    // Arrange
+    const input = makeClassifyResult({ complexity: "moderate" });
+    const prompt = "implement a feature in TypeScript";
+
+    // Act
+    const result = profileTask(input, prompt);
+
+    // Assert — exact base values, no expansion
+    expect(result.estimatedInputTokens).toBe(2000);
+    expect(result.estimatedOutputTokens).toBe(1000);
+    expect(result.requiresKorean).toBe(false);
+  });
+
+  it("should partially expand tokens for mixed Korean-English prompt", () => {
+    // Arrange — mixed text, ratio between 0 and 1
+    const input = makeClassifyResult({ complexity: "moderate" });
+    const prompt = "안녕 implement this feature";
+
+    // Act
+    const result = profileTask(input, prompt);
+
+    // Assert — expanded but less than full non-Latin expansion
+    const fullNonLatinInput = Math.ceil(2000 * NON_LATIN_TOKEN_EXPANSION);
+    expect(result.estimatedInputTokens).toBeGreaterThan(2000);
+    expect(result.estimatedInputTokens).toBeLessThan(fullNonLatinInput);
+  });
+
+  it("should expand tokens for CJK Chinese prompt", () => {
+    // Arrange — Chinese text is non-Latin, should expand
+    const input = makeClassifyResult({ complexity: "moderate" });
+    const prompt = "请实现这个功能";
+
+    // Act
+    const result = profileTask(input, prompt);
+
+    // Assert
+    expect(result.estimatedInputTokens).toBeGreaterThan(2000);
+    expect(result.estimatedOutputTokens).toBeGreaterThan(1000);
+  });
+
+  it("should expand tokens for emoji-only prompt", () => {
+    // Arrange — emoji is non-Latin (code point > 0x7F)
+    const input = makeClassifyResult({ complexity: "simple" });
+    const prompt = "🎉🚀🔥";
+
+    // Act
+    const result = profileTask(input, prompt);
+
+    // Assert
+    expect(result.estimatedInputTokens).toBeGreaterThan(500);
+    expect(result.estimatedOutputTokens).toBeGreaterThan(200);
+  });
+
+  // -- CO --
+
+  it("should not expand tokens when prompt is empty", () => {
+    // Arrange
+    const input = makeClassifyResult({ complexity: "moderate" });
+    const prompt = "";
+
+    // Act
+    const result = profileTask(input, prompt);
+
+    // Assert — empty prompt → ratio=0 → no expansion
+    expect(result.estimatedInputTokens).toBe(2000);
+    expect(result.estimatedOutputTokens).toBe(1000);
+  });
+
+  it("should expand tokens with fallback moderate when complexity is unrecognized and prompt is non-Latin", () => {
+    // Arrange — unrecognized complexity → fallback to moderate (2000/1000)
+    const input = makeClassifyResult({ complexity: "unknown" as any });
+    const prompt = "한국어 프롬프트입니다";
+
+    // Act
+    const result = profileTask(input, prompt);
+
+    // Assert — moderate base (2000/1000) + non-Latin expansion
+    expect(result.estimatedInputTokens).toBeGreaterThan(2000);
+    expect(result.estimatedOutputTokens).toBeGreaterThan(1000);
   });
 });

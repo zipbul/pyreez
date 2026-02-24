@@ -60,11 +60,7 @@ async function main(): Promise<void> {
     benchmarkFn: async (cfg) => {
       const runner = {
         generate: async (modelId: string, prompt: string): Promise<EvalResponse> => {
-          const resp = await llmClient.chat({
-            model: modelId,
-            messages: [{ role: "user", content: prompt }],
-          });
-          const content = resp.choices?.[0]?.message?.content ?? "";
+          const content = await chatAdapter(modelId, [{ role: "user", content: prompt }]);
           return {
             promptId: "",
             modelId,
@@ -75,13 +71,16 @@ async function main(): Promise<void> {
         },
       };
       const judge = createLLMJudge(async (model, prompt, judgeCfg) => {
-        const resp = await llmClient.chat({
-          model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: judgeCfg.temperature,
-          max_tokens: judgeCfg.maxTokens,
-        });
-        return resp.choices?.[0]?.message?.content ?? "";
+        const judgeAdapter = createChatAdapter(
+          (req) => llmClient.chat({
+            ...req,
+            temperature: judgeCfg.temperature,
+            max_tokens: judgeCfg.maxTokens,
+          }),
+        );
+        return judgeAdapter(model, [
+          { role: "user", content: prompt },
+        ]);
       });
       const defaultJudgeConfig = {
         judgeModel: config.llm.model,
