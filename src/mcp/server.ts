@@ -93,16 +93,39 @@ export class PyreezMcpServer {
             .optional()
             .describe("Max cost per request in USD (default: 1.0)"),
           domain_hint: z
-            .string()
+            .enum([
+              "IDEATION", "PLANNING", "REQUIREMENTS", "ARCHITECTURE",
+              "CODING", "TESTING", "REVIEW", "DOCUMENTATION",
+              "DEBUGGING", "OPERATIONS", "RESEARCH", "COMMUNICATION",
+            ])
             .optional()
             .describe(
-              "Domain hint from host agent (e.g., CODING, ARCHITECTURE, TESTING). Bypasses keyword classification.",
+              "Task domain. Bypasses keyword classification. IDEATION=brainstorm/idea, PLANNING=goal/scope/priority, REQUIREMENTS=spec/acceptance, ARCHITECTURE=system design/data model, CODING=implement/refactor/optimize, TESTING=test write/strategy, REVIEW=code review/comparison/security, DOCUMENTATION=api doc/tutorial/diagram, DEBUGGING=error diagnosis/fix, OPERATIONS=deploy/ci-cd/setup, RESEARCH=tech research/benchmark, COMMUNICATION=explain/summarize/translate",
+            ),
+          task_type_hint: z
+            .enum([
+              "BRAINSTORM", "ANALOGY", "CONSTRAINT_DISCOVERY", "OPTION_GENERATION", "FEASIBILITY_QUICK",
+              "GOAL_DEFINITION", "SCOPE_DEFINITION", "PRIORITIZATION", "MILESTONE_PLANNING", "RISK_ASSESSMENT", "RESOURCE_ESTIMATION", "TRADEOFF_ANALYSIS",
+              "REQUIREMENT_EXTRACTION", "REQUIREMENT_STRUCTURING", "AMBIGUITY_DETECTION", "COMPLETENESS_CHECK", "CONFLICT_DETECTION", "ACCEPTANCE_CRITERIA",
+              "SYSTEM_DESIGN", "MODULE_DESIGN", "INTERFACE_DESIGN", "DATA_MODELING", "PATTERN_SELECTION", "DEPENDENCY_ANALYSIS", "MIGRATION_STRATEGY", "PERFORMANCE_DESIGN",
+              "CODE_PLAN", "SCAFFOLD", "IMPLEMENT_FEATURE", "IMPLEMENT_ALGORITHM", "REFACTOR", "OPTIMIZE", "TYPE_DEFINITION", "ERROR_HANDLING", "INTEGRATION", "CONFIGURATION",
+              "TEST_STRATEGY", "TEST_CASE_DESIGN", "UNIT_TEST_WRITE", "INTEGRATION_TEST_WRITE", "EDGE_CASE_DISCOVERY", "TEST_DATA_GENERATION", "COVERAGE_ANALYSIS",
+              "CODE_REVIEW", "DESIGN_REVIEW", "SECURITY_REVIEW", "PERFORMANCE_REVIEW", "CRITIQUE", "COMPARISON", "STANDARDS_COMPLIANCE",
+              "API_DOC", "TUTORIAL", "COMMENT_WRITE", "CHANGELOG", "DECISION_RECORD", "DIAGRAM",
+              "ERROR_DIAGNOSIS", "LOG_ANALYSIS", "REPRODUCTION", "ROOT_CAUSE", "FIX_PROPOSAL", "FIX_IMPLEMENT", "REGRESSION_CHECK",
+              "DEPLOY_PLAN", "CI_CD_CONFIG", "ENVIRONMENT_SETUP", "MONITORING_SETUP", "INCIDENT_RESPONSE",
+              "TECH_RESEARCH", "BENCHMARK", "COMPATIBILITY_CHECK", "BEST_PRACTICE", "TREND_ANALYSIS",
+              "SUMMARIZE", "EXPLAIN", "REPORT", "TRANSLATE", "QUESTION_ANSWER",
+            ])
+            .optional()
+            .describe(
+              "Specific task type within the domain. Requires domain_hint. Overrides the default task type for that domain.",
             ),
           complexity_hint: z
-            .string()
+            .enum(["simple", "moderate", "complex"])
             .optional()
             .describe(
-              'Complexity hint from host agent ("simple", "moderate", "complex"). Overrides estimated complexity.',
+              "Task complexity. simple=single focused task, moderate=multi-step or requires domain knowledge, complex=cross-cutting/architectural/multi-system",
             ),
         }),
       },
@@ -357,6 +380,7 @@ export class PyreezMcpServer {
     task: string;
     budget?: number;
     domain_hint?: string;
+    task_type_hint?: string;
     complexity_hint?: string;
   }): Promise<CallToolResult> {
     return this.logRun("route", async () => {
@@ -370,6 +394,7 @@ export class PyreezMcpServer {
       };
       const hints = {
         domain_hint: args.domain_hint as any,
+        task_type_hint: args.task_type_hint as any,
         complexity_hint: args.complexity_hint as any,
       };
       const result = this.routeFn(args.task, budget, hints);

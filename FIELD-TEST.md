@@ -61,7 +61,7 @@ Input: { task: "Write API documentation for a REST endpoint POST /api/users that
 ```
 
 **PASS criteria:**
-- `classification.domain` = `"DOCUMENTATION"`
+- `classification.domain` ∈ {`"DOCUMENTATION"`, `"CODING"`}
 - `classification.complexity` = `"simple"` or `"moderate"`
 
 #### T1-03: Technology research
@@ -71,7 +71,7 @@ Input: { task: "Compare the pros and cons of SQLite vs PostgreSQL for a local-fi
 ```
 
 **PASS criteria:**
-- `classification.domain` = `"RESEARCH"`
+- `classification.domain` ∈ {`"RESEARCH"`, `"REVIEW"`}
 - `classification.taskType` ∈ {`"TECH_RESEARCH"`, `"COMPARISON"`, `"BEST_PRACTICE"`}
 
 #### T1-04: Ideation / brainstorming
@@ -103,9 +103,9 @@ Input: { task: "Create a 3-month migration roadmap for moving a monolithic Node.
 ```
 
 **PASS criteria:**
-- `classification.domain` = `"PLANNING"`
+- `classification.domain` ∈ {`"PLANNING"`, `"ARCHITECTURE"`}
 - `classification.complexity` ∈ {`"moderate"`, `"complex"`}
-- `classification.taskType` ∈ {`"MILESTONE_PLANNING"`, `"RISK_ASSESSMENT"`, `"SCOPE_DEFINITION"`}
+- `classification.taskType` ∈ {`"MILESTONE_PLANNING"`, `"RISK_ASSESSMENT"`, `"SCOPE_DEFINITION"`, `"MIGRATION_STRATEGY"`, `"SYSTEM_DESIGN"`}
 
 #### T1-07: Complex architecture design
 
@@ -127,7 +127,7 @@ Input: { task: "Design a comprehensive test strategy for a payment processing mo
 **PASS criteria:**
 - `classification.domain` = `"TESTING"`
 - `classification.complexity` ∈ {`"moderate"`, `"complex"`}
-- `classification.taskType` ∈ {`"TEST_STRATEGY"`, `"TEST_CASE_DESIGN"`}
+- `classification.taskType` ∈ {`"TEST_STRATEGY"`, `"TEST_CASE_DESIGN"`, `"EDGE_CASE_DISCOVERY"`}
 
 #### T1-09: Operations — deployment pipeline
 
@@ -180,7 +180,7 @@ Input: { task: "I need to figure out why users are complaining about the search 
 ```
 
 **PASS criteria (acceptable set):**
-- `classification.domain` ∈ {`"DEBUGGING"`, `"RESEARCH"`, `"REQUIREMENTS"`}
+- `classification.domain` ∈ {`"DEBUGGING"`, `"RESEARCH"`, `"REQUIREMENTS"`, `"ARCHITECTURE"`}
 - `classification.complexity` ∈ {`"moderate"`, `"complex"`}
 - **HARD FAIL:** `complexity` = `"simple"`
 

@@ -295,4 +295,49 @@ describe("route", () => {
     expect(result).not.toBeNull();
     expect(result!.classification.domain).toBe("ARCHITECTURE");
   });
+
+  // -- task_type_hint --
+
+  it("should use task_type_hint when provided with domain_hint", () => {
+    // Arrange — domain_hint + task_type_hint → use task_type_hint instead of DEFAULT
+    const hints: RouteHints = { domain_hint: "REVIEW", task_type_hint: "COMPARISON" as any };
+
+    // Act
+    const result = route("compare options", undefined, makeDeps(), hints);
+
+    // Assert — taskType from hint, not DEFAULT (CODE_REVIEW)
+    expect(result).not.toBeNull();
+    expect(result!.classification.domain).toBe("REVIEW");
+    expect(result!.classification.taskType).toBe("COMPARISON");
+  });
+
+  it("should use all three hints together", () => {
+    // Arrange
+    const hints: RouteHints = {
+      domain_hint: "TESTING",
+      task_type_hint: "EDGE_CASE_DISCOVERY" as any,
+      complexity_hint: "complex",
+    };
+
+    // Act
+    const result = route("find edge cases", undefined, makeDeps(), hints);
+
+    // Assert
+    expect(result).not.toBeNull();
+    expect(result!.classification.domain).toBe("TESTING");
+    expect(result!.classification.taskType).toBe("EDGE_CASE_DISCOVERY");
+    expect(result!.classification.complexity).toBe("complex");
+  });
+
+  it("should ignore task_type_hint when domain_hint is not provided", () => {
+    // Arrange — task_type_hint without domain_hint → classify runs, hint ignored
+    const hints: RouteHints = { task_type_hint: "COMPARISON" as any };
+
+    // Act
+    const result = route("함수 구현해줘", undefined, makeDeps(), hints);
+
+    // Assert — classify result used, task_type_hint ignored
+    expect(result).not.toBeNull();
+    expect(result!.classification).toEqual(stubClassifyResult);
+  });
 });

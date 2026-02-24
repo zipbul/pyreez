@@ -595,4 +595,83 @@ describe("classifyByRules", () => {
     expect(result!.domain).toBe("REVIEW");
     expect(result!.taskType).toBe("COMPARISON");
   });
+
+  // -- Word boundary: substring keywords should NOT match --
+
+  it('should NOT classify "explain to a developer" as CODING (word boundary blocks "develop" in "developer")', () => {
+    const result = classifyByRules("explain to a developer");
+    // "develop" is inside "developer" — word boundary should prevent CODING match
+    // "explain" should match COMMUNICATION/EXPLAIN instead
+    expect(result).not.toBeNull();
+    expect(result!.domain).not.toBe("CODING");
+  });
+
+  it('should NOT classify "reviewer feedback on design" as REVIEW via "review" substring', () => {
+    const result = classifyByRules("reviewer feedback on design");
+    // "review" inside "reviewer" blocked by word boundary
+    // "design" should match ARCHITECTURE/SYSTEM_DESIGN instead
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("ARCHITECTURE");
+  });
+
+  it('should NOT classify "designer tools" as ARCHITECTURE via "design" substring', () => {
+    const result = classifyByRules("designer tools");
+    // "design" inside "designer" blocked by word boundary → no match → null
+    expect(result).toBeNull();
+  });
+
+  it('should NOT classify "development process overview" as CODING via "develop" substring', () => {
+    const result = classifyByRules("development process overview");
+    // "develop" inside "development" blocked by word boundary
+    // no other keyword matches → null
+    expect(result).toBeNull();
+  });
+
+  // -- Word boundary: standalone keywords should still match --
+
+  it('should still classify "develop the feature" as CODING (standalone "develop")', () => {
+    const result = classifyByRules("develop the feature");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("CODING");
+    expect(result!.taskType).toBe("IMPLEMENT_FEATURE");
+  });
+
+  it('should still classify "let\'s develop" as CODING (standalone at end)', () => {
+    const result = classifyByRules("let's develop");
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("CODING");
+  });
+
+  // -- Multi-clause complexity --
+
+  it('should classify multi-clause prompt with AND as complex', () => {
+    const result = classifyByRules("Implement auth AND add logging AND write tests");
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("complex");
+  });
+
+  it('should classify multi-clause prompt with commas as complex', () => {
+    const result = classifyByRules("Build REST API, add authentication, configure database, write tests");
+    expect(result).not.toBeNull();
+    expect(result!.complexity).toBe("complex");
+  });
+
+  // -- Corner: word boundary + context --
+
+  it('should classify "a developer who needs code review" as REVIEW (develop blocked, review matches)', () => {
+    const result = classifyByRules("a developer who needs code review");
+    // "develop" in "developer" blocked → CODING not matched
+    // "review" standalone → REVIEW/CODE_REVIEW
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("REVIEW");
+    expect(result!.taskType).toBe("CODE_REVIEW");
+  });
+
+  // -- Negative: all keywords blocked by word boundary --
+
+  it('should return null when all potential keywords are blocked by word boundary', () => {
+    const result = classifyByRules("developers writers designers");
+    // "develop" in "developers", "write" in "writers", "design" in "designers" — all blocked
+    expect(result).toBeNull();
+  });
 });

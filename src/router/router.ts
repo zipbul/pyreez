@@ -83,7 +83,7 @@ export function route(
   if (hints?.domain_hint) {
     classification = {
       domain: hints.domain_hint,
-      taskType: DEFAULT_DOMAIN_TASK_TYPE[hints.domain_hint] as any,
+      taskType: (hints.task_type_hint ?? DEFAULT_DOMAIN_TASK_TYPE[hints.domain_hint]) as any,
       complexity: hints.complexity_hint ?? "moderate",
       criticality: "medium",
       method: "hint" as any,

@@ -3,7 +3,7 @@
  */
 
 import type { ModelInfo } from "../model/types";
-import type { Complexity, TaskDomain } from "../classify/types";
+import type { Complexity, TaskDomain, TaskType } from "../classify/types";
 
 /**
  * Optional hints from the host agent to assist routing.
@@ -12,6 +12,8 @@ import type { Complexity, TaskDomain } from "../classify/types";
 export interface RouteHints {
   /** Domain hint — bypasses keyword classification when provided. */
   domain_hint?: TaskDomain;
+  /** Task type hint — overrides default task type when domain_hint is also provided. */
+  task_type_hint?: TaskType;
   /** Complexity hint — overrides estimated complexity when provided. */
   complexity_hint?: Complexity;
 }

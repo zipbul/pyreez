@@ -251,7 +251,7 @@ const KEYWORD_RULES: readonly DomainRules[] = [
       ["CONFLICT_DETECTION", ["요구 충돌", "conflict"]],
       [
         "ACCEPTANCE_CRITERIA",
-        ["인수 조건", "acceptance criteria", "요구사항", "스펙", "want", "need"],
+        ["인수 조건", "acceptance criteria", "요구사항", "스펙", "want", "wants", "need", "needs"],
       ],
     ],
   ],
@@ -328,7 +328,56 @@ const TASK_CRITICALITY_OVERRIDES: Partial<Record<TaskType, Criticality>> = {
   FIX_IMPLEMENT: "medium",
 };
 
-// -- Complexity estimation --
+// -- Word boundary matching --
+
+/** ASCII word character pattern for word boundary detection. */
+const WORD_CHAR = /[a-zA-Z0-9_]/;
+
+/**
+ * Check if a keyword matches in the text, respecting word boundaries for ASCII keywords.
+ * Korean keywords use simple includes() since Korean has no word boundaries.
+ */
+function matchesKeyword(keyword: string, lowerText: string): boolean {
+  // Korean keyword — use simple includes
+  if (/[\u3131-\u3163\uac00-\ud7a3]/.test(keyword)) {
+    return lowerText.includes(keyword);
+  }
+
+  // Multi-word keyword (contains space) — use simple includes
+  if (keyword.includes(" ")) {
+    return lowerText.includes(keyword);
+  }
+
+  // Single ASCII word — use word boundary matching
+  const idx = lowerText.indexOf(keyword);
+  if (idx === -1) return false;
+
+  // Check all occurrences for word boundary match
+  let pos = idx;
+  while (pos !== -1) {
+    const before = pos > 0 ? lowerText[pos - 1]! : "";
+    const after = pos + keyword.length < lowerText.length ? lowerText[pos + keyword.length]! : "";
+    const boundaryBefore = !WORD_CHAR.test(before);
+    const boundaryAfter = !WORD_CHAR.test(after);
+    if (boundaryBefore && boundaryAfter) return true;
+    pos = lowerText.indexOf(keyword, pos + 1);
+  }
+  return false;
+}
+
+// -- Multi-clause detection for complexity --
+
+/** Count distinct clauses in a prompt (AND, commas, semicolons, numbered items). */
+function countClauses(text: string): number {
+  const lower = text.toLowerCase();
+  // Count separators: " and ", ",", ";", numbered items "1. ", "2. "
+  const andCount = (lower.match(/\band\b/g) || []).length;
+  const commaCount = (lower.match(/,/g) || []).length;
+  const semicolonCount = (lower.match(/;/g) || []).length;
+  const numberedCount = (lower.match(/\d+\./g) || []).length;
+  // Each separator implies one additional clause
+  return 1 + andCount + commaCount + semicolonCount + Math.max(0, numberedCount - 1);
+}
 
 /** Keywords indicating architectural/distributed complexity → force "complex". */
 const COMPLEX_KEYWORDS: readonly string[] = [
@@ -360,7 +409,15 @@ function estimateComplexity(
   else if (len < 500) complexity = "moderate";
   else complexity = "complex";
 
-  // Step 2: Keyword-based elevation
+  // Step 2: Multi-clause elevation
+  const clauseCount = countClauses(prompt);
+  if (clauseCount >= 3 && complexity !== "complex") {
+    complexity = "complex";
+  } else if (clauseCount >= 2 && complexity === "simple") {
+    complexity = "moderate";
+  }
+
+  // Step 3: Keyword-based elevation
   const lower = prompt.toLowerCase();
   if (COMPLEX_KEYWORDS.some((kw) => lower.includes(kw))) {
     complexity = "complex";
@@ -371,7 +428,7 @@ function estimateComplexity(
     complexity = "moderate";
   }
 
-  // Step 3: Criticality floor — high/critical tasks are never "simple"
+  // Step 4: Criticality floor — high/critical tasks are never "simple"
   if (
     (criticality === "critical" || criticality === "high") &&
     complexity === "simple"
@@ -433,7 +490,7 @@ export function classifyByRules(prompt: string): ClassifyResult | null {
 
   for (const [domain, rules] of KEYWORD_RULES) {
     for (const [taskType, keywords] of rules) {
-      if (keywords.some((kw) => lower.includes(kw))) {
+      if (keywords.some((kw) => matchesKeyword(kw, lower))) {
         const criticality = lookupCriticality(domain, taskType, prompt);
         return {
           domain,

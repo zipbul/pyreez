@@ -261,7 +261,7 @@ describe("PyreezMcpServer", () => {
 
       await server.handleRoute({ task: "do something", budget: 0.5 });
 
-      expect(routeFn).toHaveBeenCalledWith("do something", { perRequest: 0.5 }, { domain_hint: undefined, complexity_hint: undefined });
+      expect(routeFn).toHaveBeenCalledWith("do something", { perRequest: 0.5 }, { domain_hint: undefined, task_type_hint: undefined, complexity_hint: undefined });
     });
 
     it("should return error when task is empty", async () => {
@@ -318,7 +318,7 @@ describe("PyreezMcpServer", () => {
       expect(routeFn).toHaveBeenCalledWith(
         "build something",
         { perRequest: 1.0 },
-        { domain_hint: "CODING", complexity_hint: undefined },
+        { domain_hint: "CODING", task_type_hint: undefined, complexity_hint: undefined },
       );
     });
 
@@ -331,7 +331,38 @@ describe("PyreezMcpServer", () => {
       expect(routeFn).toHaveBeenCalledWith(
         "hard task",
         { perRequest: 1.0 },
-        { domain_hint: undefined, complexity_hint: "complex" },
+        { domain_hint: undefined, task_type_hint: undefined, complexity_hint: "complex" },
+      );
+    });
+
+    it("should forward task_type_hint to routeFn when provided", async () => {
+      const routeFn = stubRouteFn();
+      const server = new PyreezMcpServer(validConfig({ routeFn }));
+
+      await server.handleRoute({ task: "compare options", task_type_hint: "COMPARISON" });
+
+      expect(routeFn).toHaveBeenCalledWith(
+        "compare options",
+        { perRequest: 1.0 },
+        { domain_hint: undefined, task_type_hint: "COMPARISON", complexity_hint: undefined },
+      );
+    });
+
+    it("should forward domain_hint + task_type_hint + complexity_hint together", async () => {
+      const routeFn = stubRouteFn();
+      const server = new PyreezMcpServer(validConfig({ routeFn }));
+
+      await server.handleRoute({
+        task: "find edge cases",
+        domain_hint: "TESTING",
+        task_type_hint: "EDGE_CASE_DISCOVERY",
+        complexity_hint: "complex",
+      });
+
+      expect(routeFn).toHaveBeenCalledWith(
+        "find edge cases",
+        { perRequest: 1.0 },
+        { domain_hint: "TESTING", task_type_hint: "EDGE_CASE_DISCOVERY", complexity_hint: "complex" },
       );
     });
   });
