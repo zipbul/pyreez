@@ -13,7 +13,6 @@ and continuously calibrates model ratings via Bradley-Terry scoring.
 - **Bradley-Terry Ratings** — 14-dimension capability scores with pairwise calibration
 - **Provider Diversity** — 21 models across 7 providers (OpenAI, Anthropic, Google, xAI, DeepSeek, Meta, Mistral, Microsoft)
 - **Quality Tracking** — Per-model reporting with context utilization metrics
-- **Automated Benchmarks** — Evaluation suite with LLM-as-judge pairwise comparison
 
 ## Supported Models
 
@@ -39,7 +38,6 @@ and continuously calibrates model ratings via Bradley-Terry scoring.
 | `pyreez_report` | Record LLM call results or retrieve quality summaries |
 | `pyreez_deliberate` | Run multi-model consensus-based deliberation |
 | `pyreez_calibrate` | Update Bradley-Terry ratings from usage data |
-| `pyreez_benchmark` | Run automated eval pipeline: prompts → pairwise comparison → BT update |
 
 ## Quick Start
 
@@ -105,8 +103,8 @@ Host Agent (Copilot / Claude Desktop)
 │  └─────────┘                        │
 │  ┌─────────┐  ┌──────────────────┐  │
 │  │ Model   │  │ Evaluation       │  │
-│  │ Registry│  │ benchmark,judge  │  │
-│  │ BT score│  │ pairwise,calibr. │  │
+│  │ Registry│  │ calibration, BT  │  │
+│  │ BT score│  │ anchoring        │  │
 │  └─────────┘  └──────────────────┘  │
 │  ┌─────────┐  ┌──────────────────┐  │
 │  │ Reporter│  │ LLM Client       │  │

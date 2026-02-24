@@ -303,17 +303,45 @@ describe("executeRound", () => {
     expect(round.reviews[1]!.reasoning).toContain("error");
   });
 
-  it("should handle all reviewer failures with fallback reviews", async () => {
+  it("should throw RoundExecutionError when all reviewers fail", async () => {
+    // Arrange — all reviewers fail
     const chat = chatSequence([
       PRODUCTION_JSON,
       new Error("rev0 down"),
       new Error("rev1 down"),
-      SYNTHESIS_CONTINUE_JSON,
+      SYNTHESIS_CONTINUE_JSON, // leader never reached
     ]);
     const deps = makeDeps({ chat });
     const team = makeTeam(2);
     const input = makeInput();
 
+    // Act & Assert — all reviewers failed → RoundExecutionError("reviewer")
+    await expect(
+      executeRound(
+        { task: input.task, team, rounds: [] },
+        1,
+        deps,
+        { maxRounds: 3, consensus: "leader_decides" },
+        input,
+      ),
+    ).rejects.toThrow(RoundExecutionError);
+  });
+
+  it("should not throw when reviewers list is empty", async () => {
+    // Arrange — team with 0 reviewers → no allFailed guard applies
+    const chat = chatSequence([
+      PRODUCTION_JSON,
+      SYNTHESIS_CONTINUE_JSON,
+    ]);
+    const deps = makeDeps({ chat });
+    const team: TeamComposition = {
+      producer: { model: "producer/model", role: "producer" },
+      reviewers: [],
+      leader: { model: "leader/model", role: "leader" },
+    };
+    const input = makeInput();
+
+    // Act — should not throw
     const round = await executeRound(
       { task: input.task, team, rounds: [] },
       1,
@@ -322,8 +350,31 @@ describe("executeRound", () => {
       input,
     );
 
-    expect(round.reviews).toHaveLength(2);
-    expect(round.reviews.every((r) => r.approval === false)).toBe(true);
+    // Assert — empty reviews, no throw
+    expect(round.reviews).toHaveLength(0);
+  });
+
+  it("should throw RoundExecutionError when single reviewer fails as only reviewer", async () => {
+    // Arrange — 1 reviewer team, that reviewer fails
+    const chat = chatSequence([
+      PRODUCTION_JSON,
+      new Error("only reviewer down"),
+      SYNTHESIS_CONTINUE_JSON, // never reached
+    ]);
+    const deps = makeDeps({ chat });
+    const team = makeTeam(1); // single reviewer
+    const input = makeInput();
+
+    // Act & Assert
+    await expect(
+      executeRound(
+        { task: input.task, team, rounds: [] },
+        1,
+        deps,
+        { maxRounds: 3, consensus: "leader_decides" },
+        input,
+      ),
+    ).rejects.toThrow(RoundExecutionError);
   });
 
   it("should propagate error when leader chat throws", async () => {
@@ -1375,5 +1426,82 @@ describe("deliberate retry", () => {
         makeRetryDeps(["producer/bad1", "producer/bad2", "reviewer/model-0", "reviewer/model-1", "leader/model"]),
       ),
     ).rejects.toThrow();
+  });
+
+  it("should throw RoundExecutionError when all reviewers fail and retryDeps absent", async () => {
+    // Arrange — all reviewers fail, no retryDeps
+    const chat = mock(async (model: string) => {
+      if (model.startsWith("reviewer/")) throw new Error("reviewer dead");
+      return PRODUCTION_JSON;
+    });
+    const team = makeTeam(2);
+
+    await expect(
+      deliberate(
+        team,
+        makeInput(),
+        makeDeps({ chat }),
+        { maxRounds: 1, consensus: "leader_decides" },
+        undefined, // no retryDeps
+      ),
+    ).rejects.toThrow(RoundExecutionError);
+  });
+
+  it("should replace reviewers and succeed when all-reviewer failure occurs with retryDeps", async () => {
+    // Arrange — bad reviewers fail, replacement reviewers succeed
+    const badReviewers = new Set(["reviewer/model-0", "reviewer/model-1"]);
+    const chat = mock(async (model: string) => {
+      if (badReviewers.has(model)) throw new Error("bad reviewer");
+      if (model === "producer/model") return PRODUCTION_JSON;
+      if (model.startsWith("leader/")) return SYNTHESIS_APPROVE_JSON;
+      // replacement reviewer
+      return REVIEW_APPROVE_JSON;
+    });
+
+    const replacementReviewer0 = "reviewer/replacement-0";
+    const replacementReviewer1 = "reviewer/replacement-1";
+    const team = makeTeam(2); // uses reviewer/model-0, reviewer/model-1
+
+    const result = await deliberate(
+      team,
+      makeInput(),
+      makeDeps({ chat }),
+      { maxRounds: 1, consensus: "leader_decides" },
+      makeRetryDeps([
+        "reviewer/model-0",
+        "reviewer/model-1",
+        "producer/model",
+        "leader/model",
+        replacementReviewer0,
+        replacementReviewer1,
+      ]),
+    );
+
+    expect(result.consensusReached).toBe(true);
+  });
+
+  it("should propagate error when retryDeps present but no available reviewer replacement", async () => {
+    // Arrange — all reviewers fail and no replacement available
+    const chat = mock(async (model: string) => {
+      if (model.startsWith("reviewer/")) throw new Error("all reviewers dead");
+      return PRODUCTION_JSON;
+    });
+    const team = makeTeam(2);
+
+    await expect(
+      deliberate(
+        team,
+        makeInput(),
+        makeDeps({ chat }),
+        { maxRounds: 1, consensus: "leader_decides" },
+        makeRetryDeps([
+          "reviewer/model-0",
+          "reviewer/model-1",
+          "producer/model",
+          "leader/model",
+          // no reviewer replacements available
+        ]),
+      ),
+    ).rejects.toThrow(RoundExecutionError);
   });
 });

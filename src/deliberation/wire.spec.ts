@@ -693,6 +693,62 @@ describe("createDeliberateFn", () => {
     mockComposeTeam.mockReset();
     mockDeliberate.mockReset();
   });
+
+  it("should pass retryDeps as 5th argument to deliberate", async () => {
+    // Arrange
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_OUTPUT);
+
+    const registry = {
+      getAll: () => [stubModel("a/1")],
+      getAvailable: () => [stubModel("a/1")],
+      getById: () => stubModel("a/1"),
+    };
+    const fn = createDeliberateFn({ registry, chat: mock(async () => "") });
+
+    // Act
+    await fn({ task: "t", perspectives: ["p"] });
+
+    // Assert — 5th argument (retryDeps) must be defined
+    const callArgs = mockDeliberate.mock.calls[0] as unknown[];
+    expect(callArgs).toHaveLength(5);
+    const retryDeps = callArgs[4] as { cooldown: unknown; getModels: () => unknown[] };
+    expect(retryDeps).toBeDefined();
+    expect(typeof retryDeps.cooldown).toBe("object");
+    expect(typeof retryDeps.getModels).toBe("function");
+
+    // Cleanup
+    mockComposeTeam.mockReset();
+    mockDeliberate.mockReset();
+  });
+
+  it("should delegate retryDeps.getModels to registry.getAvailable", async () => {
+    // Arrange
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_OUTPUT);
+
+    const available = [stubModel("a/1"), stubModel("b/2")];
+    const getAvailable = mock(() => available);
+    const registry = {
+      getAll: () => [],
+      getAvailable,
+      getById: () => undefined,
+    };
+    const fn = createDeliberateFn({ registry, chat: mock(async () => "") });
+
+    // Act
+    await fn({ task: "t", perspectives: ["p"] });
+
+    // Assert — retryDeps.getModels() returns registry.getAvailable() result
+    const callArgs = mockDeliberate.mock.calls[0] as unknown[];
+    const retryDeps = callArgs[4] as { getModels: () => unknown[] };
+    const models = retryDeps.getModels();
+    expect(models).toEqual(available);
+
+    // Cleanup
+    mockComposeTeam.mockReset();
+    mockDeliberate.mockReset();
+  });
 });
 
 // =============================================================
@@ -1327,5 +1383,149 @@ describe("createChatAdapter", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.willRetry).toBe(false);
     expect(events[0]!.delayMs).toBe(0);
+  });
+
+  // =============================================================
+  // maxRetryAfterMs cap
+  // =============================================================
+
+  it("should cap delay to maxRetryAfterMs when retryAfterMs exceeds cap", async () => {
+    // Arrange — retryAfterMs=200, cap=100 → delay should be ≤ 100 * jitter
+    let callCount = 0;
+    const delays: number[] = [];
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1)
+        return Promise.reject(
+          new LLMClientError(429, "limit", "rate_limit_error", 200),
+        );
+      return Promise.resolve(okResponse("ok"));
+    });
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      maxRetryAfterMs: 100,
+      randomFn: () => 1,
+      onRetry: (e) => delays.push(e.delayMs),
+    });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert — reported delay must be ≤ cap (100)
+    expect(delays).toHaveLength(1);
+    expect(delays[0]).toBeLessThanOrEqual(100);
+  });
+
+  it("should not cap delay when retryAfterMs is below maxRetryAfterMs", async () => {
+    // Arrange — retryAfterMs=50, cap=100 → delay should use 50 (uncapped)
+    let callCount = 0;
+    const delays: number[] = [];
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1)
+        return Promise.reject(
+          new LLMClientError(429, "limit", "rate_limit_error", 50),
+        );
+      return Promise.resolve(okResponse("ok"));
+    });
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      maxRetryAfterMs: 100,
+      randomFn: () => 1,
+      onRetry: (e) => delays.push(e.delayMs),
+    });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert — delay is based on uncapped retryAfterMs=50 * jitter (randomFn=1 → 1.0 multiplier)
+    expect(delays).toHaveLength(1);
+    expect(delays[0]).toBe(50 * 1.0);
+  });
+
+  it("should use retryAfterMs unchanged when maxRetryAfterMs is undefined", async () => {
+    // Arrange — no cap, retryAfterMs=50
+    let callCount = 0;
+    const delays: number[] = [];
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1)
+        return Promise.reject(
+          new LLMClientError(429, "limit", "rate_limit_error", 50),
+        );
+      return Promise.resolve(okResponse("ok"));
+    });
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      // maxRetryAfterMs: undefined (not set)
+      randomFn: () => 1,
+      onRetry: (e) => delays.push(e.delayMs),
+    });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert — delay is 50 * jitter (randomFn=1 → multiplier=(0.5+1*0.5)=1.0)
+    expect(delays).toHaveLength(1);
+    expect(delays[0]).toBe(50 * 1.0);
+  });
+
+  it("should cap delay to 0 when maxRetryAfterMs is 0", async () => {
+    // Arrange — cap=0 → delay always 0 regardless of retryAfterMs
+    let callCount = 0;
+    const delays: number[] = [];
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1)
+        return Promise.reject(
+          new LLMClientError(429, "limit", "rate_limit_error", 200),
+        );
+      return Promise.resolve(okResponse("ok"));
+    });
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      maxRetryAfterMs: 0,
+      randomFn: () => 1,
+      onRetry: (e) => delays.push(e.delayMs),
+    });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert — delay reported as 0 (cap applied before jitter)
+    expect(delays).toHaveLength(1);
+    expect(delays[0]).toBe(0);
+  });
+
+  it("should result in same delay when retryAfterMs equals maxRetryAfterMs", async () => {
+    // Arrange — retryAfterMs=100, cap=100 → min(100, 100) = 100, then jitter
+    let callCount = 0;
+    const delays: number[] = [];
+    const chatFn = mock(() => {
+      callCount++;
+      if (callCount === 1)
+        return Promise.reject(
+          new LLMClientError(429, "limit", "rate_limit_error", 100),
+        );
+      return Promise.resolve(okResponse("ok"));
+    });
+    const adapter = createChatAdapter(chatFn, {
+      maxRetries: 3,
+      baseDelayMs: 1,
+      maxRetryAfterMs: 100,
+      randomFn: () => 1,
+      onRetry: (e) => delays.push(e.delayMs),
+    });
+
+    // Act
+    await adapter("m", [{ role: "user", content: "hi" }]);
+
+    // Assert — delay = 100 * jitter (randomFn=1 → 1.0 multiplier)
+    expect(delays).toHaveLength(1);
+    expect(delays[0]).toBe(100 * 1.0);
   });
 });

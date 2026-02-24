@@ -20,15 +20,6 @@ import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 import type { DeliberationStore } from "../deliberation/store-types";
 import { stripThinkTags } from "../deliberation/wire";
 import type { CalibrationResult } from "../model/calibration";
-import type { BenchmarkPipelineResult } from "../evaluation/pipeline";
-
-export interface BenchmarkConfig {
-  readonly modelIds: string[];
-  readonly anchorModelId: string;
-  readonly domains?: string[];
-  readonly difficulties?: string[];
-  readonly positionSwap?: boolean;
-}
 
 export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
@@ -41,7 +32,6 @@ export interface PyreezMcpServerConfig {
   deliberationStore?: DeliberationStore;
   runLogger?: RunLogger;
   calibrateFn?: () => Promise<CalibrationResult>;
-  benchmarkFn?: (config: BenchmarkConfig) => Promise<BenchmarkPipelineResult>;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -57,7 +47,6 @@ export class PyreezMcpServer {
   private readonly deliberationStore?: DeliberationStore;
   private readonly runLogger?: RunLogger;
   private readonly calibrateFn?: () => Promise<CalibrationResult>;
-  private readonly benchmarkFn?: (config: BenchmarkConfig) => Promise<BenchmarkPipelineResult>;
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -86,7 +75,6 @@ export class PyreezMcpServer {
     this.deliberationStore = config.deliberationStore;
     this.runLogger = config.runLogger;
     this.calibrateFn = config.calibrateFn;
-    this.benchmarkFn = config.benchmarkFn;
 
     this.registerTools();
   }
@@ -316,36 +304,6 @@ export class PyreezMcpServer {
         inputSchema: z.object({}),
       },
       async () => this.handleCalibrate(),
-    );
-
-    this.mcpServer.registerTool(
-      "pyreez_benchmark",
-      {
-        title: "Pyreez Benchmark",
-        description:
-          "Run automated benchmark pipeline: evaluation prompts → pairwise comparison → BT rating update → persist. Submit parameters in English.",
-        inputSchema: z.object({
-          modelIds: z
-            .array(z.string())
-            .describe("Model IDs to evaluate"),
-          anchorModelId: z
-            .string()
-            .describe("Anchor model ID for pairwise comparison"),
-          domains: z
-            .array(z.string())
-            .optional()
-            .describe("Filter prompts by evaluation domain"),
-          difficulties: z
-            .array(z.string())
-            .optional()
-            .describe("Filter prompts by difficulty level"),
-          position_swap: z
-            .boolean()
-            .optional()
-            .describe("Whether to run position-swapped pairs (default: true)"),
-        }),
-      },
-      async (args) => this.handleBenchmark(args),
     );
   }
 
@@ -708,40 +666,6 @@ export class PyreezMcpServer {
       }
       try {
         const result = await this.calibrateFn();
-        return this.textResult(JSON.stringify(result, null, 2));
-      } catch (error) {
-        return this.errorResult(
-          `Error: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    });
-  }
-
-  async handleBenchmark(args: {
-    modelIds: string[];
-    anchorModelId: string;
-    domains?: string[];
-    difficulties?: string[];
-    position_swap?: boolean;
-  }): Promise<CallToolResult> {
-    return this.logRun("benchmark", async () => {
-      if (!this.benchmarkFn) {
-        return this.errorResult("Error: benchmark not available");
-      }
-      if (!args.modelIds?.length) {
-        return this.errorResult("Error: modelIds must not be empty");
-      }
-      if (!args.anchorModelId) {
-        return this.errorResult("Error: anchorModelId is required");
-      }
-      try {
-        const result = await this.benchmarkFn({
-          modelIds: args.modelIds,
-          anchorModelId: args.anchorModelId,
-          domains: args.domains,
-          difficulties: args.difficulties,
-          positionSwap: args.position_swap,
-        });
         return this.textResult(JSON.stringify(result, null, 2));
       } catch (error) {
         return this.errorResult(

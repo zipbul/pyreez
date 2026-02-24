@@ -23,6 +23,7 @@ import type {
   SharedContext,
   Synthesis,
   TeamComposition,
+  TeamMember,
 } from "./types";
 import {
   createSharedContext,
@@ -39,11 +40,11 @@ import type { RoundInfo } from "./prompts";
 
 /**
  * Error thrown by executeRound when a specific role's LLM call fails.
- * Identifies the role (producer/leader) and model that caused the failure.
+ * Identifies the role (producer/reviewer/leader) and model that caused the failure.
  */
 export class RoundExecutionError extends Error {
   constructor(
-    public readonly role: "producer" | "leader",
+    public readonly role: "producer" | "reviewer" | "leader",
     public readonly modelId: string,
     public readonly cause: unknown,
   ) {
@@ -279,6 +280,14 @@ export async function executeRound(
   });
 
   const settled = await Promise.allSettled(reviewerPromises);
+
+  // If ALL reviewers failed, treat as a hard error (not a silent fallback)
+  if (ctx.team.reviewers.length > 0 && settled.every((r) => r.status === "rejected")) {
+    const firstFailure = settled[0] as PromiseRejectedResult;
+    const failedModel = ctx.team.reviewers[0]!.model;
+    throw new RoundExecutionError("reviewer", failedModel, firstFailure.reason);
+  }
+
   const reviews: Review[] = settled.map((result, i) => {
     if (result.status === "fulfilled") return result.value;
     const reviewer = ctx.team.reviewers[i]!;
@@ -370,6 +379,27 @@ export async function deliberate(
               ...currentTeam,
               producer: { model: replacement.id, role: "producer" },
             };
+          } else if (error.role === "reviewer") {
+            // Replace all reviewers with fresh models
+            const reviewerCount = currentTeam.reviewers.length;
+            const newReviewers: TeamMember[] = [];
+            const usedIds = new Set(teamMemberIds);
+            for (let ri = 0; ri < reviewerCount; ri++) {
+              const replacement = selectTopModel(
+                retryDeps.getModels(),
+                PRODUCER_DIMS,
+                usedIds,
+              );
+              if (!replacement) break;
+              newReviewers.push({
+                model: replacement.id,
+                role: "reviewer" as const,
+                perspective: currentTeam.reviewers[ri]?.perspective,
+              });
+              usedIds.add(replacement.id);
+            }
+            if (newReviewers.length < reviewerCount) break;
+            currentTeam = { ...currentTeam, reviewers: newReviewers };
           } else {
             const replacement = selectTopModel(
               retryDeps.getModels(),

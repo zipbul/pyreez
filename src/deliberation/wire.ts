@@ -14,11 +14,12 @@ import type { ChatMessage, ChatCompletionResponse } from "../llm/types";
 import { LLMClientError } from "../llm/client";
 import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput } from "./types";
-import type { EngineDeps, EngineConfig } from "./engine";
+import type { EngineDeps, EngineConfig, RetryDeps } from "./engine";
 import type { DeliberationStore } from "./store-types";
 import { composeTeam } from "./team-composer";
 import type { ComposeTeamOptions } from "./team-composer";
 import { deliberate } from "./engine";
+import { createCooldownManager } from "./cooldown";
 import {
   buildProducerMessages,
   buildReviewerMessages,
@@ -71,6 +72,12 @@ export interface ChatAdapterOptions {
   readonly randomFn?: () => number;
   /** Callback invoked on each retryable error. Use for telemetry/event collection. */
   readonly onRetry?: (event: RetryEvent) => void;
+  /**
+   * Maximum delay in ms applied to retryAfterMs before jitter.
+   * Prevents extremely long waits when the server returns a large Retry-After header.
+   * When undefined, no cap is applied.
+   */
+  readonly maxRetryAfterMs?: number;
 }
 
 /**
@@ -129,9 +136,13 @@ export function createChatAdapter(
           opts.retryableStatuses.includes(error.status)
         ) {
           const willRetry = attempt < opts.maxRetries;
-          const baseDelay = willRetry
+          const rawDelay = willRetry
             ? (error.retryAfterMs ?? opts.baseDelayMs * 2 ** attempt)
             : 0;
+          const baseDelay =
+            willRetry && opts.maxRetryAfterMs != null
+              ? Math.min(rawDelay, opts.maxRetryAfterMs)
+              : rawDelay;
           const jitter = willRetry ? 0.5 + opts.randomFn() * 0.5 : 1;
           const delay = baseDelay * jitter;
 
@@ -208,8 +219,14 @@ export function createDeliberateFn(
           }
         : undefined;
 
-    // 5. Run deliberation
-    const result = await deliberate(team, input, engineDeps, config);
+    // 5. Build retryDeps for automatic team recomposition on failure
+    const retryDeps: RetryDeps = {
+      cooldown: createCooldownManager(),
+      getModels: () => deps.registry.getAvailable(),
+    };
+
+    // 6. Run deliberation
+    const result = await deliberate(team, input, engineDeps, config, retryDeps);
 
     // 6. Auto-save to store (best-effort, errors are swallowed)
     if (deps.store) {

@@ -1,7 +1,12 @@
-T8 benchmark loadPrompts — 구조적 미구현. index.ts 95행에서 throw new Error("No prompt source configured"). 평가 프롬프트 JSON/JSONL 파일을 만들고 loadPrompts를 실제 파일 로더로 교체해야 함.
+## Deliberation Resilience
 
-T6 deliberate — LLM API 예산 한도. 예산 충전 후 재실행 가능.
+**retryAfterMs 상한**
+- `src/llm/client.ts`: `Retry-After` 헤더 값에 상한(30 s) 적용
+- `src/deliberation/wire.ts`: `chatAdapter` 에 `maxRetryAfterMs` 옵션 전달
 
-T1 route — MCP 서버가 구 코드(f41efeb 이전)로 실행 중. VS Code Command Palette → MCP: Restart Server 또는 mcp.json 재저장으로 재시작 필요.
+**retryDeps 연결**
+- `src/deliberation/wire.ts`: `deliberate()` 5번째 인자 `retryDeps` 전달 (cooldown + getModels)
 
-블라킹 무한대기시 태스크 취소해야됨
+**Reviewer 장애 처리**
+- `src/deliberation/engine.ts`: 모든 reviewer 가 실패하면 라운드 중단
+- `src/deliberation/engine.ts`: reviewer 교체/승격 로직 추가

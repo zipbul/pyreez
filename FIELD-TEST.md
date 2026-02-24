@@ -759,10 +759,9 @@ Input: {
 | 5 | T5 (report × 4) | 4 | 0 | Free (file I/O) |
 | 6 | T6 (deliberate × 7) | 7 | ~40-56 | **High** |
 | 7 | T7 (calibrate × 2) | 2 | ~10-20 | Medium |
-| 8 | T8 (benchmark × 2) | 2 | ~15-30 | **High** |
 
-**Total estimate:** ~51 scenarios, ~82-123 LLM calls.
-Without T6/T7/T8: ~17 LLM calls (T2 + T3 only).
+**Total estimate:** ~49 scenarios, ~67-93 LLM calls.
+Without T6/T7: ~17 LLM calls (T2 + T3 only).
 
 ---
 
@@ -785,9 +784,9 @@ After all scenarios complete:
 
 ```
 ### Field Test Summary
-- Total: XX/51 PASS
+- Total: XX/49 PASS
 - By Tier: T-1=X/5, T-2=X/6, T-3=X/5, T-4=X/5
-- By Tool: T1=X/21, T2=X/6, T3=X/5, T4=X/4, T5=X/4, T6=X/7, T7=X/2, T8=X/2
+- By Tool: T1=X/21, T2=X/6, T3=X/5, T4=X/4, T5=X/4, T6=X/7, T7=X/2
 - Dimension Coverage: Classification=X, Interpretation=X, Intent=X, Constraint=X, Robustness=X
 - Total LLM Calls: XX
 - Critical Failures: (list any)
