@@ -13,6 +13,9 @@ import type { CapabilityRequirement } from "../profile/types";
 import type { TaskRequirement } from "../profile/types";
 import { selectModel } from "../router/selector";
 import type { BudgetConfig as RouterBudgetConfig } from "../router/types";
+import { gate } from "../router/gating";
+import { buildCascadeChain, passesGate } from "../router/cascade";
+import { PreferenceTable, routeByPreference } from "../router/preference";
 import { ModelRegistry } from "../model/registry";
 import type { CapabilityDimension, ModelInfo } from "../model/types";
 
@@ -292,6 +295,174 @@ export class RoleBasedProtocol implements DeliberationProtocol {
       totalLLMCalls: 1,
       modelsUsed: [primaryId],
       protocol: "role-based",
+    };
+  }
+}
+
+// ============================================================
+// Phase 2 — MoeGatingProfiler (R-B3)
+// ============================================================
+
+/**
+ * Wraps MoE gating network (`gate()` from router/gating.ts) to produce
+ * AxisTaskRequirement. Uses taskType+domain to compute softmax expert weights
+ * automatically — no hardcoded lookup tables.
+ */
+export class MoeGatingProfiler implements Profiler {
+  async profile(input: ClassifyOutput): Promise<AxisTaskRequirement> {
+    const result = gate(input.taskType, input.domain);
+
+    // Convert DimensionWeights record → capabilities Record<string, number>
+    const capabilities: Record<string, number> = {};
+    for (const [dim, weight] of Object.entries(result.weights)) {
+      if (weight >= 0.01) {
+        capabilities[dim] = weight;
+      }
+    }
+
+    // Normalize (gate() already normalizes, but defensive re-normalize)
+    const total = Object.values(capabilities).reduce((a, b) => a + b, 0);
+    if (total > 0 && Math.abs(total - 1.0) > 0.001) {
+      for (const k of Object.keys(capabilities)) {
+        capabilities[k] = capabilities[k]! / total;
+      }
+    }
+
+    return {
+      capabilities,
+      constraints: {
+        requiresKorean: input.language === "ko",
+      },
+      budget: {},
+      criticality: input.criticality,
+    };
+  }
+}
+
+// ============================================================
+// Phase 2 — CascadeSelector (R-C3)
+// ============================================================
+
+/** Confidence threshold for accepting a model in the cascade chain. */
+const CASCADE_CONFIDENCE_THRESHOLD = 0.50;
+
+/**
+ * Wraps FrugalGPT-style cascade (router/cascade.ts).
+ * Sorts models by cost (cheapest first); picks first model whose normalized
+ * BT overall score exceeds the confidence threshold.
+ *
+ * Note: Real confidence checking (LLM-based) is a Phase 6+ feature.
+ * Phase 2 uses model's overall BT score as a static proxy.
+ */
+export class CascadeSelector implements Selector {
+  async select(
+    req: AxisTaskRequirement,
+    scores: ModelScore[],
+    budget: BudgetConfig,
+  ): Promise<EnsemblePlan> {
+    const registry = getRegistry();
+
+    // Build ModelInfo[] from scores (preserving BT-patched capabilities)
+    const models: Array<{ model: ModelInfo; score: ModelScore; estimatedCost: number }> = [];
+    const inputTokens = req.estimatedInputTokens ?? 500;
+    const outputTokens = req.estimatedOutputTokens ?? 500;
+
+    for (const score of scores) {
+      const info = registry.getById(score.modelId);
+      if (!info) continue;
+      const cost =
+        (inputTokens * info.cost.inputPer1M + outputTokens * info.cost.outputPer1M) / 1_000_000;
+      models.push({ model: info, score, estimatedCost: cost });
+    }
+
+    // Sort cheapest first
+    models.sort((a, b) => a.estimatedCost - b.estimatedCost);
+
+    let selected: string | null = null;
+    let totalCost = 0;
+    let lastModelId = models[0]?.model.id ?? "";
+
+    for (const { model, score, estimatedCost } of models) {
+      if (totalCost + estimatedCost > budget.perRequest && budget.perRequest > 0) break;
+
+      lastModelId = model.id;
+      totalCost += estimatedCost;
+
+      // Static confidence = overall / 1000 (mu scale 0-1000 → 0-1)
+      const confidence = score.overall / 1000;
+      if (passesGate(confidence, CASCADE_CONFIDENCE_THRESHOLD)) {
+        selected = model.id;
+        break;
+      }
+    }
+
+    // Fallback: use last attempted
+    const chosenId = selected ?? lastModelId;
+
+    return {
+      models: [{ modelId: chosenId, role: "primary", weight: 1.0 }],
+      strategy: "cascade",
+      estimatedCost: totalCost,
+      reason: selected
+        ? `Cascade accepted "${chosenId}" (confidence above threshold)`
+        : `Cascade fallback to "${chosenId}" (no model passed gate)`,
+    };
+  }
+}
+
+// ============================================================
+// Phase 2 — PreferenceSelector (R-C4)
+// ============================================================
+
+/**
+ * Wraps win/loss preference router (router/preference.ts).
+ * Uses accumulated W/L/T history per taskType to rank models.
+ * Falls back to overall BT score ordering when no preference data exists.
+ *
+ * Accepts an optional pre-populated PreferenceTable for testing/injection.
+ */
+export class PreferenceSelector implements Selector {
+  constructor(private readonly table: PreferenceTable = new PreferenceTable()) {}
+
+  async select(
+    req: AxisTaskRequirement,
+    scores: ModelScore[],
+    _budget: BudgetConfig,
+  ): Promise<EnsemblePlan> {
+    const modelIds = scores.map((s) => s.modelId);
+    // Use criticality as proxy for taskType key (best available without classify roundtrip)
+    const taskKey = req.criticality ?? "general";
+
+    const rankings = routeByPreference(this.table, taskKey, modelIds);
+
+    // Find best ranked model that has non-zero confidence (has preference data)
+    const withData = rankings.filter((r) => r.confidence > 0);
+    let chosenId: string;
+    let reason: string;
+
+    if (withData.length > 0) {
+      // Pick highest win-rate model
+      chosenId = withData[0]!.modelId;
+      reason = `Preference routing: "${chosenId}" win-rate=${withData[0]!.score.toFixed(2)}`;
+    } else {
+      // Fallback: sort by overall BT score
+      const sorted = [...scores].sort((a, b) => b.overall - a.overall);
+      chosenId = sorted[0]?.modelId ?? modelIds[0] ?? "unknown";
+      reason = `Preference fallback (no history): BT overall top model "${chosenId}"`;
+    }
+
+    const info = getRegistry().getById(chosenId);
+    const inputTokens = req.estimatedInputTokens ?? 500;
+    const outputTokens = req.estimatedOutputTokens ?? 500;
+    const estimatedCost = info
+      ? (inputTokens * info.cost.inputPer1M + outputTokens * info.cost.outputPer1M) / 1_000_000
+      : 0;
+
+    return {
+      models: [{ modelId: chosenId, role: "primary", weight: 1.0 }],
+      strategy: "preference",
+      estimatedCost,
+      reason,
     };
   }
 }

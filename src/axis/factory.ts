@@ -17,7 +17,10 @@ import {
   KeywordClassifier,
   BtScoringSystem,
   DomainOverrideProfiler,
+  MoeGatingProfiler,
   TwoTrackCeSelector,
+  CascadeSelector,
+  PreferenceSelector,
   RoleBasedProtocol,
 } from "./wrappers";
 import type { AxisConfig, ChatFn } from "./types";
@@ -119,16 +122,23 @@ function buildProfiler(config: AxisConfig): Profiler {
     case "domain-override":
       return new DomainOverrideProfiler();
     case "moe-gating":
-      // Phase 1 stub — use domain-override as MoE placeholder
-      return new DomainOverrideProfiler();
+      return new MoeGatingProfiler();
     default:
       return new DomainOverrideProfiler();
   }
 }
 
-function buildSelector(_config: AxisConfig): Selector {
-  // Phase 1: only 2track-ce is implemented
-  return new TwoTrackCeSelector();
+function buildSelector(config: AxisConfig): Selector {
+  switch (config.selector) {
+    case "2track-ce":
+      return new TwoTrackCeSelector();
+    case "cascade":
+      return new CascadeSelector();
+    case "preference":
+      return new PreferenceSelector();
+    default:
+      return new TwoTrackCeSelector();
+  }
 }
 
 function buildDeliberation(_config: AxisConfig): DeliberationProtocol {
