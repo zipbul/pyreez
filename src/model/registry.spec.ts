@@ -48,7 +48,7 @@ describe("ModelRegistry", () => {
 
       // Assert
       expect(model).toBeDefined();
-      expect(model!.capabilities.REASONING.mu).toBe(900);
+      expect(model!.capabilities.REASONING.mu).toBe(1000);  // calibrated: 900→1000 (comparisons=12)
       expect(model!.capabilities.CODE_GENERATION.mu).toBe(900);
       expect(model!.contextWindow).toBe(1_000_000);
     });
