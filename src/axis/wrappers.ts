@@ -18,6 +18,13 @@ import { buildCascadeChain, passesGate } from "../router/cascade";
 import { PreferenceTable, routeByPreference } from "../router/preference";
 import { ModelRegistry } from "../model/registry";
 import type { CapabilityDimension, ModelInfo } from "../model/types";
+import {
+  STEP_PROFILES,
+  STEP_DOMAIN,
+  STEP_KEYWORD_MAP,
+  stepToDimensions,
+} from "./step-types";
+import type { WorkflowStep } from "./step-types";
 
 import type {
   ClassifyOutput,
@@ -463,6 +470,242 @@ export class PreferenceSelector implements Selector {
       strategy: "preference",
       estimatedCost,
       reason,
+    };
+  }
+}
+
+// ============================================================
+// Phase 3 — StepProfiler (R-B2)
+// ============================================================
+
+/**
+ * 1-level WorkflowStep → dimension weight lookup.
+ * Uses STEP_PROFILES from step-types.ts. No domain-level fallback needed;
+ * GENERAL profile serves as the universal default.
+ */
+export class StepProfiler implements Profiler {
+  async profile(input: ClassifyOutput): Promise<AxisTaskRequirement> {
+    const step = (input.taskType as WorkflowStep) ?? "GENERAL";
+    const profile = STEP_PROFILES[step] ?? STEP_PROFILES.GENERAL;
+
+    // Deep copy so callers can't mutate the static table
+    const capabilities: Record<string, number> = { ...profile };
+
+    return {
+      capabilities,
+      constraints: {
+        requiresKorean: input.language === "ko",
+      },
+      budget: {},
+      criticality: input.criticality,
+    };
+  }
+}
+
+// ============================================================
+// Phase 3 — StepDeclareClassifier (R-A2)
+// ============================================================
+
+/** Rough word-count heuristic for complexity (no external deps). */
+function estimateComplexityFromPrompt(
+  prompt: string,
+): ClassifyOutput["complexity"] {
+  const words = prompt.trim().split(/\s+/).length;
+  if (words < 20) return "simple";
+  if (words < 80) return "moderate";
+  return "complex";
+}
+
+/** Default criticality per step. */
+const STEP_DEFAULT_CRITICALITY: Partial<Record<WorkflowStep, ClassifyOutput["criticality"]>> = {
+  DEPLOY:      "high",
+  DEBUG:       "medium",
+  VALIDATE:    "medium",
+  REVIEW:      "medium",
+  CONFIGURE:   "medium",
+};
+
+/**
+ * Accepts an explicit `step` hint from the orchestrator (via RouteHints.step)
+ * and directly produces a ClassifyOutput with vocabKind="step".
+ *
+ * When no step hint is provided, falls back to KeywordClassifier behaviour
+ * (vocabKind="taskType"), preserving full backward compatibility.
+ */
+export class StepDeclareClassifier implements Classifier {
+  private readonly keyword = new KeywordClassifier();
+
+  async classify(prompt: string, hints?: RouteHints): Promise<ClassifyOutput> {
+    const step = hints?.step?.toUpperCase() as WorkflowStep | undefined;
+
+    if (!step) {
+      // No step declared → fall back to keyword classifier
+      return this.keyword.classify(prompt, hints);
+    }
+
+    const domain = STEP_DOMAIN[step] ?? STEP_DOMAIN.GENERAL;
+    const criticality: ClassifyOutput["criticality"] =
+      STEP_DEFAULT_CRITICALITY[step] ?? "low";
+
+    return {
+      domain,
+      taskType: step,
+      vocabKind: "step",
+      complexity: estimateComplexityFromPrompt(prompt),
+      criticality,
+      method: "step-declare",
+    };
+  }
+}
+
+// ============================================================
+// Phase 3 — StepBtScoringSystem (S1-b)
+// ============================================================
+
+/**
+ * WorkflowStep-aware BT scoring system.
+ * getScores() is identical to BtScoringSystem (reads from registry).
+ * update() (Phase 5 stub) uses stepToDimensions() instead of taskToDimensions()
+ * to map comparison results to the correct capability dimensions.
+ */
+export class StepBtScoringSystem implements ScoringSystem {
+  async getScores(modelIds: string[]): Promise<ModelScore[]> {
+    const registry = getRegistry();
+    const results: ModelScore[] = [];
+
+    for (const id of modelIds) {
+      const model = registry.getById(id);
+      if (!model) continue;
+
+      const dimensions: Record<string, { mu: number; sigma: number }> = {};
+      for (const [dim, rating] of Object.entries(model.capabilities)) {
+        dimensions[dim] = { mu: rating.mu, sigma: rating.sigma };
+      }
+
+      results.push({
+        modelId: id,
+        dimensions,
+        overall: computeOverall(dimensions),
+      });
+    }
+
+    return results;
+  }
+
+  /** Phase 5 stub — uses stepToDimensions() when fully implemented. */
+  async update(_results: PairwiseResult[]): Promise<void> {
+    // TODO: Phase 5 — stepToDimensions(result.taskType) for dimension selection
+    void stepToDimensions; // reference so tree-shaking keeps the import
+  }
+}
+
+// ============================================================
+// Phase 3 — FourStrategySelector (R-C2)
+// ============================================================
+
+type FourStrategy = "economy" | "balanced" | "premium" | "critical";
+
+/** Infer strategy from criticality when budget.strategy is not set. */
+function inferStrategy(req: AxisTaskRequirement): FourStrategy {
+  if (req.budget?.strategy) {
+    const s = req.budget.strategy as FourStrategy;
+    if (["economy", "balanced", "premium", "critical"].includes(s)) return s;
+  }
+  switch (req.criticality) {
+    case "critical": return "critical";
+    case "high":     return "premium";
+    case "medium":   return "balanced";
+    default:         return "economy";
+  }
+}
+
+/**
+ * Four-strategy model selector (R-C2):
+ * - economy:  cheapest model (cost ASC)
+ * - balanced: best cost-efficiency (score / cost)
+ * - premium:  highest capability score (score DESC)
+ * - critical: same as premium, budget cap ignored
+ */
+export class FourStrategySelector implements Selector {
+  async select(
+    req: AxisTaskRequirement,
+    scores: ModelScore[],
+    budget: BudgetConfig,
+  ): Promise<EnsemblePlan> {
+    const registry = getRegistry();
+    const strategy = inferStrategy(req);
+    const inputTokens = req.estimatedInputTokens ?? 500;
+    const outputTokens = req.estimatedOutputTokens ?? 500;
+
+    type Candidate = {
+      modelId: string;
+      score: number;
+      cost: number;
+    };
+
+    const candidates: Candidate[] = [];
+    for (const ms of scores) {
+      const info = registry.getById(ms.modelId);
+      if (!info) continue;
+      const cost =
+        (inputTokens * info.cost.inputPer1M + outputTokens * info.cost.outputPer1M) / 1_000_000;
+
+      // Capability-weighted score using req.capabilities weights
+      let weighted = 0;
+      const capEntries = Object.entries(req.capabilities);
+      if (capEntries.length > 0) {
+        for (const [dim, weight] of capEntries) {
+          const dimRating = ms.dimensions[dim];
+          weighted += (dimRating?.mu ?? ms.overall) * weight;
+        }
+      } else {
+        weighted = ms.overall;
+      }
+
+      // Apply budget cap only for economy, balanced, premium (not critical)
+      if (strategy !== "critical" && budget.perRequest > 0 && cost > budget.perRequest) continue;
+
+      candidates.push({ modelId: ms.modelId, score: weighted, cost });
+    }
+
+    // Fallback: if all filtered, use everything (ignore budget)
+    const pool =
+      candidates.length > 0
+        ? candidates
+        : scores.map((ms) => {
+            const info = registry.getById(ms.modelId);
+            const cost = info
+              ? (inputTokens * info.cost.inputPer1M + outputTokens * info.cost.outputPer1M) / 1_000_000
+              : 0;
+            return { modelId: ms.modelId, score: ms.overall, cost };
+          });
+
+    let sorted: Candidate[];
+    switch (strategy) {
+      case "economy":
+        sorted = [...pool].sort((a, b) => a.cost - b.cost);
+        break;
+      case "critical":
+      case "premium":
+        sorted = [...pool].sort((a, b) => b.score - a.score);
+        break;
+      case "balanced":
+      default: {
+        // CE = score / cost, with a floor to prevent division by zero
+        const COST_FLOOR = 1e-9;
+        sorted = [...pool].sort(
+          (a, b) => b.score / Math.max(b.cost, COST_FLOOR) - a.score / Math.max(a.cost, COST_FLOOR),
+        );
+        break;
+      }
+    }
+
+    const chosen = sorted[0]!;
+    return {
+      models: [{ modelId: chosen.modelId, role: "primary", weight: 1.0 }],
+      strategy,
+      estimatedCost: chosen.cost,
+      reason: `Four-strategy "${strategy}": selected "${chosen.modelId}" (score=${chosen.score.toFixed(1)}, cost=${chosen.cost.toFixed(5)})`,
     };
   }
 }

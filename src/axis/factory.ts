@@ -22,6 +22,11 @@ import {
   CascadeSelector,
   PreferenceSelector,
   RoleBasedProtocol,
+  // Phase 3
+  StepProfiler,
+  StepDeclareClassifier,
+  StepBtScoringSystem,
+  FourStrategySelector,
 } from "./wrappers";
 import type { AxisConfig, ChatFn } from "./types";
 import type {
@@ -102,17 +107,23 @@ function isCompatible(
 
 // -- Slot factory helpers --
 
-function buildScoring(_config: AxisConfig): ScoringSystem {
-  // Phase 1: only bt-21 is implemented
-  return new BtScoringSystem();
+function buildScoring(config: AxisConfig): ScoringSystem {
+  switch (config.scoring) {
+    case "bt-step":
+      return new StepBtScoringSystem();
+    case "bt-21":
+    default:
+      return new BtScoringSystem();
+  }
 }
 
 function buildClassifier(config: AxisConfig): Classifier {
   switch (config.classifier) {
     case "keyword":
       return new KeywordClassifier();
+    case "step-declare":
+      return new StepDeclareClassifier();
     default:
-      // Phase 1 stub — fall back to keyword for unimplemented classifiers
       return new KeywordClassifier();
   }
 }
@@ -123,6 +134,8 @@ function buildProfiler(config: AxisConfig): Profiler {
       return new DomainOverrideProfiler();
     case "moe-gating":
       return new MoeGatingProfiler();
+    case "step-profile":
+      return new StepProfiler();
     default:
       return new DomainOverrideProfiler();
   }
@@ -136,6 +149,8 @@ function buildSelector(config: AxisConfig): Selector {
       return new CascadeSelector();
     case "preference":
       return new PreferenceSelector();
+    case "4strategy":
+      return new FourStrategySelector();
     default:
       return new TwoTrackCeSelector();
   }
