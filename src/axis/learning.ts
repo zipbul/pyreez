@@ -116,7 +116,7 @@ export class LocalLearningLayer implements LearningLayer {
     for (const pw of pairwise) {
       // Map axis PairwiseResult → evaluation PairwiseResult for PreferenceTable
       this.preferenceTable.record(
-        { modelA: pw.modelAId, modelB: pw.modelBId, outcome: pw.outcome as any },
+        { modelA: pw.modelAId, modelB: pw.modelBId, outcome: pw.outcome } as any,
         classified.taskType,
       );
       this.pendingPairwise.push(pw);
@@ -252,19 +252,19 @@ export class LocalLearningLayer implements LearningLayer {
         // This is a simplification — full restore would need internal table access
         for (let i = 0; i < entry.wins; i++) {
           this.preferenceTable.record(
-            { modelA: entry.modelId, modelB: "__restore__", outcome: "A>B" },
+            { modelA: entry.modelId, modelB: "__restore__", outcome: "A>B" } as any,
             taskType,
           );
         }
         for (let i = 0; i < entry.losses; i++) {
           this.preferenceTable.record(
-            { modelA: entry.modelId, modelB: "__restore__", outcome: "B>A" },
+            { modelA: entry.modelId, modelB: "__restore__", outcome: "B>A" } as any,
             taskType,
           );
         }
         for (let i = 0; i < entry.ties; i++) {
           this.preferenceTable.record(
-            { modelA: entry.modelId, modelB: "__restore__", outcome: "A=B" },
+            { modelA: entry.modelId, modelB: "__restore__", outcome: "A=B" } as any,
             taskType,
           );
         }

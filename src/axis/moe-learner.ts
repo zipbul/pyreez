@@ -48,7 +48,7 @@ export class MoeLearner {
   update(expertIdx: number, reward: number): void {
     if (expertIdx < 0 || expertIdx >= this.numExperts) return;
 
-    this.weights[expertIdx] += this.learningRate * reward;
+    this.weights[expertIdx] = this.weights[expertIdx]! + this.learningRate * reward;
 
     // Clamp to non-negative
     for (let i = 0; i < this.numExperts; i++) {

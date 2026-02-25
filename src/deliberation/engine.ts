@@ -46,7 +46,7 @@ export class RoundExecutionError extends Error {
   constructor(
     public readonly role: "producer" | "reviewer" | "leader",
     public readonly modelId: string,
-    public readonly cause: unknown,
+    public override readonly cause: unknown,
   ) {
     super(
       `${role} (${modelId}) failed: ${cause instanceof Error ? cause.message : String(cause)}`,
