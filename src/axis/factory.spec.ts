@@ -47,4 +47,36 @@ describe("createEngine", () => {
     };
     expect(() => createEngine(config)).not.toThrow();
   });
+
+  it("creates engine with full PLAN.md config (step-declare + step-profile + bt-step + 4strategy)", () => {
+    const config: AxisConfig = {
+      ...DEFAULT_CONFIG,
+      scoring: "bt-step",
+      classifier: "step-declare",
+      profiler: "step-profile",
+      selector: "4strategy",
+    };
+    const engine = createEngine(config);
+    expect(engine).toBeInstanceOf(PyreezEngine);
+  });
+
+  it("creates engine with step-declare + moe-gating + 4strategy (cross-vocab via MoE)", () => {
+    const config: AxisConfig = {
+      ...DEFAULT_CONFIG,
+      classifier: "step-declare",
+      profiler: "moe-gating",
+      selector: "4strategy",
+    };
+    const engine = createEngine(config);
+    expect(engine).toBeInstanceOf(PyreezEngine);
+  });
+
+  it("creates engine with bt-step scoring alone (other slots default)", () => {
+    const config: AxisConfig = {
+      ...DEFAULT_CONFIG,
+      scoring: "bt-step",
+    };
+    const engine = createEngine(config);
+    expect(engine).toBeInstanceOf(PyreezEngine);
+  });
 });
