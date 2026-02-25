@@ -114,8 +114,16 @@ export interface RouteHints {
 
 /**
  * Chat function injected into the engine — allows any LLM backend.
+ *
+ * Accepts either a plain string (user prompt) or a ChatMessage[] array
+ * (multi-turn conversation). Implementations must handle both forms:
+ * - string → wrap as [{ role: "user", content: input }]
+ * - ChatMessage[] → pass directly to the LLM API
  */
-export type ChatFn = (modelId: string, prompt: string) => Promise<string>;
+export type ChatFn = (
+  modelId: string,
+  input: string | import("../llm/types").ChatMessage[],
+) => Promise<string>;
 
 /**
  * Pairwise comparison result for BT rating update.

@@ -18,6 +18,22 @@ import { buildCascadeChain, passesGate } from "../router/cascade";
 import { PreferenceTable, routeByPreference } from "../router/preference";
 import { ModelRegistry } from "../model/registry";
 import type { CapabilityDimension, ModelInfo } from "../model/types";
+import { SIGMA_BASE } from "../model/types";
+import type { ChatMessage } from "../llm/types";
+import { deliberate as defaultDeliberateFn } from "../deliberation/engine";
+import type { EngineDeps, EngineConfig } from "../deliberation/engine";
+import type { DeliberateOutput } from "../deliberation/types";
+import {
+  buildProducerMessages,
+  buildReviewerMessages,
+  buildLeaderMessages,
+} from "../deliberation/prompts";
+import type {
+  TeamComposition,
+  TeamMember,
+  ConsensusMode,
+  DeliberateInput,
+} from "../deliberation/types";
 import {
   STEP_PROFILES,
   STEP_DOMAIN,
@@ -274,34 +290,235 @@ export class TwoTrackCeSelector implements Selector {
 }
 
 // ============================================================
-// Slot 5 — RoleBasedProtocol (Phase 1 stub)
+// Slot 5 — RoleBasedProtocol (D2: wire to deliberation engine)
 // ============================================================
 
 /**
- * Phase 1 stub for the role-based deliberation protocol.
+ * Adapts the axis 5-slot pipeline to the real deliberation engine.
  *
- * Full implementation (Phase 6) will wire to the existing deliberation engine
- * (wire.ts / engine.ts). For now, uses the primary model from the EnsemblePlan
- * to produce a single-turn response and wraps it in DeliberationResult shape.
+ * Role assignment from EnsemblePlan.models + ModelScore[]:
+ *   - If plan.models[i].role is set → use explicit roles.
+ *   - Otherwise → auto-assign: JUDGMENT-highest → leader,
+ *     CODE_GENERATION-highest (excl. leader) → producer, rest → reviewers.
+ *
+ * ChatFn bridge:
+ *   The axis ChatFn accepts (modelId, string | ChatMessage[]).
+ *   The deliberation engine expects (model, ChatMessage[]) → string.
+ *   This class bridges by passing ChatMessage[] through ChatFn.
  */
 export class RoleBasedProtocol implements DeliberationProtocol {
+  private readonly consensus: ConsensusMode;
+  private readonly maxRounds: number;
+  private readonly runDeliberation: (
+    team: TeamComposition,
+    input: DeliberateInput,
+    deps: EngineDeps,
+    config: EngineConfig,
+  ) => Promise<DeliberateOutput>;
+
+  constructor(
+    consensus?: ConsensusMode | string,
+    maxRounds?: number,
+    deliberateFn?: (
+      team: TeamComposition,
+      input: DeliberateInput,
+      deps: EngineDeps,
+      config: EngineConfig,
+    ) => Promise<DeliberateOutput>,
+  ) {
+    const VALID: ConsensusMode[] = ["leader_decides", "all_approve", "majority"];
+    this.consensus = VALID.includes(consensus as ConsensusMode)
+      ? (consensus as ConsensusMode)
+      : "leader_decides";
+    this.maxRounds = maxRounds ?? 3;
+    this.runDeliberation = deliberateFn ?? defaultDeliberateFn;
+  }
+
   async deliberate(
     task: string,
     plan: EnsemblePlan,
-    _scores: ModelScore[],
+    scores: ModelScore[],
     chat: ChatFn,
   ): Promise<DeliberationResult> {
-    // Phase 1 stub: single call to primary model
-    const primaryId = plan.models[0]?.modelId ?? "unknown";
-    const response = await chat(primaryId, task);
+    // Guard: empty plan
+    if (!plan.models.length) {
+      throw new Error("RoleBasedProtocol: plan.models must not be empty");
+    }
+
+    // Single-model shortcut (no deliberation needed)
+    if (plan.models.length === 1) {
+      const modelId = plan.models[0]!.modelId;
+      const response = await chat(modelId, task);
+      return {
+        result: response,
+        roundsExecuted: 0,
+        consensusReached: true,
+        totalLLMCalls: 1,
+        modelsUsed: [modelId],
+        protocol: "role-based",
+      };
+    }
+
+    // Build team composition
+    const team = this.buildTeam(plan, scores);
+
+    // Derive perspectives from reviewers (default perspective per reviewer index)
+    const perspectives = team.reviewers.map(
+      (r) => r.perspective ?? `reviewer-${team.reviewers.indexOf(r) + 1}`,
+    );
+
+    // Build DeliberateInput
+    const input: DeliberateInput = {
+      task,
+      perspectives: perspectives.length > 0 ? perspectives : ["general"],
+    };
+
+    // Chat adapter: axis ChatFn → EngineDeps.chat
+    const engineChat = (model: string, messages: ChatMessage[]): Promise<string> =>
+      chat(model, messages);
+
+    // Assemble engine deps
+    const deps: EngineDeps = {
+      chat: engineChat,
+      buildProducerMessages,
+      buildReviewerMessages,
+      buildLeaderMessages,
+    };
+
+    const config: EngineConfig = {
+      maxRounds: this.maxRounds,
+      consensus: this.consensus,
+    };
+
+    // Run the real deliberation engine
+    const output = await this.runDeliberation(team, input, deps, config);
+
+    // Map DeliberateOutput → DeliberationResult
+    return {
+      result: output.result,
+      roundsExecuted: output.roundsExecuted,
+      consensusReached: output.consensusReached,
+      totalLLMCalls: output.totalLLMCalls,
+      modelsUsed: [...output.modelsUsed],
+      protocol: "role-based",
+    };
+  }
+
+  /**
+   * Build TeamComposition from EnsemblePlan + ModelScore[].
+   *
+   * Strategy:
+   * 1. If plan.models have explicit role fields → use them.
+   * 2. Otherwise → auto-assign using scores:
+   *    - JUDGMENT highest → leader
+   *    - CODE_GENERATION highest (excl. leader) → producer
+   *    - Remainder → reviewers
+   * 3. Fallback (no scores match): first → producer, last → leader, middle → reviewers.
+   */
+  private buildTeam(plan: EnsemblePlan, scores: ModelScore[]): TeamComposition {
+    // Check if any model has an explicit role
+    const hasExplicitRoles = plan.models.some((m) => m.role);
+
+    if (hasExplicitRoles) {
+      return this.buildExplicitTeam(plan);
+    }
+
+    return this.buildAutoTeam(plan, scores);
+  }
+
+  private buildExplicitTeam(plan: EnsemblePlan): TeamComposition {
+    let producer: TeamMember | undefined;
+    const reviewers: TeamMember[] = [];
+    let leader: TeamMember | undefined;
+
+    for (const m of plan.models) {
+      const role = m.role ?? "reviewer";
+      if (role === "producer" && !producer) {
+        producer = { model: m.modelId, role: "producer" };
+      } else if (role === "leader" && !leader) {
+        leader = { model: m.modelId, role: "leader" };
+      } else {
+        reviewers.push({
+          model: m.modelId,
+          role: "reviewer",
+          perspective: `reviewer-${reviewers.length + 1}`,
+        });
+      }
+    }
+
+    // Fallback if missing roles
+    if (!producer) {
+      producer = { model: plan.models[0]!.modelId, role: "producer" };
+    }
+    if (!leader) {
+      leader = { model: plan.models[plan.models.length - 1]!.modelId, role: "leader" };
+    }
+
+    return { producer, reviewers, leader };
+  }
+
+  private buildAutoTeam(plan: EnsemblePlan, scores: ModelScore[]): TeamComposition {
+    const scoreMap = new Map(scores.map((s) => [s.modelId, s]));
+    const modelIds = plan.models.map((m) => m.modelId);
+
+    // Score helper: get dimension mu with uncertainty penalty
+    const getDimScore = (modelId: string, dimension: string): number => {
+      const s = scoreMap.get(modelId);
+      if (!s) return 0;
+      const rating = s.dimensions[dimension];
+      if (!rating) return 0;
+      const penalty = 1 / (1 + rating.sigma / SIGMA_BASE);
+      return rating.mu * penalty;
+    };
+
+    // Find leader: highest JUDGMENT score
+    let leaderId = modelIds[modelIds.length - 1]!; // fallback: last
+    let bestJudgment = -Infinity;
+    for (const id of modelIds) {
+      const score = getDimScore(id, "JUDGMENT") * 0.4
+        + getDimScore(id, "ANALYSIS") * 0.3
+        + getDimScore(id, "REASONING") * 0.2
+        + getDimScore(id, "SELF_CONSISTENCY") * 0.1;
+      if (score > bestJudgment) {
+        bestJudgment = score;
+        leaderId = id;
+      }
+    }
+
+    // Find producer: highest CODE_GENERATION + CREATIVITY (excluding leader)
+    const remaining = modelIds.filter((id) => id !== leaderId);
+    let producerId = remaining[0] ?? modelIds[0]!; // fallback: first remaining
+    let bestProd = -Infinity;
+    for (const id of remaining) {
+      const score = getDimScore(id, "CODE_GENERATION") * 0.35
+        + getDimScore(id, "CREATIVITY") * 0.25
+        + getDimScore(id, "REASONING") * 0.2
+        + getDimScore(id, "INSTRUCTION_FOLLOWING") * 0.2;
+      if (score > bestProd) {
+        bestProd = score;
+        producerId = id;
+      }
+    }
+
+    // Reviewers: everyone else
+    const reviewerIds = modelIds.filter((id) => id !== leaderId && id !== producerId);
+
+    // Edge case: 2 models → 0 reviewers. The deliberation engine requires ≥ 1 reviewer.
+    // Solution: leader doubles as a reviewer with "general" perspective.
+    if (reviewerIds.length === 0) {
+      reviewerIds.push(leaderId);
+    }
+
+    const reviewers: TeamMember[] = reviewerIds.map((id, i) => ({
+      model: id,
+      role: "reviewer" as const,
+      perspective: `reviewer-${i + 1}`,
+    }));
 
     return {
-      result: response,
-      roundsExecuted: 0,
-      consensusReached: true,
-      totalLLMCalls: 1,
-      modelsUsed: [primaryId],
-      protocol: "role-based",
+      producer: { model: producerId, role: "producer" },
+      reviewers,
+      leader: { model: leaderId, role: "leader" },
     };
   }
 }

@@ -156,9 +156,9 @@ function buildSelector(config: AxisConfig): Selector {
   }
 }
 
-function buildDeliberation(_config: AxisConfig): DeliberationProtocol {
-  // Phase 1: only role-based stub is implemented
-  return new RoleBasedProtocol();
+function buildDeliberation(config: AxisConfig): DeliberationProtocol {
+  // Pass consensus mode from config to RoleBasedProtocol
+  return new RoleBasedProtocol(config.consensus);
 }
 
 // -- Public API --
