@@ -22,11 +22,18 @@ import {
   CascadeSelector,
   PreferenceSelector,
   RoleBasedProtocol,
+  SingleBestProtocol,
+  DivergeSynthProtocol,
+  AdaptiveDelibProtocol,
   // Phase 3
   StepProfiler,
   StepDeclareClassifier,
   StepBtScoringSystem,
   FourStrategySelector,
+  // Phase 8
+  FreeDebateProtocol,
+  LlmJudgeScoringSystem,
+  MabSelector,
 } from "./wrappers";
 import type { AxisConfig, ChatFn } from "./types";
 import type {
@@ -151,14 +158,33 @@ function buildSelector(config: AxisConfig): Selector {
       return new PreferenceSelector();
     case "4strategy":
       return new FourStrategySelector();
+    case "mab":
+      return new MabSelector();
     default:
       return new TwoTrackCeSelector();
   }
 }
 
-function buildDeliberation(config: AxisConfig): DeliberationProtocol {
-  // Pass consensus mode from config to RoleBasedProtocol
-  return new RoleBasedProtocol(config.consensus);
+function buildDeliberation(config: AxisConfig, chat?: ChatFn): DeliberationProtocol {
+  switch (config.deliberation) {
+    case "single-best":
+      return new SingleBestProtocol();
+    case "diverge-synth":
+      return new DivergeSynthProtocol();
+    case "adp":
+      return new AdaptiveDelibProtocol();
+    case "free-debate": {
+      // FreeDebateProtocol requires a default ChatFn; use provided or a stub
+      const defaultChat: ChatFn = chat ?? ((_m, _p) => {
+        throw new Error("No chat function provided for free-debate protocol");
+      });
+      return new FreeDebateProtocol(defaultChat);
+    }
+    case "role-based":
+    default:
+      // Pass consensus mode from config to RoleBasedProtocol
+      return new RoleBasedProtocol(config.consensus);
+  }
 }
 
 // -- Public API --
@@ -186,7 +212,6 @@ export function createEngine(
   const classifier = buildClassifier(config);
   const profiler = buildProfiler(config);
   const selector = buildSelector(config);
-  const deliberation = buildDeliberation(config);
   const modelIds = config.modelIds ?? [...ALL_MODEL_IDS];
 
   // If no chat function provided, use a stub that throws at runtime
@@ -198,6 +223,8 @@ export function createEngine(
         "Pass a ChatFn as the second argument to enable run().",
       );
     });
+
+  const deliberation = buildDeliberation(config, effectiveChat);
 
   return new PyreezEngine(
     scoring,

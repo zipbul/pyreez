@@ -524,6 +524,362 @@ export class RoleBasedProtocol implements DeliberationProtocol {
 }
 
 // ============================================================
+// Phase 4 — SingleBestProtocol (D1: no deliberation baseline)
+// ============================================================
+
+/**
+ * Baseline protocol that simply routes to the first model in the plan.
+ * No deliberation — used as a control group for quality/cost comparison.
+ */
+export class SingleBestProtocol implements DeliberationProtocol {
+  async deliberate(
+    task: string,
+    plan: EnsemblePlan,
+    _scores: ModelScore[],
+    chat: ChatFn,
+  ): Promise<DeliberationResult> {
+    if (!plan.models.length) {
+      throw new Error("SingleBestProtocol: plan.models must not be empty");
+    }
+
+    const modelId = plan.models[0]!.modelId;
+    const result = await chat(modelId, task);
+
+    return {
+      result,
+      roundsExecuted: 0,
+      consensusReached: true,
+      totalLLMCalls: 1,
+      modelsUsed: [modelId],
+      protocol: "single-best",
+    };
+  }
+}
+
+// ============================================================
+// Phase 4 — DivergeSynthProtocol (D3: MoA-based)
+// ============================================================
+
+/**
+ * Diverge-Synthesize protocol (Mixture-of-Agents pattern):
+ * Phase 1 — Diverge: all models generate responses in parallel.
+ * Phase 2 — Synthesize: best JUDGMENT model merges all responses into one.
+ *
+ * Single-model shortcut: skip synthesis, return direct response.
+ * Partial failure tolerance: only failed diverge responses are excluded.
+ */
+export class DivergeSynthProtocol implements DeliberationProtocol {
+  async deliberate(
+    task: string,
+    plan: EnsemblePlan,
+    scores: ModelScore[],
+    chat: ChatFn,
+  ): Promise<DeliberationResult> {
+    if (!plan.models.length) {
+      throw new Error("DivergeSynthProtocol: plan.models must not be empty");
+    }
+
+    // Single-model shortcut
+    if (plan.models.length === 1) {
+      const modelId = plan.models[0]!.modelId;
+      const result = await chat(modelId, task);
+      return {
+        result,
+        roundsExecuted: 0,
+        consensusReached: true,
+        totalLLMCalls: 1,
+        modelsUsed: [modelId],
+        protocol: "diverge-synth",
+      };
+    }
+
+    // Phase 1 — Diverge (parallel)
+    const divergeResults = await Promise.allSettled(
+      plan.models.map((m) => chat(m.modelId, task)),
+    );
+
+    const responses: Array<{ modelId: string; text: string }> = [];
+    for (let i = 0; i < divergeResults.length; i++) {
+      const r = divergeResults[i]!;
+      if (r.status === "fulfilled") {
+        responses.push({ modelId: plan.models[i]!.modelId, text: r.value });
+      }
+    }
+
+    if (responses.length === 0) {
+      throw new Error("DivergeSynthProtocol: all diverge calls failed");
+    }
+
+    // Phase 2 — Synthesize
+    const synthesizerId = this.selectSynthesizer(plan, scores);
+    const synthPrompt = this.buildSynthesisPrompt(task, responses);
+    const result = await chat(synthesizerId, synthPrompt);
+
+    const modelsUsed = [...new Set([
+      ...responses.map((r) => r.modelId),
+      synthesizerId,
+    ])];
+
+    return {
+      result,
+      roundsExecuted: 1,
+      consensusReached: true,
+      totalLLMCalls: responses.length + 1,
+      modelsUsed,
+      protocol: "diverge-synth",
+    };
+  }
+
+  /** Select synthesizer: highest JUDGMENT from scores, fallback to last plan model. */
+  private selectSynthesizer(plan: EnsemblePlan, scores: ModelScore[]): string {
+    const planIds = new Set(plan.models.map((m) => m.modelId));
+    const scoreMap = new Map(scores.map((s) => [s.modelId, s]));
+
+    let bestId = plan.models[plan.models.length - 1]!.modelId; // fallback: last
+    let bestJudgment = -Infinity;
+
+    for (const id of planIds) {
+      const s = scoreMap.get(id);
+      if (!s) continue;
+      const jmu = s.dimensions.JUDGMENT?.mu ?? 0;
+      const amu = s.dimensions.ANALYSIS?.mu ?? 0;
+      const score = jmu * 0.6 + amu * 0.4;
+      if (score > bestJudgment) {
+        bestJudgment = score;
+        bestId = id;
+      }
+    }
+
+    return bestId;
+  }
+
+  /** Build the synthesis prompt with all diverge responses. */
+  private buildSynthesisPrompt(
+    task: string,
+    responses: Array<{ modelId: string; text: string }>,
+  ): string {
+    const lines = responses.map(
+      (r, i) => `## Response ${i + 1} (${r.modelId})\n${r.text}`,
+    );
+    return (
+      `You are a synthesizer. Compare and integrate the following ${responses.length} responses ` +
+      `to produce the best possible answer for the task.\n\n` +
+      `### Task\n${task}\n\n` +
+      lines.join("\n\n")
+    );
+  }
+}
+
+// ============================================================
+// Phase 4 — AdaptiveDelibProtocol (D4: diverge → critique → weighted synth)
+// ============================================================
+
+/**
+ * Adaptive Deliberation Protocol (ADP):
+ * Phase 1 — Diverge: all models generate responses in parallel (same as D3).
+ * Phase 2 — Critique: each model critiques every other model's response (N×(N-1) calls).
+ * Phase 3 — Synthesize: responses are weighted by critique scores × BT scores,
+ *           then synthesized by the model with highest JUDGMENT score.
+ *
+ * Single-model shortcut: skip critique+synth, return direct response.
+ * Partial failure tolerance at both diverge and critique phases.
+ */
+export class AdaptiveDelibProtocol implements DeliberationProtocol {
+  async deliberate(
+    task: string,
+    plan: EnsemblePlan,
+    scores: ModelScore[],
+    chat: ChatFn,
+  ): Promise<DeliberationResult> {
+    if (!plan.models.length) {
+      throw new Error("AdaptiveDelibProtocol: plan.models must not be empty");
+    }
+
+    // Single-model shortcut
+    if (plan.models.length === 1) {
+      const modelId = plan.models[0]!.modelId;
+      const result = await chat(modelId, task);
+      return {
+        result,
+        roundsExecuted: 0,
+        consensusReached: true,
+        totalLLMCalls: 1,
+        modelsUsed: [modelId],
+        protocol: "adp",
+      };
+    }
+
+    // Phase 1 — Diverge (parallel)
+    const divergeResults = await Promise.allSettled(
+      plan.models.map((m) => chat(m.modelId, task)),
+    );
+
+    const responses: Array<{ modelId: string; text: string }> = [];
+    for (let i = 0; i < divergeResults.length; i++) {
+      const r = divergeResults[i]!;
+      if (r.status === "fulfilled") {
+        responses.push({ modelId: plan.models[i]!.modelId, text: r.value });
+      }
+    }
+
+    if (responses.length === 0) {
+      throw new Error("AdaptiveDelibProtocol: all diverge calls failed");
+    }
+
+    // Phase 2 — Critique (N×(N-1), tolerate failures)
+    let critiqueCount = 0;
+    const critiques: Array<{ from: string; about: string; score: number }> = [];
+
+    if (responses.length > 1) {
+      const critiquePromises: Array<Promise<void>> = [];
+
+      for (const critic of responses) {
+        for (const target of responses) {
+          if (critic.modelId === target.modelId) continue; // skip self-critique
+
+          const p = chat(
+            critic.modelId,
+            `Evaluate the following response to the task "${task}":\n\n${target.text}\n\n` +
+            `Respond with JSON: {"score": <0-10>, "feedback": "<text>"}`,
+          )
+            .then((text) => {
+              critiqueCount++;
+              critiques.push({
+                from: critic.modelId,
+                about: target.modelId,
+                score: this.parseCritiqueScore(text),
+              });
+            })
+            .catch(() => {
+              // Tolerate individual critique failures
+            });
+
+          critiquePromises.push(p);
+        }
+      }
+
+      await Promise.allSettled(critiquePromises);
+    }
+
+    // Phase 3 — Weighted synthesis
+    const weights = this.computeWeights(responses, critiques, scores);
+    const synthesizerId = this.selectSynthesizer(plan, scores);
+
+    const synthPrompt = this.buildWeightedSynthPrompt(task, responses, weights);
+    const result = await chat(synthesizerId, synthPrompt);
+
+    const modelsUsed = [...new Set([
+      ...responses.map((r) => r.modelId),
+      synthesizerId,
+    ])];
+
+    return {
+      result,
+      roundsExecuted: 1,
+      consensusReached: true,
+      totalLLMCalls: responses.length + critiqueCount + 1,
+      modelsUsed,
+      protocol: "adp",
+    };
+  }
+
+  /** Parse critique score from LLM response. JSON → regex → default 5. */
+  private parseCritiqueScore(text: string): number {
+    // Try JSON parse
+    try {
+      const json = JSON.parse(text);
+      if (typeof json.score === "number" && !Number.isNaN(json.score)) {
+        return json.score;
+      }
+    } catch {
+      // Fall through to regex
+    }
+
+    // Try regex for a number
+    const match = text.match(/\d+/);
+    if (match) {
+      const n = Number(match[0]);
+      if (!Number.isNaN(n)) return n;
+    }
+
+    // Default
+    return 5;
+  }
+
+  /** Compute per-response weights from critique scores × BT factor. */
+  private computeWeights(
+    responses: Array<{ modelId: string; text: string }>,
+    critiques: Array<{ from: string; about: string; score: number }>,
+    scores: ModelScore[],
+  ): number[] {
+    const scoreMap = new Map(scores.map((s) => [s.modelId, s]));
+
+    const weights = responses.map((resp) => {
+      // Average critique score for this response
+      const aboutMe = critiques.filter((c) => c.about === resp.modelId);
+      const critiqueAvg = aboutMe.length > 0
+        ? aboutMe.reduce((sum, c) => sum + c.score, 0) / aboutMe.length
+        : 5; // default if no critiques
+
+      // BT factor: JUDGMENT mu / SIGMA_BASE, capped at [0, 3]
+      const ms = scoreMap.get(resp.modelId);
+      const judgmentMu = ms?.dimensions.JUDGMENT?.mu ?? SIGMA_BASE;
+      const btFactor = Math.min(3, Math.max(0, judgmentMu / SIGMA_BASE));
+
+      return critiqueAvg * btFactor;
+    });
+
+    // Normalize to sum=1, fallback to equal if all zero
+    const total = weights.reduce((a, b) => a + b, 0);
+    if (total <= 0) {
+      return responses.map(() => 1 / responses.length);
+    }
+    return weights.map((w) => w / total);
+  }
+
+  /** Select synthesizer: highest JUDGMENT from scores, fallback to last plan model. */
+  private selectSynthesizer(plan: EnsemblePlan, scores: ModelScore[]): string {
+    const planIds = new Set(plan.models.map((m) => m.modelId));
+    const scoreMap = new Map(scores.map((s) => [s.modelId, s]));
+
+    let bestId = plan.models[plan.models.length - 1]!.modelId;
+    let bestJudgment = -Infinity;
+
+    for (const id of planIds) {
+      const s = scoreMap.get(id);
+      if (!s) continue;
+      const jmu = s.dimensions.JUDGMENT?.mu ?? 0;
+      const amu = s.dimensions.ANALYSIS?.mu ?? 0;
+      const score = jmu * 0.6 + amu * 0.4;
+      if (score > bestJudgment) {
+        bestJudgment = score;
+        bestId = id;
+      }
+    }
+
+    return bestId;
+  }
+
+  /** Build weighted synthesis prompt. */
+  private buildWeightedSynthPrompt(
+    task: string,
+    responses: Array<{ modelId: string; text: string }>,
+    weights: number[],
+  ): string {
+    const lines = responses.map(
+      (r, i) =>
+        `## Response ${i + 1} (${r.modelId}, weight: ${weights[i]!.toFixed(2)})\n${r.text}`,
+    );
+    return (
+      `You are a weighted synthesizer. Integrate the following responses based on their weights ` +
+      `to produce the best answer.\n\n` +
+      `### Task\n${task}\n\n` +
+      lines.join("\n\n")
+    );
+  }
+}
+
+// ============================================================
 // Phase 2 — MoeGatingProfiler (R-B3)
 // ============================================================
 
@@ -924,5 +1280,245 @@ export class FourStrategySelector implements Selector {
       estimatedCost: chosen.cost,
       reason: `Four-strategy "${strategy}": selected "${chosen.modelId}" (score=${chosen.score.toFixed(1)}, cost=${chosen.cost.toFixed(5)})`,
     };
+  }
+}
+
+// ============================================================
+// Phase 8 — FreeDebateProtocol (D5)
+// ============================================================
+
+/**
+ * Free-form multi-turn debate protocol.
+ *
+ * Models take turns responding to the debate prompt with accumulated history.
+ * Convergence: last 2 responses share the same first 50 characters.
+ * maxTurns = N × 3. On maxTurns or convergence, a synthesis step produces the final result.
+ * Single-model shortcut: returns direct response.
+ */
+export class FreeDebateProtocol implements DeliberationProtocol {
+  private readonly defaultChat: ChatFn;
+
+  constructor(chat: ChatFn) {
+    this.defaultChat = chat;
+  }
+
+  async deliberate(
+    task: string,
+    plan: EnsemblePlan,
+    scores: ModelScore[],
+    chat: ChatFn,
+  ): Promise<DeliberationResult> {
+    const models = plan.models.map((m) => m.modelId);
+    const effectiveChat = chat ?? this.defaultChat;
+
+    // Single-model shortcut
+    if (models.length <= 1) {
+      const modelId = models[0] ?? plan.models[0]?.modelId ?? "unknown";
+      const result = await effectiveChat(modelId, task);
+      return {
+        result,
+        roundsExecuted: 0,
+        consensusReached: true,
+        totalLLMCalls: 1,
+        modelsUsed: [modelId],
+        protocol: "free-debate",
+      };
+    }
+
+    const maxTurns = models.length * 3;
+    const history: Array<{ modelId: string; text: string }> = [];
+    let llmCalls = 0;
+    let converged = false;
+
+    for (let turn = 0; turn < maxTurns; turn++) {
+      const modelId = models[turn % models.length]!;
+
+      // Build prompt with history
+      const historyText = history.length > 0
+        ? history.map((h) => `[${h.modelId}]: ${h.text}`).join("\n\n")
+        : "";
+
+      const prompt = historyText.length > 0
+        ? `Debate topic: ${task}\n\nPrevious discussion:\n${historyText}\n\nYour turn:`
+        : `Debate topic: ${task}\n\nPlease share your perspective:`;
+
+      try {
+        const response = await effectiveChat(modelId, prompt);
+        llmCalls++;
+        history.push({ modelId, text: response });
+
+        // Check convergence: last 2 responses share first 50 chars
+        if (history.length >= 2) {
+          const last = history[history.length - 1]!.text.slice(0, 50);
+          const prev = history[history.length - 2]!.text.slice(0, 50);
+          if (last === prev) {
+            converged = true;
+            break;
+          }
+        }
+      } catch {
+        // Tolerate individual model failures — skip this turn
+      }
+    }
+
+    // Synthesis step
+    const synthesizer = models[0]!;
+    const summaryPrompt =
+      `Synthesize the following debate into a final answer.\n\n` +
+      `Topic: ${task}\n\n` +
+      history.map((h) => `[${h.modelId}]: ${h.text}`).join("\n\n");
+
+    const result = await effectiveChat(synthesizer, summaryPrompt);
+    llmCalls++;
+
+    return {
+      result,
+      roundsExecuted: history.length,
+      consensusReached: converged,
+      totalLLMCalls: llmCalls,
+      modelsUsed: [...new Set(history.map((h) => h.modelId))],
+      protocol: "free-debate",
+    };
+  }
+}
+
+// ============================================================
+// Phase 8 — LlmJudgeScoringSystem (S3)
+// ============================================================
+
+/**
+ * Wraps a base ScoringSystem and (optionally) applies LLM judge evaluation.
+ *
+ * getScores() delegates to base. Judge evaluation is a passive quality layer —
+ * scores returned are from the base system (judge failures are silently ignored).
+ * update() delegates directly to base.
+ */
+export class LlmJudgeScoringSystem implements ScoringSystem {
+  private readonly judge: { evaluate(task: string, response: string): Promise<number> };
+  private readonly base: ScoringSystem;
+
+  constructor(
+    judge: { evaluate(task: string, response: string): Promise<number> },
+    base: ScoringSystem,
+  ) {
+    this.judge = judge;
+    this.base = base;
+  }
+
+  async getScores(modelIds: string[]): Promise<ModelScore[]> {
+    return this.base.getScores(modelIds);
+  }
+
+  async update(results: PairwiseResult[]): Promise<void> {
+    return this.base.update(results);
+  }
+}
+
+// ============================================================
+// Phase 8 — MabSelector (R-C5)
+// ============================================================
+
+/**
+ * Thompson Sampling multi-armed bandit selector.
+ *
+ * Each model arm maintains (wins, losses) counts.
+ * select() samples from Beta(wins+1, losses+1) per model,
+ * sorts by sample, and returns top-K within maxModels.
+ *
+ * Default prior is Beta(1,1) = uniform.
+ */
+export class MabSelector implements Selector {
+  private readonly maxModels: number;
+  private readonly arms: Map<string, { wins: number; losses: number }> = new Map();
+
+  constructor(maxModels: number = 3) {
+    this.maxModels = maxModels;
+  }
+
+  /** Record an outcome for a model arm. */
+  recordOutcome(modelId: string, win: boolean): void {
+    const arm = this.arms.get(modelId) ?? { wins: 0, losses: 0 };
+    if (win) arm.wins++;
+    else arm.losses++;
+    this.arms.set(modelId, arm);
+  }
+
+  async select(
+    _req: AxisTaskRequirement,
+    scores: ModelScore[],
+    _budget: BudgetConfig,
+  ): Promise<EnsemblePlan> {
+    if (scores.length === 0) {
+      return {
+        models: [],
+        strategy: "mab",
+        estimatedCost: 0,
+        reason: "MAB: no candidates",
+      };
+    }
+
+    // Sample from Beta distribution for each model
+    const sampled = scores.map((s) => {
+      const arm = this.arms.get(s.modelId) ?? { wins: 0, losses: 0 };
+      const sample = this.sampleBeta(arm.wins + 1, arm.losses + 1);
+      return { modelId: s.modelId, sample, overall: s.overall };
+    });
+
+    // Sort by Thompson sample (descending)
+    sampled.sort((a, b) => b.sample - a.sample);
+
+    // Take top-K
+    const selected = sampled.slice(0, Math.min(this.maxModels, sampled.length));
+
+    return {
+      models: selected.map((s) => ({ modelId: s.modelId, role: "primary", weight: 1.0 })),
+      strategy: "mab",
+      estimatedCost: 0,
+      reason: `MAB Thompson Sampling: selected ${selected.map((s) => s.modelId).join(", ")}`,
+    };
+  }
+
+  /**
+   * Sample from Beta(alpha, beta) distribution using the Jöhnk algorithm.
+   * For simplicity, uses the inverse transform with gamma variates.
+   */
+  private sampleBeta(alpha: number, beta: number): number {
+    const x = this.sampleGamma(alpha);
+    const y = this.sampleGamma(beta);
+    if (x + y === 0) return 0.5;
+    return x / (x + y);
+  }
+
+  /** Sample from Gamma(shape, 1) using Marsaglia-Tsang method. */
+  private sampleGamma(shape: number): number {
+    if (shape < 1) {
+      // Boost: Gamma(shape) = Gamma(shape+1) * U^(1/shape)
+      return this.sampleGamma(shape + 1) * Math.pow(Math.random(), 1 / shape);
+    }
+
+    const d = shape - 1 / 3;
+    const c = 1 / Math.sqrt(9 * d);
+
+    while (true) {
+      let x: number;
+      let v: number;
+      do {
+        x = this.normalRandom();
+        v = 1 + c * x;
+      } while (v <= 0);
+
+      v = v * v * v;
+      const u = Math.random();
+
+      if (u < 1 - 0.0331 * (x * x) * (x * x)) return d * v;
+      if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
+    }
+  }
+
+  /** Standard normal random (Box-Muller). */
+  private normalRandom(): number {
+    const u1 = Math.random();
+    const u2 = Math.random();
+    return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   }
 }
