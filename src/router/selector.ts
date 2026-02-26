@@ -13,6 +13,7 @@ import type {
   AdaptiveWeightProvider,
 } from "./types";
 import { nullAdaptiveWeight } from "./types";
+import { estimateStaticCost } from "../cost/effective-cost";
 
 // -- Cost calculation --
 
@@ -24,11 +25,7 @@ function estimateCost(
   inputTokens: number,
   outputTokens: number,
 ): number {
-  return (
-    (inputTokens * model.cost.inputPer1M +
-      outputTokens * model.cost.outputPer1M) /
-    1_000_000
-  );
+  return estimateStaticCost(model, inputTokens, outputTokens);
 }
 
 // -- Step 1: HARD FILTER --
@@ -165,6 +162,7 @@ function fallbackResult(
       model: {
         id: "fallback/none",
         name: "No Model Available",
+        provider: "github",
         contextWindow: 0,
         capabilities: {} as any,
         cost: { inputPer1M: 0, outputPer1M: 0 },

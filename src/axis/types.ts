@@ -62,6 +62,8 @@ export interface EnsemblePlan {
   }>;
   strategy: string;
   estimatedCost: number;
+  /** Total effective cost across all rounds, accounting for provider prompt caching. */
+  effectiveCost?: number;
   reason: string;
 }
 
@@ -157,4 +159,21 @@ export interface AxisConfig {
     tier3: boolean;
   };
   modelIds?: string[];
+  /** 1 = single model (default), 2+ = multi-model → Deliberation slot executes. */
+  ensembleSize?: number;
+}
+
+// -- Trace types (for benchmark / dry-run) --
+
+/** Slot 1-4 intermediate results (no LLM calls). */
+export interface SlotTrace {
+  scores: ModelScore[];
+  classified: ClassifyOutput;
+  requirement: AxisTaskRequirement;
+  plan: EnsemblePlan;
+}
+
+/** Full pipeline trace including Slot 5 deliberation result. */
+export interface RunTrace extends SlotTrace {
+  result: DeliberationResult;
 }

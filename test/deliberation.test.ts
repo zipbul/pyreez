@@ -42,6 +42,7 @@ function makeCapabilities(
 const MODEL_A: ModelInfo = {
   id: "openai/gpt-4.1",
   name: "GPT-4.1",
+  provider: "github",
   contextWindow: 128000,
   capabilities: makeCapabilities({
     CODE_GENERATION: 9,
@@ -58,6 +59,7 @@ const MODEL_A: ModelInfo = {
 const MODEL_B: ModelInfo = {
   id: "meta/llama-4-scout",
   name: "Llama 4 Scout",
+  provider: "github",
   contextWindow: 512000,
   capabilities: makeCapabilities({
     HALLUCINATION_RESISTANCE: 8,
@@ -73,6 +75,7 @@ const MODEL_B: ModelInfo = {
 const MODEL_C: ModelInfo = {
   id: "mistralai/mistral-large",
   name: "Mistral Large",
+  provider: "github",
   contextWindow: 128000,
   capabilities: makeCapabilities({
     CREATIVITY: 9,

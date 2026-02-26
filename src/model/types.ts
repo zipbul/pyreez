@@ -135,6 +135,8 @@ export interface ModelInfo {
   id: string;
   /** Human-readable display name. */
   name: string;
+  /** Provider that serves this model. */
+  provider: import("../llm/types").ProviderName;
   /** Context window size in tokens. */
   contextWindow: number;
   /** Capability ratings (BT DimensionRating per dimension). */

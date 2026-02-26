@@ -1,7 +1,16 @@
 /**
  * OpenAI-compatible chat completion types.
- * Used for both GitHub Models API and Ollama.
+ * Used across all providers — each provider normalizes to this format.
  */
+
+// --- Provider Types ---
+
+export type ProviderName = "github" | "anthropic" | "google" | "openai";
+
+export interface LLMProvider {
+  readonly name: ProviderName;
+  chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse>;
+}
 
 // --- Request Types ---
 
@@ -60,6 +69,8 @@ export interface ChatCompletionUsage {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  /** Number of input tokens served from provider cache (observation/reporting only). */
+  cached_tokens?: number;
 }
 
 export interface ChatCompletionResponse {

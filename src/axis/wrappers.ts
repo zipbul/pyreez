@@ -17,8 +17,19 @@ import { gate } from "../router/gating";
 import { buildCascadeChain, passesGate } from "../router/cascade";
 import { PreferenceTable, routeByPreference } from "../router/preference";
 import { ModelRegistry } from "../model/registry";
-import type { CapabilityDimension, ModelInfo } from "../model/types";
+import type { CapabilityDimension, DimensionRating, ModelInfo } from "../model/types";
 import { SIGMA_BASE } from "../model/types";
+import {
+  extractRatingsMap,
+  persistRatings,
+  type PersistIO,
+} from "../model/calibration";
+import {
+  updateRating as btUpdateRating,
+  getRating as btGetRating,
+  setRating as btSetRating,
+} from "../evaluation/bt-updater";
+import type { PairwiseOutcome } from "../evaluation/types";
 import type { ChatMessage } from "../llm/types";
 import { deliberate as defaultDeliberateFn } from "../deliberation/engine";
 import type { EngineDeps, EngineConfig } from "../deliberation/engine";
@@ -41,6 +52,11 @@ import {
   stepToDimensions,
 } from "./step-types";
 import type { WorkflowStep } from "./step-types";
+import {
+  estimateStaticCost,
+  estimateEffectiveCost,
+  estimateAmortizedCost,
+} from "../cost/effective-cost";
 
 import type {
   ClassifyOutput,
@@ -74,6 +90,15 @@ function computeOverall(dimensions: Record<string, { mu: number; sigma: number }
   const entries = Object.values(dimensions);
   if (entries.length === 0) return 0;
   return entries.reduce((sum, d) => sum + d.mu, 0) / entries.length;
+}
+
+/** Assign deliberation roles for N models. */
+function assignRoles(count: number): string[] {
+  if (count <= 1) return ["primary"];
+  if (count === 2) return ["producer", "leader"];
+  return Array.from({ length: count }, (_, i) =>
+    i === 0 ? "producer" : i === count - 1 ? "leader" : "reviewer",
+  );
 }
 
 // ============================================================
@@ -121,9 +146,18 @@ export class KeywordClassifier implements Classifier {
 
 /**
  * Wraps ModelRegistry to produce ModelScore[] with BT dimensional ratings.
- * Phase 1: reads mu/sigma directly from registry (no live comparison updates).
+ * getScores() reads mu/sigma from registry. update() applies pairwise BT updates
+ * and optionally persists to disk via PersistIO.
  */
 export class BtScoringSystem implements ScoringSystem {
+  private readonly persistIO?: PersistIO;
+  private readonly scoresPath: string;
+
+  constructor(opts?: { persistIO?: PersistIO; scoresPath?: string }) {
+    this.persistIO = opts?.persistIO;
+    this.scoresPath = opts?.scoresPath ?? "scores/models.json";
+  }
+
   async getScores(modelIds: string[]): Promise<ModelScore[]> {
     const registry = getRegistry();
     const results: ModelScore[] = [];
@@ -147,9 +181,27 @@ export class BtScoringSystem implements ScoringSystem {
     return results;
   }
 
-  /** Phase 5 stub — BT rating persistence not yet implemented. */
-  async update(_results: PairwiseResult[]): Promise<void> {
-    // TODO: Phase 5 — write updated mu/sigma back to scores/models.json
+  async update(results: PairwiseResult[]): Promise<void> {
+    if (results.length === 0) return;
+
+    const VALID_OUTCOMES: string[] = ["A>>B", "A>B", "A=B", "B>A", "B>>A"];
+    const registry = getRegistry();
+    const ratings = extractRatingsMap(registry.getAll());
+
+    for (const r of results) {
+      if (!VALID_OUTCOMES.includes(r.outcome)) continue;
+
+      const dim = r.dimension as CapabilityDimension;
+      const rA = btGetRating(ratings, r.modelAId, dim);
+      const rB = btGetRating(ratings, r.modelBId, dim);
+      const { updatedA, updatedB } = btUpdateRating(rA, rB, r.outcome as PairwiseOutcome);
+      btSetRating(ratings, r.modelAId, dim, updatedA);
+      btSetRating(ratings, r.modelBId, dim, updatedB);
+    }
+
+    if (this.persistIO) {
+      await persistRatings(this.scoresPath, ratings, this.persistIO);
+    }
   }
 }
 
@@ -215,6 +267,8 @@ export class DomainOverrideProfiler implements Profiler {
  * - SelectResult → EnsemblePlan (single element)
  */
 export class TwoTrackCeSelector implements Selector {
+  constructor(private readonly ensembleSize: number = 1) {}
+
   async select(
     req: AxisTaskRequirement,
     scores: ModelScore[],
@@ -264,27 +318,80 @@ export class TwoTrackCeSelector implements Selector {
     };
 
     const routerBudget: RouterBudgetConfig = { perRequest: budget.perRequest };
-
-    const result = selectModel(models, taskReq, routerBudget);
-
-    const estimatedCost =
-      "expectedCost" in result ? result.expectedCost : 0;
     const strategy =
       req.criticality === "critical" || req.criticality === "high"
         ? "quality-first"
         : "cost-first";
 
+    // Single-model path: use existing selectModel()
+    if (this.ensembleSize <= 1) {
+      const result = selectModel(models, taskReq, routerBudget);
+      const estimatedCost =
+        "expectedCost" in result ? result.expectedCost : 0;
+
+      return {
+        models: [
+          {
+            modelId: result.model.id,
+            role: "primary",
+            weight: 1.0,
+          },
+        ],
+        strategy,
+        estimatedCost,
+        reason: result.reason,
+      };
+    }
+
+    // Multi-model path: score all models via scoreMap, sort, take top-N
+    const inputTokens = req.estimatedInputTokens ?? 500;
+    const outputTokens = req.estimatedOutputTokens ?? 500;
+    const rounds = this.ensembleSize;
+    type Ranked = { modelId: string; weighted: number; cost: number; info: ModelInfo };
+    const ranked: Ranked[] = [];
+
+    for (const ms of scores) {
+      const info = registry.getById(ms.modelId);
+      if (!info) continue;
+      const cost = estimateStaticCost(info, inputTokens, outputTokens);
+      let weighted = 0;
+      const capEntries = Object.entries(req.capabilities);
+      if (capEntries.length > 0) {
+        for (const [dim, weight] of capEntries) {
+          weighted += (ms.dimensions[dim]?.mu ?? ms.overall) * weight;
+        }
+      } else {
+        weighted = ms.overall;
+      }
+      ranked.push({ modelId: ms.modelId, weighted, cost, info });
+    }
+
+    // quality-first → sort by score DESC, cost-first → sort by cost-efficiency (amortized)
+    if (strategy === "quality-first") {
+      ranked.sort((a, b) => b.weighted - a.weighted);
+    } else {
+      const FLOOR = 1e-9;
+      ranked.sort((a, b) => {
+        const aCost = estimateAmortizedCost(a.info, inputTokens, outputTokens, rounds);
+        const bCost = estimateAmortizedCost(b.info, inputTokens, outputTokens, rounds);
+        return b.weighted / Math.max(bCost, FLOOR) - a.weighted / Math.max(aCost, FLOOR);
+      });
+    }
+
+    const topN = ranked.slice(0, Math.min(this.ensembleSize, ranked.length));
+    const roles = assignRoles(topN.length);
+    const totalCost = topN.reduce((sum, r) => sum + r.cost, 0);
+    const effCost = topN.reduce(
+      (sum, r) => sum + estimateEffectiveCost({ model: r.info, inputTokens, outputTokens, rounds }),
+      0,
+    );
+
     return {
-      models: [
-        {
-          modelId: result.model.id,
-          role: "primary",
-          weight: 1.0,
-        },
-      ],
+      models: topN.map((r, i) => ({ modelId: r.modelId, role: roles[i], weight: 1.0 })),
       strategy,
-      estimatedCost,
-      reason: result.reason,
+      estimatedCost: totalCost,
+      effectiveCost: effCost,
+      reason: `2track-ce ensemble: top-${topN.length} by ${strategy}`,
     };
   }
 }
@@ -935,6 +1042,8 @@ const CASCADE_CONFIDENCE_THRESHOLD = 0.50;
  * Phase 2 uses model's overall BT score as a static proxy.
  */
 export class CascadeSelector implements Selector {
+  constructor(private readonly ensembleSize: number = 1) {}
+
   async select(
     req: AxisTaskRequirement,
     scores: ModelScore[],
@@ -950,42 +1059,82 @@ export class CascadeSelector implements Selector {
     for (const score of scores) {
       const info = registry.getById(score.modelId);
       if (!info) continue;
-      const cost =
-        (inputTokens * info.cost.inputPer1M + outputTokens * info.cost.outputPer1M) / 1_000_000;
+      const cost = estimateStaticCost(info, inputTokens, outputTokens);
       models.push({ model: info, score, estimatedCost: cost });
     }
 
     // Sort cheapest first
     models.sort((a, b) => a.estimatedCost - b.estimatedCost);
 
-    let selected: string | null = null;
+    if (this.ensembleSize <= 1) {
+      // Original single-model path
+      let selected: string | null = null;
+      let totalCost = 0;
+      let lastModelId = models[0]?.model.id ?? "";
+
+      for (const { model, score, estimatedCost } of models) {
+        if (totalCost + estimatedCost > budget.perRequest && budget.perRequest > 0) break;
+
+        lastModelId = model.id;
+        totalCost += estimatedCost;
+
+        const confidence = score.overall / 1000;
+        if (passesGate(confidence, CASCADE_CONFIDENCE_THRESHOLD)) {
+          selected = model.id;
+          break;
+        }
+      }
+
+      const chosenId = selected ?? lastModelId;
+
+      return {
+        models: [{ modelId: chosenId, role: "primary", weight: 1.0 }],
+        strategy: "cascade",
+        estimatedCost: totalCost,
+        reason: selected
+          ? `Cascade accepted "${chosenId}" (confidence above threshold)`
+          : `Cascade fallback to "${chosenId}" (no model passed gate)`,
+      };
+    }
+
+    // Multi-model: collect gate-passing models up to ensembleSize
+    const rounds = this.ensembleSize;
+    const collected: Array<{ modelId: string; cost: number; info: ModelInfo }> = [];
     let totalCost = 0;
-    let lastModelId = models[0]?.model.id ?? "";
 
     for (const { model, score, estimatedCost } of models) {
       if (totalCost + estimatedCost > budget.perRequest && budget.perRequest > 0) break;
-
-      lastModelId = model.id;
       totalCost += estimatedCost;
 
-      // Static confidence = overall / 1000 (mu scale 0-1000 → 0-1)
       const confidence = score.overall / 1000;
       if (passesGate(confidence, CASCADE_CONFIDENCE_THRESHOLD)) {
-        selected = model.id;
-        break;
+        collected.push({ modelId: model.id, cost: estimatedCost, info: model });
+        if (collected.length >= this.ensembleSize) break;
       }
     }
 
-    // Fallback: use last attempted
-    const chosenId = selected ?? lastModelId;
+    // Fallback: if not enough models passed gate, fill from score-sorted
+    if (collected.length < this.ensembleSize) {
+      const already = new Set(collected.map((c) => c.modelId));
+      const byCost = [...models].filter((m) => !already.has(m.model.id));
+      for (const { model, estimatedCost } of byCost) {
+        collected.push({ modelId: model.id, cost: estimatedCost, info: model });
+        totalCost += estimatedCost;
+        if (collected.length >= this.ensembleSize) break;
+      }
+    }
 
+    const roles = assignRoles(collected.length);
+    const effCost = collected.reduce(
+      (sum, c) => sum + estimateEffectiveCost({ model: c.info, inputTokens, outputTokens, rounds }),
+      0,
+    );
     return {
-      models: [{ modelId: chosenId, role: "primary", weight: 1.0 }],
+      models: collected.map((c, i) => ({ modelId: c.modelId, role: roles[i], weight: 1.0 })),
       strategy: "cascade",
       estimatedCost: totalCost,
-      reason: selected
-        ? `Cascade accepted "${chosenId}" (confidence above threshold)`
-        : `Cascade fallback to "${chosenId}" (no model passed gate)`,
+      effectiveCost: effCost,
+      reason: `Cascade ensemble: ${collected.length} models (gate threshold=${CASCADE_CONFIDENCE_THRESHOLD})`,
     };
   }
 }
@@ -1002,46 +1151,58 @@ export class CascadeSelector implements Selector {
  * Accepts an optional pre-populated PreferenceTable for testing/injection.
  */
 export class PreferenceSelector implements Selector {
-  constructor(private readonly table: PreferenceTable = new PreferenceTable()) {}
+  constructor(
+    private readonly table: PreferenceTable = new PreferenceTable(),
+    private readonly ensembleSize: number = 1,
+  ) {}
 
   async select(
     req: AxisTaskRequirement,
     scores: ModelScore[],
     _budget: BudgetConfig,
   ): Promise<EnsemblePlan> {
+    const registry = getRegistry();
     const modelIds = scores.map((s) => s.modelId);
-    // Use criticality as proxy for taskType key (best available without classify roundtrip)
     const taskKey = req.criticality ?? "general";
+    const inputTokens = req.estimatedInputTokens ?? 500;
+    const outputTokens = req.estimatedOutputTokens ?? 500;
 
     const rankings = routeByPreference(this.table, taskKey, modelIds);
-
-    // Find best ranked model that has non-zero confidence (has preference data)
     const withData = rankings.filter((r) => r.confidence > 0);
-    let chosenId: string;
+
+    const n = Math.max(this.ensembleSize, 1);
+
+    // Build ordered list of model IDs
+    let ordered: string[];
     let reason: string;
 
     if (withData.length > 0) {
-      // Pick highest win-rate model
-      chosenId = withData[0]!.modelId;
-      reason = `Preference routing: "${chosenId}" win-rate=${withData[0]!.score.toFixed(2)}`;
+      ordered = withData.map((r) => r.modelId);
+      reason = `Preference routing: top-${Math.min(n, ordered.length)} by win-rate`;
     } else {
-      // Fallback: sort by overall BT score
       const sorted = [...scores].sort((a, b) => b.overall - a.overall);
-      chosenId = sorted[0]?.modelId ?? modelIds[0] ?? "unknown";
-      reason = `Preference fallback (no history): BT overall top model "${chosenId}"`;
+      ordered = sorted.map((s) => s.modelId);
+      reason = `Preference fallback (no history): BT overall top-${Math.min(n, ordered.length)}`;
     }
 
-    const info = getRegistry().getById(chosenId);
-    const inputTokens = req.estimatedInputTokens ?? 500;
-    const outputTokens = req.estimatedOutputTokens ?? 500;
-    const estimatedCost = info
-      ? (inputTokens * info.cost.inputPer1M + outputTokens * info.cost.outputPer1M) / 1_000_000
-      : 0;
+    const selected = ordered.slice(0, n);
+    const roles = assignRoles(selected.length);
+    const rounds = this.ensembleSize;
+    let totalCost = 0;
+    let effCost = 0;
+    for (const id of selected) {
+      const info = registry.getById(id);
+      if (info) {
+        totalCost += estimateStaticCost(info, inputTokens, outputTokens);
+        effCost += estimateEffectiveCost({ model: info, inputTokens, outputTokens, rounds });
+      }
+    }
 
     return {
-      models: [{ modelId: chosenId, role: "primary", weight: 1.0 }],
+      models: selected.map((id, i) => ({ modelId: id, role: roles[i], weight: 1.0 })),
       strategy: "preference",
-      estimatedCost,
+      estimatedCost: totalCost,
+      ...(this.ensembleSize > 1 && { effectiveCost: effCost }),
       reason,
     };
   }
@@ -1138,10 +1299,17 @@ export class StepDeclareClassifier implements Classifier {
 /**
  * WorkflowStep-aware BT scoring system.
  * getScores() is identical to BtScoringSystem (reads from registry).
- * update() (Phase 5 stub) uses stepToDimensions() instead of taskToDimensions()
- * to map comparison results to the correct capability dimensions.
+ * update() applies pairwise BT updates using the explicit dimension from each result.
  */
 export class StepBtScoringSystem implements ScoringSystem {
+  private readonly persistIO?: PersistIO;
+  private readonly scoresPath: string;
+
+  constructor(opts?: { persistIO?: PersistIO; scoresPath?: string }) {
+    this.persistIO = opts?.persistIO;
+    this.scoresPath = opts?.scoresPath ?? "scores/models.json";
+  }
+
   async getScores(modelIds: string[]): Promise<ModelScore[]> {
     const registry = getRegistry();
     const results: ModelScore[] = [];
@@ -1165,10 +1333,27 @@ export class StepBtScoringSystem implements ScoringSystem {
     return results;
   }
 
-  /** Phase 5 stub — uses stepToDimensions() when fully implemented. */
-  async update(_results: PairwiseResult[]): Promise<void> {
-    // TODO: Phase 5 — stepToDimensions(result.taskType) for dimension selection
-    void stepToDimensions; // reference so tree-shaking keeps the import
+  async update(results: PairwiseResult[]): Promise<void> {
+    if (results.length === 0) return;
+
+    const VALID_OUTCOMES: string[] = ["A>>B", "A>B", "A=B", "B>A", "B>>A"];
+    const registry = getRegistry();
+    const ratings = extractRatingsMap(registry.getAll());
+
+    for (const r of results) {
+      if (!VALID_OUTCOMES.includes(r.outcome)) continue;
+
+      const dim = r.dimension as CapabilityDimension;
+      const rA = btGetRating(ratings, r.modelAId, dim);
+      const rB = btGetRating(ratings, r.modelBId, dim);
+      const { updatedA, updatedB } = btUpdateRating(rA, rB, r.outcome as PairwiseOutcome);
+      btSetRating(ratings, r.modelAId, dim, updatedA);
+      btSetRating(ratings, r.modelBId, dim, updatedB);
+    }
+
+    if (this.persistIO) {
+      await persistRatings(this.scoresPath, ratings, this.persistIO);
+    }
   }
 }
 
@@ -1200,6 +1385,8 @@ function inferStrategy(req: AxisTaskRequirement): FourStrategy {
  * - critical: same as premium, budget cap ignored
  */
 export class FourStrategySelector implements Selector {
+  constructor(private readonly ensembleSize: number = 1) {}
+
   async select(
     req: AxisTaskRequirement,
     scores: ModelScore[],
@@ -1210,18 +1397,20 @@ export class FourStrategySelector implements Selector {
     const inputTokens = req.estimatedInputTokens ?? 500;
     const outputTokens = req.estimatedOutputTokens ?? 500;
 
+    const rounds = this.ensembleSize;
+
     type Candidate = {
       modelId: string;
       score: number;
       cost: number;
+      info: ModelInfo;
     };
 
     const candidates: Candidate[] = [];
     for (const ms of scores) {
       const info = registry.getById(ms.modelId);
       if (!info) continue;
-      const cost =
-        (inputTokens * info.cost.inputPer1M + outputTokens * info.cost.outputPer1M) / 1_000_000;
+      const cost = estimateStaticCost(info, inputTokens, outputTokens);
 
       // Capability-weighted score using req.capabilities weights
       let weighted = 0;
@@ -1238,7 +1427,7 @@ export class FourStrategySelector implements Selector {
       // Apply budget cap only for economy, balanced, premium (not critical)
       if (strategy !== "critical" && budget.perRequest > 0 && cost > budget.perRequest) continue;
 
-      candidates.push({ modelId: ms.modelId, score: weighted, cost });
+      candidates.push({ modelId: ms.modelId, score: weighted, cost, info });
     }
 
     // Fallback: if all filtered, use everything (ignore budget)
@@ -1248,15 +1437,24 @@ export class FourStrategySelector implements Selector {
         : scores.map((ms) => {
             const info = registry.getById(ms.modelId);
             const cost = info
-              ? (inputTokens * info.cost.inputPer1M + outputTokens * info.cost.outputPer1M) / 1_000_000
+              ? estimateStaticCost(info, inputTokens, outputTokens)
               : 0;
-            return { modelId: ms.modelId, score: ms.overall, cost };
+            return { modelId: ms.modelId, score: ms.overall, cost, info: info! };
           });
 
     let sorted: Candidate[];
     switch (strategy) {
       case "economy":
-        sorted = [...pool].sort((a, b) => a.cost - b.cost);
+        // economy: sort by amortized cost for multi-round awareness
+        if (this.ensembleSize > 1) {
+          sorted = [...pool].sort((a, b) => {
+            const aCost = estimateAmortizedCost(a.info, inputTokens, outputTokens, rounds);
+            const bCost = estimateAmortizedCost(b.info, inputTokens, outputTokens, rounds);
+            return aCost - bCost;
+          });
+        } else {
+          sorted = [...pool].sort((a, b) => a.cost - b.cost);
+        }
         break;
       case "critical":
       case "premium":
@@ -1264,21 +1462,37 @@ export class FourStrategySelector implements Selector {
         break;
       case "balanced":
       default: {
-        // CE = score / cost, with a floor to prevent division by zero
         const COST_FLOOR = 1e-9;
-        sorted = [...pool].sort(
-          (a, b) => b.score / Math.max(b.cost, COST_FLOOR) - a.score / Math.max(a.cost, COST_FLOOR),
-        );
+        if (this.ensembleSize > 1) {
+          sorted = [...pool].sort((a, b) => {
+            const aCost = estimateAmortizedCost(a.info, inputTokens, outputTokens, rounds);
+            const bCost = estimateAmortizedCost(b.info, inputTokens, outputTokens, rounds);
+            return b.score / Math.max(bCost, COST_FLOOR) - a.score / Math.max(aCost, COST_FLOOR);
+          });
+        } else {
+          sorted = [...pool].sort(
+            (a, b) => b.score / Math.max(b.cost, COST_FLOOR) - a.score / Math.max(a.cost, COST_FLOOR),
+          );
+        }
         break;
       }
     }
 
-    const chosen = sorted[0]!;
+    const n = Math.min(Math.max(this.ensembleSize, 1), sorted.length);
+    const topN = sorted.slice(0, n);
+    const roles = assignRoles(topN.length);
+    const totalCost = topN.reduce((sum, c) => sum + c.cost, 0);
+    const effCost = topN.reduce(
+      (sum, c) => sum + estimateEffectiveCost({ model: c.info, inputTokens, outputTokens, rounds }),
+      0,
+    );
+
     return {
-      models: [{ modelId: chosen.modelId, role: "primary", weight: 1.0 }],
+      models: topN.map((c, i) => ({ modelId: c.modelId, role: roles[i], weight: 1.0 })),
       strategy,
-      estimatedCost: chosen.cost,
-      reason: `Four-strategy "${strategy}": selected "${chosen.modelId}" (score=${chosen.score.toFixed(1)}, cost=${chosen.cost.toFixed(5)})`,
+      estimatedCost: totalCost,
+      ...(this.ensembleSize > 1 && { effectiveCost: effCost }),
+      reason: `Four-strategy "${strategy}": top-${topN.length} (best=${topN[0]!.modelId}, score=${topN[0]!.score.toFixed(1)})`,
     };
   }
 }
@@ -1431,8 +1645,8 @@ export class MabSelector implements Selector {
   private readonly maxModels: number;
   private readonly arms: Map<string, { wins: number; losses: number }> = new Map();
 
-  constructor(maxModels: number = 3) {
-    this.maxModels = maxModels;
+  constructor(ensembleSize: number = 3) {
+    this.maxModels = ensembleSize;
   }
 
   /** Record an outcome for a model arm. */
@@ -1469,9 +1683,10 @@ export class MabSelector implements Selector {
 
     // Take top-K
     const selected = sampled.slice(0, Math.min(this.maxModels, sampled.length));
+    const roles = assignRoles(selected.length);
 
     return {
-      models: selected.map((s) => ({ modelId: s.modelId, role: "primary", weight: 1.0 })),
+      models: selected.map((s, i) => ({ modelId: s.modelId, role: roles[i], weight: 1.0 })),
       strategy: "mab",
       estimatedCost: 0,
       reason: `MAB Thompson Sampling: selected ${selected.map((s) => s.modelId).join(", ")}`,

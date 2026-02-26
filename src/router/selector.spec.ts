@@ -41,6 +41,7 @@ function makeModel(overrides: Partial<ModelInfo> = {}): ModelInfo {
   return {
     id: "test/model-a",
     name: "Model A",
+    provider: "github",
     contextWindow: 100_000,
     capabilities: makeCapabilities(),
     cost: { inputPer1M: 1.0, outputPer1M: 4.0 },
@@ -690,6 +691,7 @@ function makeBTModel(overrides: Partial<ModelInfo> & {
   return {
     id: "test/bt-model",
     name: "BT Model",
+    provider: "github",
     contextWindow: 100_000,
     cost: { inputPer1M: 1.0, outputPer1M: 4.0 },
     supportsToolCalling: true,

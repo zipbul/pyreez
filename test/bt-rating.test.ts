@@ -42,9 +42,10 @@ function makeBTModel(overrides: {
   return {
     id: overrides.id,
     name: overrides.id,
+    provider: "github",
     contextWindow: overrides.contextWindow ?? 100_000,
     capabilities: caps as any,
-    
+
     cost: overrides.cost ?? { inputPer1M: 1.0, outputPer1M: 4.0 },
     supportsToolCalling: overrides.supportsToolCalling ?? true,
   };

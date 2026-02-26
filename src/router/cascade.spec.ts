@@ -20,6 +20,7 @@ function makeModel(id: string, inputPer1M: number, outputPer1M: number): ModelIn
   return {
     id,
     name: id,
+    provider: "github",
     contextWindow: 100_000,
     capabilities: {} as any,
     cost: { inputPer1M, outputPer1M },

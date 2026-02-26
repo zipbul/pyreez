@@ -18,6 +18,8 @@ import type {
   ChatFn,
   DeliberationResult,
   RouteHints,
+  SlotTrace,
+  RunTrace,
 } from "./types";
 
 export class PyreezEngine {
@@ -32,14 +34,13 @@ export class PyreezEngine {
     private readonly learner?: LearningLayer,
   ) {}
 
-  async run(
+  /** Run Slot 1-4 only (no LLM calls). For benchmark dry mode. */
+  async traceOnly(
     prompt: string,
     budget: BudgetConfig,
     hints?: RouteHints,
-  ): Promise<DeliberationResult> {
-    // TODO: Phase 7 — T2 bypass 체크 (슬롯 2-3-4 건너뛰고 EnsemblePlan 직접 생산)
-
-    // Slot 1: get scores (global + personal merged)
+  ): Promise<SlotTrace> {
+    // Slot 1: get scores
     let scores = await this.scoring.getScores(this.modelIds);
 
     // Slot 2: classify
@@ -54,10 +55,24 @@ export class PyreezEngine {
     const requirement = await this.profiler.profile(classified);
     const plan = await this.selector.select(requirement, scores, budget);
 
+    return { scores, classified, requirement, plan };
+  }
+
+  /** Run full 5-slot pipeline and return intermediate trace + result. */
+  async runWithTrace(
+    prompt: string,
+    budget: BudgetConfig,
+    hints?: RouteHints,
+  ): Promise<RunTrace> {
+    const trace = await this.traceOnly(prompt, budget, hints);
+    const { scores, classified, plan } = trace;
+
+    let result: DeliberationResult;
+
     // Single-model shortcut: skip deliberation
     if (plan.models.length === 1) {
       const response = await this.chat(plan.models[0]!.modelId, prompt);
-      const result: DeliberationResult = {
+      result = {
         result: response,
         roundsExecuted: 0,
         consensusReached: true,
@@ -65,28 +80,30 @@ export class PyreezEngine {
         modelsUsed: [plan.models[0]!.modelId],
         protocol: "single",
       };
-
-      // Learning Layer: fire-and-forget record
-      if (this.learner) {
-        this.learner.record(classified, plan, result).catch(() => {});
-      }
-
-      return result;
+    } else {
+      // Slot 5: deliberate
+      result = await this.deliberation.deliberate(
+        prompt,
+        plan,
+        scores,
+        this.chat,
+      );
     }
-
-    // Slot 5: deliberate
-    const result = await this.deliberation.deliberate(
-      prompt,
-      plan,
-      scores,
-      this.chat,
-    );
 
     // Learning Layer: fire-and-forget record
     if (this.learner) {
       this.learner.record(classified, plan, result).catch(() => {});
     }
 
-    return result;
+    return { ...trace, result };
+  }
+
+  /** Run full 5-slot pipeline and return the final result. */
+  async run(
+    prompt: string,
+    budget: BudgetConfig,
+    hints?: RouteHints,
+  ): Promise<DeliberationResult> {
+    return (await this.runWithTrace(prompt, budget, hints)).result;
   }
 }

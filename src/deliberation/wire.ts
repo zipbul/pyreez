@@ -11,7 +11,7 @@
  */
 
 import type { ChatMessage, ChatCompletionResponse } from "../llm/types";
-import { LLMClientError } from "../llm/client";
+import { LLMClientError } from "../llm/errors";
 import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput } from "./types";
 import type { EngineDeps, EngineConfig, RetryDeps } from "./engine";

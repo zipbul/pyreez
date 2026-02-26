@@ -35,6 +35,7 @@ import {
   LlmJudgeScoringSystem,
   MabSelector,
 } from "./wrappers";
+import { PreferenceTable } from "../router/preference";
 import type { AxisConfig, ChatFn } from "./types";
 import type {
   ScoringSystem,
@@ -66,6 +67,8 @@ export const ALL_MODEL_IDS: readonly string[] = [
   "mistral/Codestral-2501",
   "mistral/Mistral-Medium-3",
   "anthropic/claude-opus-4.6",
+  "anthropic/claude-sonnet-4.6",
+  "anthropic/claude-haiku-4.5",
   "google/gemini-3.1-pro",
   "openai/gpt-5.3",
 ];
@@ -149,19 +152,20 @@ function buildProfiler(config: AxisConfig): Profiler {
 }
 
 function buildSelector(config: AxisConfig): Selector {
+  const ensembleSize = config.ensembleSize ?? 1;
   switch (config.selector) {
     case "2track-ce":
-      return new TwoTrackCeSelector();
+      return new TwoTrackCeSelector(ensembleSize);
     case "cascade":
-      return new CascadeSelector();
+      return new CascadeSelector(ensembleSize);
     case "preference":
-      return new PreferenceSelector();
+      return new PreferenceSelector(new PreferenceTable(), ensembleSize);
     case "4strategy":
-      return new FourStrategySelector();
+      return new FourStrategySelector(ensembleSize);
     case "mab":
-      return new MabSelector();
+      return new MabSelector(ensembleSize);
     default:
-      return new TwoTrackCeSelector();
+      return new TwoTrackCeSelector(ensembleSize);
   }
 }
 

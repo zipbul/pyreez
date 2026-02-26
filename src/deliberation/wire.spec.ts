@@ -7,7 +7,7 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import type { ChatMessage } from "../llm/types";
-import { LLMClientError } from "../llm/client";
+import { LLMClientError } from "../llm/errors";
 import type {
   DeliberateInput,
   DeliberateOutput,
@@ -90,6 +90,7 @@ function stubModel(id: string): ModelInfo {
   return {
     id,
     name: id,
+    provider: "github",
     contextWindow: 128000,
     capabilities: dims,
     cost: { inputPer1M: 0, outputPer1M: 0 },

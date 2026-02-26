@@ -3,7 +3,7 @@ import { PyreezMcpServer } from "./server";
 import type { PyreezMcpServerConfig } from "./server";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { LLMClient } from "../llm/client";
+import type { ChatCompletionRequest, ChatCompletionResponse } from "../llm/types";
 import type { ModelRegistry } from "../model/registry";
 import type { Reporter } from "../report/types";
 import type { RouteResult } from "../router/router";
@@ -23,28 +23,27 @@ function stubMcpServer(overrides: Partial<McpServer> = {}): McpServer {
   } as unknown as McpServer;
 }
 
-function stubLlmClient(
-  overrides: Partial<LLMClient> = {},
-): LLMClient {
-  return {
-    chat: mock(() =>
-      Promise.resolve({
-        id: "test-id",
-        object: "chat.completion",
-        created: Date.now(),
-        model: "test-model",
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant" as const, content: "test response" },
-            finish_reason: "stop" as const,
-          },
-        ],
-        usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-      }),
-    ),
-    ...overrides,
-  } as unknown as LLMClient;
+type ChatFnType = (request: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
+
+const DEFAULT_CHAT_RESPONSE: ChatCompletionResponse = {
+  id: "test-id",
+  object: "chat.completion",
+  created: Date.now(),
+  model: "test-model",
+  choices: [
+    {
+      index: 0,
+      message: { role: "assistant" as const, content: "test response" },
+      finish_reason: "stop" as const,
+    },
+  ],
+  usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+};
+
+function stubChatFn(
+  impl?: (request: ChatCompletionRequest) => Promise<ChatCompletionResponse>,
+): ChatFnType {
+  return mock(impl ?? (() => Promise.resolve(DEFAULT_CHAT_RESPONSE)));
 }
 
 function stubRegistry(
@@ -151,7 +150,7 @@ function validConfig(
 ): PyreezMcpServerConfig {
   return {
     mcpServer: stubMcpServer(),
-    llmClient: stubLlmClient(),
+    chatFn: stubChatFn(),
     registry: stubRegistry(),
     reporter: stubReporter(),
     routeFn: stubRouteFn(),
@@ -193,14 +192,14 @@ describe("PyreezMcpServer", () => {
       ).toThrow("mcpServer is required");
     });
 
-    it('should throw "llmClient is required" when llmClient is missing', () => {
+    it("should throw when chatFn is missing", () => {
       expect(
         () =>
           new PyreezMcpServer({
             ...validConfig(),
-            llmClient: undefined as unknown as LLMClient,
+            chatFn: undefined as unknown as ChatFnType,
           }),
-      ).toThrow("llmClient is required");
+      ).toThrow("chatFn is required");
     });
 
     it('should throw "registry is required" when registry is missing', () => {
@@ -371,8 +370,8 @@ describe("PyreezMcpServer", () => {
 
   describe("pyreez_ask", () => {
     it("should return response text when model and messages are valid", async () => {
-      const llmClient = stubLlmClient();
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+      const chatFn = stubChatFn();
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       const result = await server.handleAsk({
         model: "openai/gpt-4.1",
@@ -386,8 +385,8 @@ describe("PyreezMcpServer", () => {
     });
 
     it("should forward temperature and max_tokens to LLM client", async () => {
-      const llmClient = stubLlmClient();
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+      const chatFn = stubChatFn();
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       await server.handleAsk({
         model: "openai/gpt-4.1",
@@ -396,7 +395,7 @@ describe("PyreezMcpServer", () => {
         max_tokens: 500,
       });
 
-      const chatCall = (llmClient.chat as ReturnType<typeof mock>).mock
+      const chatCall = (chatFn as ReturnType<typeof mock>).mock
         .calls[0]![0];
       expect(chatCall.model).toBe("openai/gpt-4.1");
       expect(chatCall.temperature).toBe(0.7);
@@ -430,10 +429,8 @@ describe("PyreezMcpServer", () => {
     });
 
     it("should return error when chat() throws", async () => {
-      const llmClient = stubLlmClient({
-        chat: mock(() => Promise.reject(new Error("API rate limit"))) as any,
-      });
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+      const chatFn = stubChatFn(() => Promise.reject(new Error("API rate limit")));
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       const result = await server.handleAsk({
         model: "openai/gpt-4.1",
@@ -447,8 +444,7 @@ describe("PyreezMcpServer", () => {
     });
 
     it("should return error when response has no content", async () => {
-      const llmClient = stubLlmClient({
-        chat: mock(() =>
+      const chatFn = stubChatFn(() =>
           Promise.resolve({
             id: "test",
             object: "chat.completion",
@@ -461,9 +457,8 @@ describe("PyreezMcpServer", () => {
               total_tokens: 10,
             },
           }),
-        ) as any,
-      });
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+        );
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       const result = await server.handleAsk({
         model: "openai/gpt-4.1",
@@ -477,8 +472,7 @@ describe("PyreezMcpServer", () => {
     });
 
     it("should strip think tags from response content", async () => {
-      const llmClient = stubLlmClient({
-        chat: mock(() =>
+      const chatFn = stubChatFn(() =>
           Promise.resolve({
             id: "test",
             object: "chat.completion",
@@ -497,9 +491,8 @@ describe("PyreezMcpServer", () => {
             ],
             usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
           }),
-        ) as any,
-      });
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+        );
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       const result = await server.handleAsk({
         model: "deepseek/deepseek-r1",
@@ -513,8 +506,7 @@ describe("PyreezMcpServer", () => {
     });
 
     it("should return empty text when response contains only think tags", async () => {
-      const llmClient = stubLlmClient({
-        chat: mock(() =>
+      const chatFn = stubChatFn(() =>
           Promise.resolve({
             id: "test",
             object: "chat.completion",
@@ -532,9 +524,8 @@ describe("PyreezMcpServer", () => {
             ],
             usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
           }),
-        ) as any,
-      });
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+        );
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       const result = await server.handleAsk({
         model: "deepseek/deepseek-r1",
@@ -550,8 +541,7 @@ describe("PyreezMcpServer", () => {
 
   describe("pyreez_ask_many", () => {
     it("should return result per model when all succeed", async () => {
-      const llmClient = stubLlmClient({
-        chat: mock((req: { model: string }) =>
+      const chatFn = stubChatFn((req: { model: string }) =>
           Promise.resolve({
             id: "test",
             object: "chat.completion",
@@ -568,9 +558,8 @@ describe("PyreezMcpServer", () => {
               },
             ],
           }),
-        ) as any,
-      });
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+        );
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       const result = await server.handleAskMany({
         models: ["openai/gpt-4.1", "openai/gpt-4.1-mini"],
@@ -613,8 +602,7 @@ describe("PyreezMcpServer", () => {
 
     it("should include error entries when some models fail", async () => {
       let callIndex = 0;
-      const llmClient = stubLlmClient({
-        chat: mock(() => {
+      const chatFn = stubChatFn(() => {
           callIndex++;
           if (callIndex === 1) {
             return Promise.resolve({
@@ -632,9 +620,8 @@ describe("PyreezMcpServer", () => {
             });
           }
           return Promise.reject(new Error("model unavailable"));
-        }) as any,
-      });
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+        });
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       const result = await server.handleAskMany({
         models: ["openai/gpt-4.1", "openai/gpt-4.1-mini"],
@@ -656,12 +643,10 @@ describe("PyreezMcpServer", () => {
     });
 
     it("should return all errors when every model fails", async () => {
-      const llmClient = stubLlmClient({
-        chat: mock(() =>
+      const chatFn = stubChatFn(() =>
           Promise.reject(new Error("all models down")),
-        ) as any,
-      });
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+        );
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       const result = await server.handleAskMany({
         models: ["openai/gpt-4.1", "openai/gpt-4.1-mini"],
@@ -676,8 +661,7 @@ describe("PyreezMcpServer", () => {
     });
 
     it("should strip think tags from each model response", async () => {
-      const llmClient = stubLlmClient({
-        chat: mock((req: { model: string }) =>
+      const chatFn = stubChatFn((req: { model: string }) =>
           Promise.resolve({
             id: "test",
             object: "chat.completion",
@@ -694,9 +678,8 @@ describe("PyreezMcpServer", () => {
               },
             ],
           }),
-        ) as any,
-      });
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+        );
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       const result = await server.handleAskMany({
         models: ["deepseek/deepseek-r1", "openai/gpt-4.1"],
@@ -711,8 +694,7 @@ describe("PyreezMcpServer", () => {
 
     it("should strip think tags only from models that have them", async () => {
       let callIndex = 0;
-      const llmClient = stubLlmClient({
-        chat: mock(() => {
+      const chatFn = stubChatFn(() => {
           callIndex++;
           const content =
             callIndex === 1
@@ -731,9 +713,8 @@ describe("PyreezMcpServer", () => {
               },
             ],
           });
-        }) as any,
-      });
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+        });
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       const result = await server.handleAskMany({
         models: ["deepseek/deepseek-r1", "openai/gpt-4.1"],
@@ -746,8 +727,7 @@ describe("PyreezMcpServer", () => {
     });
 
     it("should return empty content for model with only think tags", async () => {
-      const llmClient = stubLlmClient({
-        chat: mock(() =>
+      const chatFn = stubChatFn(() =>
           Promise.resolve({
             id: "test",
             object: "chat.completion",
@@ -764,9 +744,8 @@ describe("PyreezMcpServer", () => {
               },
             ],
           }),
-        ) as any,
-      });
-      const server = new PyreezMcpServer(validConfig({ llmClient }));
+        );
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
 
       const result = await server.handleAskMany({
         models: ["deepseek/deepseek-r1"],
@@ -1625,11 +1604,9 @@ describe("PyreezMcpServer", () => {
         log: mock(() => Promise.resolve()),
         query: mock(() => Promise.resolve([])),
       };
-      const llmClient = stubLlmClient({
-        chat: mock(() => Promise.reject(new Error("API error"))) as any,
-      });
+      const chatFn = stubChatFn(() => Promise.reject(new Error("API error")));
       const server = new PyreezMcpServer(
-        validConfig({ runLogger, llmClient }),
+        validConfig({ runLogger, chatFn }),
       );
 
       await server.handleAsk({
@@ -1675,11 +1652,9 @@ describe("PyreezMcpServer", () => {
         log: mock(() => Promise.reject(new Error("log write failed"))),
         query: mock(() => Promise.resolve([])),
       };
-      const llmClient = stubLlmClient({
-        chat: mock(() => Promise.reject(new Error("LLM API down"))) as any,
-      });
+      const chatFn = stubChatFn(() => Promise.reject(new Error("LLM API down")));
       const server = new PyreezMcpServer(
-        validConfig({ runLogger, llmClient }),
+        validConfig({ runLogger, chatFn }),
       );
 
       // Act — handleAsk will throw from chat, logRun catches logger failure

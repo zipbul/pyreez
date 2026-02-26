@@ -42,6 +42,7 @@ function makeModel(overrides: {
   return {
     id: overrides.id,
     name: overrides.id.split("/")[1] ?? overrides.id,
+    provider: "github",
     contextWindow: 128_000,
     capabilities: caps as any,
     cost: { inputPer1M: 2, outputPer1M: 8 },
@@ -699,9 +700,10 @@ function makeBTModel(overrides: {
   return {
     id: overrides.id,
     name: overrides.id.split("/")[1] ?? overrides.id,
+    provider: "github",
     contextWindow: 128_000,
     capabilities: caps as any,
-    
+
     cost: { inputPer1M: 2, outputPer1M: 8 },
     supportsToolCalling: true,
   };

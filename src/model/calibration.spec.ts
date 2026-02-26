@@ -248,6 +248,7 @@ function makeModelInfo(id: string, mu = 500): ModelInfo {
   return {
     id,
     name: id,
+    provider: "github",
     contextWindow: 128000,
     capabilities: capabilities as any,
     cost: { inputPer1M: 1, outputPer1M: 4 },
@@ -313,6 +314,7 @@ describe("extractRatingsMap", () => {
     const emptyModel: ModelInfo = {
       id: "empty",
       name: "empty",
+      provider: "github",
       contextWindow: 128000,
       capabilities: {} as any,
       cost: { inputPer1M: 0, outputPer1M: 0 },

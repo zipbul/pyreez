@@ -9,7 +9,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
-import type { LLMClient } from "../llm/client";
+import type { ChatCompletionRequest, ChatCompletionResponse } from "../llm/types";
 import type { ModelRegistry } from "../model/registry";
 import type { ModelInfo } from "../model/types";
 import type { Reporter, CallRecord } from "../report/types";
@@ -20,10 +20,11 @@ import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 import type { DeliberationStore } from "../deliberation/store-types";
 import { stripThinkTags } from "../deliberation/wire";
 import type { CalibrationResult } from "../model/calibration";
+import type { PyreezEngine } from "../axis/engine";
 
 export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
-  llmClient: LLMClient;
+  chatFn: (request: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
   registry: ModelRegistry;
   reporter: Reporter;
   routeFn: (prompt: string, budget?: BudgetConfig, hints?: import("../router/types").RouteHints) => RouteResult | null;
@@ -31,6 +32,7 @@ export interface PyreezMcpServerConfig {
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
   deliberationStore?: DeliberationStore;
   runLogger?: RunLogger;
+  engine?: PyreezEngine;
   calibrateFn?: () => Promise<CalibrationResult>;
 }
 
@@ -38,7 +40,7 @@ const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
 
 export class PyreezMcpServer {
   private readonly mcpServer: McpServer;
-  private readonly llmClient: LLMClient;
+  private readonly chatFn: (request: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
   private readonly registry: ModelRegistry;
   private readonly reporter: Reporter;
   private readonly routeFn: PyreezMcpServerConfig["routeFn"];
@@ -46,14 +48,15 @@ export class PyreezMcpServer {
   private readonly deliberateFn?: PyreezMcpServerConfig["deliberateFn"];
   private readonly deliberationStore?: DeliberationStore;
   private readonly runLogger?: RunLogger;
+  private readonly engine?: PyreezEngine;
   private readonly calibrateFn?: () => Promise<CalibrationResult>;
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
       throw new Error("mcpServer is required");
     }
-    if (!config.llmClient) {
-      throw new Error("llmClient is required");
+    if (!config.chatFn) {
+      throw new Error("chatFn is required");
     }
     if (!config.registry) {
       throw new Error("registry is required");
@@ -66,7 +69,7 @@ export class PyreezMcpServer {
     }
 
     this.mcpServer = config.mcpServer;
-    this.llmClient = config.llmClient;
+    this.chatFn = config.chatFn;
     this.registry = config.registry;
     this.reporter = config.reporter;
     this.routeFn = config.routeFn;
@@ -74,6 +77,7 @@ export class PyreezMcpServer {
     this.deliberateFn = config.deliberateFn;
     this.deliberationStore = config.deliberationStore;
     this.runLogger = config.runLogger;
+    this.engine = config.engine;
     this.calibrateFn = config.calibrateFn;
 
     this.registerTools();
@@ -296,7 +300,12 @@ export class PyreezMcpServer {
           task: z.string().describe("Task to deliberate on"),
           perspectives: z
             .array(z.string())
-            .describe("Review perspectives (e.g., ['코드 품질', '보안', '성능'])"),
+            .optional()
+            .describe("Review perspectives (e.g., ['코드 품질', '보안', '성능']). Required when auto_route is false."),
+          auto_route: z
+            .boolean()
+            .optional()
+            .describe("When true, use the 5-slot axis pipeline (auto-selects models)"),
           producer_instructions: z
             .string()
             .optional()
@@ -429,7 +438,7 @@ export class PyreezMcpServer {
     }
 
     try {
-      const response = await this.llmClient.chat({
+      const response = await this.chatFn({
         model: args.model,
         messages: args.messages.map((m) => ({
           role: m.role as "system" | "user" | "assistant",
@@ -469,7 +478,7 @@ export class PyreezMcpServer {
 
     const results = await Promise.allSettled(
       args.models.map(async (model) => {
-        const response = await this.llmClient.chat({
+        const response = await this.chatFn({
           model,
           messages: args.messages.map((m) => ({
             role: m.role as "system" | "user" | "assistant",
@@ -646,7 +655,8 @@ export class PyreezMcpServer {
 
   async handleDeliberate(args: {
     task: string;
-    perspectives: string[];
+    perspectives?: string[];
+    auto_route?: boolean;
     producer_instructions?: string;
     leader_instructions?: string;
     max_rounds?: number;
@@ -656,6 +666,21 @@ export class PyreezMcpServer {
     if (!args.task) {
       return this.errorResult("Error: task is required");
     }
+
+    // auto_route + engine: use the 5-slot axis pipeline
+    if (args.auto_route && this.engine) {
+      try {
+        const budget = { perRequest: 1.0 };
+        const result = await this.engine.run(args.task, budget);
+        return this.textResult(JSON.stringify(result, null, 2));
+      } catch (error) {
+        return this.errorResult(
+          `Error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    // Fallback: perspectives-based deliberation
     if (!args.perspectives?.length) {
       return this.errorResult("Error: perspectives must not be empty");
     }

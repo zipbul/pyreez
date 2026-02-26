@@ -1,19 +1,17 @@
 /**
- * Unit tests for config.ts — githubModelsConfig and loadConfigFromEnv.
+ * Unit tests for config.ts — loadConfigFromEnv.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import {
-  githubModelsConfig,
-  loadConfigFromEnv,
-} from "./config";
-import type { LLMProviderConfig } from "./config";
+import { loadConfigFromEnv } from "./config";
 
 // -- Helpers --
 
-/** Snapshot and restore Bun.env between tests. */
 const ENV_KEYS = [
   "PYREEZ_GITHUB_PAT",
+  "PYREEZ_ANTHROPIC_KEY",
+  "PYREEZ_GOOGLE_API_KEY",
+  "PYREEZ_OPENAI_KEY",
   "PYREEZ_MODEL",
 ] as const;
 
@@ -45,61 +43,6 @@ function clearEnv() {
 
 // -- Tests --
 
-describe("githubModelsConfig", () => {
-  it("should return correct LLMProviderConfig with explicit model when model provided", () => {
-    // Arrange & Act
-    const config = githubModelsConfig("my-pat", "custom-model");
-
-    // Assert
-    expect(config).toEqual({
-      baseUrl: "https://models.github.ai",
-      apiKey: "my-pat",
-      model: "custom-model",
-      chatEndpoint: "/inference/chat/completions",
-      headers: {
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    });
-  });
-
-  it('should use default model "openai/gpt-4.1" when model param omitted', () => {
-    // Arrange & Act
-    const config = githubModelsConfig("my-pat");
-
-    // Assert
-    expect(config.model).toBe("openai/gpt-4.1");
-  });
-
-  it("should include chatEndpoint and Accept header in config", () => {
-    // Arrange & Act
-    const config = githubModelsConfig("pat");
-
-    // Assert
-    expect(config.chatEndpoint).toBe("/inference/chat/completions");
-    expect(config.headers).toHaveProperty(
-      "Accept",
-      "application/vnd.github+json",
-    );
-  });
-});
-
-describe("factory independence", () => {
-  it("should return independent objects on each call (not shared references)", () => {
-    // Arrange & Act
-    const a = githubModelsConfig("pat");
-    const b = githubModelsConfig("pat");
-
-    // Assert — same values but different references
-    expect(a).toEqual(b);
-    expect(a).not.toBe(b);
-
-    // Mutating one does not affect the other
-    a.model = "MUTATED";
-    expect(b.model).toBe("openai/gpt-4.1");
-  });
-});
-
 describe("loadConfigFromEnv", () => {
   let envSnap: EnvSnapshot;
 
@@ -112,39 +55,61 @@ describe("loadConfigFromEnv", () => {
     restoreEnv(envSnap);
   });
 
-  it("should return github config with defaults when PAT is set", () => {
-    // Arrange
+  it("should return github provider when PAT is set", () => {
     Bun.env.PYREEZ_GITHUB_PAT = "test-pat";
 
-    // Act
     const result = loadConfigFromEnv();
 
-    // Assert
-    expect(result.llm.baseUrl).toBe("https://models.github.ai");
-    expect(result.llm.model).toBe("openai/gpt-4.1");
-    expect(result.llm.apiKey).toBe("test-pat");
-    expect(result.llm.chatEndpoint).toBe("/inference/chat/completions");
+    expect(result.providers.github).toEqual({ apiKey: "test-pat" });
+    expect(result.defaultModel).toBe("openai/gpt-4.1");
   });
 
-  it("should return github config with PAT and custom model when PYREEZ_MODEL is set", () => {
-    // Arrange
+  it("should use custom defaultModel when PYREEZ_MODEL is set", () => {
     Bun.env.PYREEZ_GITHUB_PAT = "my-pat";
     Bun.env.PYREEZ_MODEL = "openai/gpt-4o";
 
-    // Act
     const result = loadConfigFromEnv();
 
-    // Assert
-    expect(result.llm.model).toBe("openai/gpt-4o");
-    expect(result.llm.apiKey).toBe("my-pat");
+    expect(result.defaultModel).toBe("openai/gpt-4o");
   });
 
-  it("should throw when PYREEZ_GITHUB_PAT is missing", () => {
-    // Arrange — no PAT set
+  it("should throw when no provider keys are set", () => {
+    expect(() => loadConfigFromEnv()).toThrow("No LLM providers configured");
+  });
 
-    // Act & Assert
-    expect(() => loadConfigFromEnv()).toThrow(
-      "PYREEZ_GITHUB_PAT is required when using GitHub Models provider",
-    );
+  it("should configure anthropic provider when PYREEZ_ANTHROPIC_KEY is set", () => {
+    Bun.env.PYREEZ_ANTHROPIC_KEY = "sk-ant-test";
+
+    const result = loadConfigFromEnv();
+
+    expect(result.providers.anthropic).toEqual({ apiKey: "sk-ant-test" });
+  });
+
+  it("should configure google provider when PYREEZ_GOOGLE_API_KEY is set", () => {
+    Bun.env.PYREEZ_GOOGLE_API_KEY = "goog-key";
+
+    const result = loadConfigFromEnv();
+
+    expect(result.providers.google).toEqual({ apiKey: "goog-key" });
+  });
+
+  it("should configure openai provider when PYREEZ_OPENAI_KEY is set", () => {
+    Bun.env.PYREEZ_OPENAI_KEY = "sk-test";
+
+    const result = loadConfigFromEnv();
+
+    expect(result.providers.openai).toEqual({ apiKey: "sk-test" });
+  });
+
+  it("should configure multiple providers when multiple keys are set", () => {
+    Bun.env.PYREEZ_GITHUB_PAT = "gh-pat";
+    Bun.env.PYREEZ_ANTHROPIC_KEY = "sk-ant";
+
+    const result = loadConfigFromEnv();
+
+    expect(result.providers.github).toBeDefined();
+    expect(result.providers.anthropic).toBeDefined();
+    expect(result.providers.google).toBeUndefined();
+    expect(result.providers.openai).toBeUndefined();
   });
 });

@@ -9,6 +9,7 @@ import type {
   DimensionRating,
   CapabilityDimension,
 } from "./types";
+import type { ProviderName } from "../llm/types";
 import { ALL_DIMENSIONS, SIGMA_BASE } from "./types";
 import modelsJson from "../../scores/models.json";
 
@@ -30,6 +31,7 @@ interface LegacyScoreEntry {
 
 interface JsonModelEntry {
   name: string;
+  provider: ProviderName;
   contextWindow: number;
   supportsToolCalling: boolean;
   cost: { inputPer1M: number; outputPer1M: number };
@@ -80,6 +82,7 @@ function parseModels(data: ModelsJsonSchema): ModelInfo[] {
     result.push({
       id,
       name: entry.name,
+      provider: entry.provider,
       contextWindow: entry.contextWindow,
       capabilities: capabilities as ModelCapabilities,
       cost: entry.cost,
@@ -147,6 +150,15 @@ export class ModelRegistry {
     return this.getAll().filter(
       (m) => m.capabilities.MULTILINGUAL.mu >= minScore,
     );
+  }
+
+  /** Build a model ID → provider name map for ProviderRegistry. */
+  buildProviderMap(): ReadonlyMap<string, ProviderName> {
+    const map = new Map<string, ProviderName>();
+    for (const model of this.models.values()) {
+      map.set(model.id, model.provider);
+    }
+    return map;
   }
 }
 

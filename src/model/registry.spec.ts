@@ -13,12 +13,12 @@ describe("ModelRegistry", () => {
   const registry = new ModelRegistry();
 
   describe("getAll", () => {
-    it("should return array of 21 models", () => {
+    it("should return array of 34 models", () => {
       // Arrange & Act
       const models = registry.getAll();
 
       // Assert
-      expect(models).toBeArrayOfSize(21);
+      expect(models).toBeArrayOfSize(34);
     });
 
     it("should return equal results on repeated calls", () => {
@@ -237,12 +237,12 @@ describe("ModelRegistry (BT rating)", () => {
       expect(typeof reasoning.mu).toBe("number");
     });
 
-    it("should parse all 21 models with 21 dimensions each", () => {
+    it("should parse all 34 models with 21 dimensions each", () => {
       // Arrange & Act
       const models = registry.getAll();
 
       // Assert
-      expect(models).toBeArrayOfSize(21);
+      expect(models).toBeArrayOfSize(34);
       for (const model of models) {
         for (const dim of ALL_DIMENSIONS) {
           const rating = model.capabilities[dim] as any;
@@ -258,6 +258,7 @@ describe("ModelRegistry (BT rating)", () => {
         {
           id: "test/partial",
           name: "Partial",
+          provider: "github",
           contextWindow: 100_000,
           capabilities: (() => {
             const caps: Record<string, any> = {};
@@ -302,6 +303,7 @@ describe("ModelRegistry (BT rating)", () => {
         {
           id: "test/zero",
           name: "Zero",
+          provider: "github",
           contextWindow: 100_000,
           capabilities: (() => {
             const caps: Record<string, any> = {};
@@ -447,6 +449,7 @@ describe("ModelRegistry (BT rating)", () => {
       const available: ModelInfo = {
         id: "test/available",
         name: "Available",
+        provider: "github",
         contextWindow: 32000,
         capabilities: {} as any,
         cost: { inputPer1M: 1, outputPer1M: 2 },
@@ -456,6 +459,7 @@ describe("ModelRegistry (BT rating)", () => {
       const unavailable: ModelInfo = {
         id: "test/unavailable",
         name: "Unavailable",
+        provider: "github",
         contextWindow: 32000,
         capabilities: {} as any,
         cost: { inputPer1M: 1, outputPer1M: 2 },
@@ -477,6 +481,7 @@ describe("ModelRegistry (BT rating)", () => {
       const noField: ModelInfo = {
         id: "test/no-field",
         name: "NoField",
+        provider: "github",
         contextWindow: 32000,
         capabilities: {} as any,
         cost: { inputPer1M: 1, outputPer1M: 2 },

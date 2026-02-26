@@ -19,6 +19,8 @@ import type {
   DeliberationResult,
   BudgetConfig,
   ChatFn,
+  SlotTrace,
+  RunTrace,
 } from "./types";
 
 // -- Fixtures --
@@ -251,6 +253,135 @@ describe("PyreezEngine", () => {
       );
 
       await expect(engine.run("task", budget)).resolves.toBeDefined();
+    });
+  });
+
+  describe("traceOnly() — Slot 1-4 only", () => {
+    it("should return SlotTrace with scores, classified, requirement, plan", async () => {
+      const { scoring, classifier, profiler, selector, deliberation, chat } =
+        makeMocks();
+      const engine = new PyreezEngine(
+        scoring,
+        classifier,
+        profiler,
+        selector,
+        deliberation,
+        chat,
+        ["test/model-a"],
+      );
+
+      const trace = await engine.traceOnly("task", budget);
+
+      expect(trace.scores).toEqual([mockScore]);
+      expect(trace.classified).toBe(mockClassified);
+      expect(trace.requirement).toBe(mockReq);
+      expect(trace.plan).toBe(mockPlanMulti);
+    });
+
+    it("should NOT call chat or deliberation", async () => {
+      const { scoring, classifier, profiler, selector, deliberation, chat } =
+        makeMocks();
+      const engine = new PyreezEngine(
+        scoring,
+        classifier,
+        profiler,
+        selector,
+        deliberation,
+        chat,
+        ["test/model-a"],
+      );
+
+      await engine.traceOnly("task", budget);
+
+      expect(chat).not.toHaveBeenCalled();
+      expect(deliberation.deliberate).not.toHaveBeenCalled();
+    });
+
+    it("should apply learner.enhance when learner is provided", async () => {
+      const { scoring, classifier, profiler, selector, deliberation, chat } =
+        makeMocks();
+      const enhancedScore: ModelScore = { ...mockScore, overall: 0.9 };
+      const learner: LearningLayer = {
+        record: mock(async () => {}),
+        enhance: mock(async () => [enhancedScore]),
+      };
+      const engine = new PyreezEngine(
+        scoring,
+        classifier,
+        profiler,
+        selector,
+        deliberation,
+        chat,
+        ["test/model-a"],
+        learner,
+      );
+
+      const trace = await engine.traceOnly("task", budget);
+
+      expect(learner.enhance).toHaveBeenCalled();
+      expect(trace.scores).toEqual([enhancedScore]);
+    });
+  });
+
+  describe("runWithTrace() — full pipeline with trace", () => {
+    it("should return RunTrace with all SlotTrace fields + result", async () => {
+      const { scoring, classifier, profiler, selector, deliberation, chat } =
+        makeMocks();
+      const engine = new PyreezEngine(
+        scoring,
+        classifier,
+        profiler,
+        selector,
+        deliberation,
+        chat,
+        ["test/model-a"],
+      );
+
+      const trace = await engine.runWithTrace("task", budget);
+
+      expect(trace.scores).toEqual([mockScore]);
+      expect(trace.classified).toBe(mockClassified);
+      expect(trace.requirement).toBe(mockReq);
+      expect(trace.plan).toBe(mockPlanMulti);
+      expect(trace.result).toBe(mockResult);
+    });
+
+    it("should use single-model shortcut when plan has 1 model", async () => {
+      const { scoring, classifier, profiler, selector, deliberation, chat } =
+        makeMocks(mockPlanSingle);
+      const engine = new PyreezEngine(
+        scoring,
+        classifier,
+        profiler,
+        selector,
+        deliberation,
+        chat,
+        ["test/model-a"],
+      );
+
+      const trace = await engine.runWithTrace("task", budget);
+
+      expect(deliberation.deliberate).not.toHaveBeenCalled();
+      expect(trace.result.protocol).toBe("single");
+      expect(trace.result.totalLLMCalls).toBe(1);
+    });
+
+    it("run() should return same result as runWithTrace().result", async () => {
+      const { scoring, classifier, profiler, selector, deliberation, chat } =
+        makeMocks();
+      const engine = new PyreezEngine(
+        scoring,
+        classifier,
+        profiler,
+        selector,
+        deliberation,
+        chat,
+        ["test/model-a"],
+      );
+
+      const result = await engine.run("task", budget);
+      // run() delegates to runWithTrace(), so it returns the deliberation result
+      expect(result).toBe(mockResult);
     });
   });
 });
