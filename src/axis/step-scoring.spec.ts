@@ -8,13 +8,13 @@ describe("StepBtScoringSystem", () => {
   const scoring = new StepBtScoringSystem();
 
   it("returns ModelScore[] with correct length for valid model IDs", async () => {
-    const scores = await scoring.getScores(["openai/gpt-4.1", "openai/gpt-4.1-mini"]);
+    const scores = await scoring.getScores(["anthropic/claude-sonnet-4.6", "anthropic/claude-haiku-4.5"]);
     expect(scores).toHaveLength(2);
   });
 
   it("returns ModelScore with modelId, dimensions, and overall > 0", async () => {
-    const [score] = await scoring.getScores(["openai/gpt-4.1"]);
-    expect(score!.modelId).toBe("openai/gpt-4.1");
+    const [score] = await scoring.getScores(["anthropic/claude-sonnet-4.6"]);
+    expect(score!.modelId).toBe("anthropic/claude-sonnet-4.6");
     expect(score!.overall).toBeGreaterThan(0);
     expect(Object.keys(score!.dimensions).length).toBeGreaterThan(0);
   });
@@ -25,7 +25,7 @@ describe("StepBtScoringSystem", () => {
   });
 
   it("dimensions have mu and sigma fields", async () => {
-    const [score] = await scoring.getScores(["openai/gpt-4.1"]);
+    const [score] = await scoring.getScores(["anthropic/claude-sonnet-4.6"]);
     const someKey = Object.keys(score!.dimensions)[0]!;
     expect(score!.dimensions[someKey]).toHaveProperty("mu");
     expect(score!.dimensions[someKey]).toHaveProperty("sigma");
@@ -33,7 +33,7 @@ describe("StepBtScoringSystem", () => {
   });
 
   it("overall is average of dimension mu values", async () => {
-    const [score] = await scoring.getScores(["openai/gpt-4.1"]);
+    const [score] = await scoring.getScores(["anthropic/claude-sonnet-4.6"]);
     const dims = Object.values(score!.dimensions);
     const expectedOverall = dims.reduce((sum, d) => sum + d.mu, 0) / dims.length;
     // Allow small floating-point tolerance

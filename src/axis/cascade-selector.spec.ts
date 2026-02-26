@@ -11,9 +11,9 @@ describe("CascadeSelector", () => {
   async function makeScores(): Promise<ModelScore[]> {
     const s = new BtScoringSystem();
     return s.getScores([
-      "openai/gpt-4.1",
-      "openai/gpt-4.1-mini",
-      "openai/gpt-4.1-nano",
+      "anthropic/claude-sonnet-4.6",
+      "anthropic/claude-haiku-4.5",
+      "google/gemini-2.5-flash-lite",
     ]);
   }
 
@@ -37,9 +37,9 @@ describe("CascadeSelector", () => {
     };
     const scores = await makeScores();
     const plan = await selector.select(req, scores, { perRequest: 1.0 });
-    // nano is cheaper than mini, which is cheaper than 4.1
-    // cascade should pick nano or mini first
-    expect(["openai/gpt-4.1-nano", "openai/gpt-4.1-mini"]).toContain(plan.models[0]!.modelId);
+    // flash-lite is cheaper than haiku, which is cheaper than sonnet
+    // cascade should pick flash-lite or haiku first
+    expect(["google/gemini-2.5-flash-lite", "anthropic/claude-haiku-4.5"]).toContain(plan.models[0]!.modelId);
   });
 
   it("falls back to last model when budget is very small", async () => {

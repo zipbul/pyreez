@@ -1,6 +1,6 @@
 /**
  * Model registry — loads models from scores/models.json.
- * 21-dimension capability model, 18 GitHub Models.
+ * 21-dimension capability model, Anthropic + Google providers.
  */
 
 import type {

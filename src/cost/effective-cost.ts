@@ -5,7 +5,6 @@
  * - Anthropic: 90% read discount, 25% write premium
  * - Google: 75% read discount, automatic caching
  * - OpenAI: 50% read discount, automatic caching
- * - GitHub Models: no caching support
  *
  * This module consolidates the cost formula previously duplicated across
  * selector.ts and wrappers.ts into three shared functions.
@@ -27,7 +26,6 @@ export interface ProviderCachingInfo {
 }
 
 export const PROVIDER_CACHING: Record<ProviderName, ProviderCachingInfo> = {
-  github:    { supported: false, readDiscount: 0,    writePremium: 0,    automatic: false },
   anthropic: { supported: true,  readDiscount: 0.9,  writePremium: 0.25, automatic: false },
   google:    { supported: true,  readDiscount: 0.75, writePremium: 0,    automatic: true  },
   openai:    { supported: true,  readDiscount: 0.5,  writePremium: 0,    automatic: true  },

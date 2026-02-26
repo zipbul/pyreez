@@ -32,15 +32,10 @@ function makeModel(
 // -- PROVIDER_CACHING record --
 
 describe("PROVIDER_CACHING", () => {
-  it("should have entries for all four providers", () => {
-    expect(PROVIDER_CACHING.github).toBeDefined();
+  it("should have entries for all three providers", () => {
     expect(PROVIDER_CACHING.anthropic).toBeDefined();
     expect(PROVIDER_CACHING.google).toBeDefined();
     expect(PROVIDER_CACHING.openai).toBeDefined();
-  });
-
-  it("should mark github as unsupported", () => {
-    expect(PROVIDER_CACHING.github.supported).toBe(false);
   });
 
   it("should mark anthropic with 90% read discount and 25% write premium", () => {
@@ -65,7 +60,7 @@ describe("estimateStaticCost", () => {
   });
 
   it("should match the old inline formula exactly", () => {
-    const model = makeModel("github", 5, 10);
+    const model = makeModel("anthropic", 5, 10);
     const input = 2000;
     const output = 1000;
     const oldFormula =
@@ -89,8 +84,8 @@ describe("estimateEffectiveCost", () => {
     expect(effective1).toBeCloseTo(static1, 10);
   });
 
-  it("should equal static cost × N for github (no caching)", () => {
-    const model = makeModel("github", 2, 8);
+  it("should be cheaper than static × N for openai with caching", () => {
+    const model = makeModel("openai", 2, 8);
     const static1 = estimateStaticCost(model, 1000, 500);
     const effective3 = estimateEffectiveCost({
       model,
@@ -98,7 +93,8 @@ describe("estimateEffectiveCost", () => {
       outputTokens: 500,
       rounds: 3,
     });
-    expect(effective3).toBeCloseTo(static1 * 3, 10);
+    // OpenAI: 50% read discount on cached input
+    expect(effective3).toBeLessThan(static1 * 3);
   });
 
   it("should be cheaper than static × N for anthropic with multiple rounds", () => {
@@ -182,11 +178,12 @@ describe("estimateAmortizedCost", () => {
     expect(amortized3).toBeLessThan(static1);
   });
 
-  it("should equal static cost for github multi-round (no caching)", () => {
-    const model = makeModel("github", 2, 8);
+  it("should be less than static cost for openai multi-round (caching)", () => {
+    const model = makeModel("openai", 2, 8);
     const static1 = estimateStaticCost(model, 1000, 500);
     const amortized3 = estimateAmortizedCost(model, 1000, 500, 3);
-    expect(amortized3).toBeCloseTo(static1, 10);
+    // OpenAI: 50% read discount on cached portion
+    expect(amortized3).toBeLessThan(static1);
   });
 
   it("should return 0 for 0 rounds", () => {

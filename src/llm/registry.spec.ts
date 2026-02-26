@@ -47,13 +47,13 @@ function makeProviderMap(entries: [string, ProviderName][]): ReadonlyMap<string,
 describe("ProviderRegistry", () => {
   it("should route to correct provider based on model-provider map", async () => {
     // Arrange
-    const github = makeProvider("github");
+    const openai = makeProvider("openai");
     const anthropic = makeProvider("anthropic");
     const map = makeProviderMap([
-      ["openai/gpt-4.1", "github"],
+      ["anthropic/claude-sonnet-4.6", "openai"],
       ["anthropic/claude-opus-4.6", "anthropic"],
     ]);
-    const registry = new ProviderRegistry([github, anthropic], map);
+    const registry = new ProviderRegistry([openai, anthropic], map);
 
     // Act
     const result = await registry.chat({
@@ -64,14 +64,14 @@ describe("ProviderRegistry", () => {
     // Assert
     expect(result.id).toBe("resp-anthropic/claude-opus-4.6");
     expect((anthropic.chat as ReturnType<typeof mock>)).toHaveBeenCalledTimes(1);
-    expect((github.chat as ReturnType<typeof mock>)).not.toHaveBeenCalled();
+    expect((openai.chat as ReturnType<typeof mock>)).not.toHaveBeenCalled();
   });
 
   it("should throw LLMClientError with 400 when model is not in map", async () => {
     // Arrange
-    const github = makeProvider("github");
-    const map = makeProviderMap([["openai/gpt-4.1", "github"]]);
-    const registry = new ProviderRegistry([github], map);
+    const openai = makeProvider("openai");
+    const map = makeProviderMap([["anthropic/claude-sonnet-4.6", "openai"]]);
+    const registry = new ProviderRegistry([openai], map);
 
     // Act & Assert
     try {
@@ -91,12 +91,12 @@ describe("ProviderRegistry", () => {
 
   it("should throw LLMClientError with 503 when provider is not configured", async () => {
     // Arrange — map points to anthropic, but no anthropic provider registered
-    const github = makeProvider("github");
+    const openai = makeProvider("openai");
     const map = makeProviderMap([
-      ["openai/gpt-4.1", "github"],
+      ["anthropic/claude-sonnet-4.6", "openai"],
       ["anthropic/claude-opus-4.6", "anthropic"],
     ]);
-    const registry = new ProviderRegistry([github], map);
+    const registry = new ProviderRegistry([openai], map);
 
     // Act & Assert
     try {
@@ -117,9 +117,9 @@ describe("ProviderRegistry", () => {
   it("should pass full request to provider", async () => {
     // Arrange
     const chatMock = mock((req: ChatCompletionRequest) => Promise.resolve(makeResponse(req.model)));
-    const github = makeProvider("github", chatMock);
-    const map = makeProviderMap([["openai/gpt-4.1", "github"]]);
-    const registry = new ProviderRegistry([github], map);
+    const openai = makeProvider("openai", chatMock);
+    const map = makeProviderMap([["anthropic/claude-sonnet-4.6", "openai"]]);
+    const registry = new ProviderRegistry([openai], map);
 
     const messages = [
       { role: "system" as const, content: "Be helpful" },
@@ -128,7 +128,7 @@ describe("ProviderRegistry", () => {
 
     // Act
     await registry.chat({
-      model: "openai/gpt-4.1",
+      model: "anthropic/claude-sonnet-4.6",
       messages,
       temperature: 0.5,
       max_tokens: 100,
@@ -136,7 +136,7 @@ describe("ProviderRegistry", () => {
 
     // Assert
     const call = chatMock.mock.calls[0]![0] as ChatCompletionRequest;
-    expect(call.model).toBe("openai/gpt-4.1");
+    expect(call.model).toBe("anthropic/claude-sonnet-4.6");
     expect(call.messages).toEqual(messages);
     expect(call.temperature).toBe(0.5);
     expect(call.max_tokens).toBe(100);
@@ -144,19 +144,19 @@ describe("ProviderRegistry", () => {
 
   it("should handle multiple providers correctly", async () => {
     // Arrange
-    const github = makeProvider("github");
+    const openai = makeProvider("openai");
     const anthropic = makeProvider("anthropic");
     const google = makeProvider("google");
     const map = makeProviderMap([
-      ["openai/gpt-4.1", "github"],
+      ["anthropic/claude-sonnet-4.6", "openai"],
       ["anthropic/claude-opus-4.6", "anthropic"],
       ["google/gemini-3.1-pro", "google"],
     ]);
-    const registry = new ProviderRegistry([github, anthropic, google], map);
+    const registry = new ProviderRegistry([openai, anthropic, google], map);
 
     // Act
     const r1 = await registry.chat({
-      model: "openai/gpt-4.1",
+      model: "anthropic/claude-sonnet-4.6",
       messages: [{ role: "user", content: "hi" }],
     });
     const r2 = await registry.chat({
@@ -165,9 +165,9 @@ describe("ProviderRegistry", () => {
     });
 
     // Assert
-    expect(r1.id).toBe("resp-openai/gpt-4.1");
+    expect(r1.id).toBe("resp-anthropic/claude-sonnet-4.6");
     expect(r2.id).toBe("resp-google/gemini-3.1-pro");
-    expect((github.chat as ReturnType<typeof mock>)).toHaveBeenCalledTimes(1);
+    expect((openai.chat as ReturnType<typeof mock>)).toHaveBeenCalledTimes(1);
     expect((google.chat as ReturnType<typeof mock>)).toHaveBeenCalledTimes(1);
     expect((anthropic.chat as ReturnType<typeof mock>)).not.toHaveBeenCalled();
   });

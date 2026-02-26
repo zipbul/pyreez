@@ -35,7 +35,7 @@ const stubRequirement: TaskRequirement = {
 const stubModel = {
   id: "test/model",
   name: "Test Model",
-  provider: "github",
+  provider: "anthropic",
   contextWindow: 100_000,
   capabilities: {
     REASONING: 7, MATH_REASONING: 6, MULTI_STEP_DEPTH: 6, CREATIVITY: 5, ANALYSIS: 7, JUDGMENT: 7,

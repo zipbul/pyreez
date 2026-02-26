@@ -11,9 +11,9 @@ describe("FourStrategySelector", () => {
   async function makeScores(): Promise<ModelScore[]> {
     const s = new BtScoringSystem();
     return s.getScores([
-      "openai/gpt-4.1",
-      "openai/gpt-4.1-mini",
-      "openai/gpt-4.1-nano",
+      "anthropic/claude-sonnet-4.6",
+      "anthropic/claude-haiku-4.5",
+      "google/gemini-2.5-flash-lite",
     ]);
   }
 
@@ -26,8 +26,8 @@ describe("FourStrategySelector", () => {
     };
     const scores = await makeScores();
     const plan = await selector.select(req, scores, { perRequest: 1.0 });
-    // nano is cheapest
-    expect(plan.models[0]!.modelId).toBe("openai/gpt-4.1-nano");
+    // gemini-2.5-flash-lite is cheapest
+    expect(plan.models[0]!.modelId).toBe("google/gemini-2.5-flash-lite");
     expect(plan.strategy).toBe("economy");
   });
 
@@ -40,8 +40,8 @@ describe("FourStrategySelector", () => {
     };
     const scores = await makeScores();
     const plan = await selector.select(req, scores, { perRequest: 1.0 });
-    // gpt-4.1 has highest overall score
-    expect(plan.models[0]!.modelId).toBe("openai/gpt-4.1");
+    // claude-sonnet-4.6 has highest overall score
+    expect(plan.models[0]!.modelId).toBe("anthropic/claude-sonnet-4.6");
     expect(plan.strategy).toBe("premium");
   });
 
@@ -54,7 +54,7 @@ describe("FourStrategySelector", () => {
     };
     const scores = await makeScores();
     const plan = await selector.select(req, scores, { perRequest: 1.0 });
-    expect(plan.models[0]!.modelId).toBe("openai/gpt-4.1");
+    expect(plan.models[0]!.modelId).toBe("anthropic/claude-sonnet-4.6");
     expect(plan.strategy).toBe("critical");
   });
 

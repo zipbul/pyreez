@@ -10,9 +10,9 @@ describe("PreferenceSelector", () => {
   async function makeScores(): Promise<ModelScore[]> {
     const s = new BtScoringSystem();
     return s.getScores([
-      "openai/gpt-4.1",
-      "openai/gpt-4.1-mini",
-      "openai/gpt-4.1-nano",
+      "anthropic/claude-sonnet-4.6",
+      "anthropic/claude-haiku-4.5",
+      "google/gemini-2.5-flash-lite",
     ]);
   }
 
@@ -39,8 +39,8 @@ describe("PreferenceSelector", () => {
       reasoning: "better response",
       confidence: 0.9,
     };
-    table.record({ ...base, modelA: "openai/gpt-4.1", modelB: "openai/gpt-4.1-mini", outcome: "A>>B" }, "CODING");
-    table.record({ ...base, promptId: "test-2", modelA: "openai/gpt-4.1", modelB: "openai/gpt-4.1-nano", outcome: "A>>B" }, "CODING");
+    table.record({ ...base, modelA: "anthropic/claude-sonnet-4.6", modelB: "anthropic/claude-haiku-4.5", outcome: "A>>B" }, "CODING");
+    table.record({ ...base, promptId: "test-2", modelA: "anthropic/claude-sonnet-4.6", modelB: "google/gemini-2.5-flash-lite", outcome: "A>>B" }, "CODING");
 
     const selector = new PreferenceSelector(table);
     const req: AxisTaskRequirement = {
@@ -50,8 +50,8 @@ describe("PreferenceSelector", () => {
     };
     const scores = await makeScores();
     const plan = await selector.select(req, scores, { perRequest: 1.0 });
-    // gpt-4.1 should win with its high win rate
-    expect(plan.models[0]!.modelId).toBe("openai/gpt-4.1");
+    // claude-sonnet-4.6 should win with its high win rate
+    expect(plan.models[0]!.modelId).toBe("anthropic/claude-sonnet-4.6");
   });
 
   it("strategy field is 'preference'", async () => {

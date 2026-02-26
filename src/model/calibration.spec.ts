@@ -22,7 +22,7 @@ import type { CallRecord } from "../report/types";
 
 function makeRecord(overrides: Partial<CallRecord> = {}): CallRecord {
   return {
-    model: "openai/gpt-4.1",
+    model: "anthropic/claude-sonnet-4.6",
     taskType: "CODE_WRITE",
     quality: 7,
     latencyMs: 500,
@@ -248,7 +248,7 @@ function makeModelInfo(id: string, mu = 500): ModelInfo {
   return {
     id,
     name: id,
-    provider: "github",
+    provider: "anthropic",
     contextWindow: 128000,
     capabilities: capabilities as any,
     cost: { inputPer1M: 1, outputPer1M: 4 },
@@ -314,7 +314,7 @@ describe("extractRatingsMap", () => {
     const emptyModel: ModelInfo = {
       id: "empty",
       name: "empty",
-      provider: "github",
+      provider: "anthropic",
       contextWindow: 128000,
       capabilities: {} as any,
       cost: { inputPer1M: 0, outputPer1M: 0 },

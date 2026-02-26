@@ -48,6 +48,7 @@ import type {
 // -- All 21 model IDs in the registry --
 
 export const ALL_MODEL_IDS: readonly string[] = [
+  // OpenAI (direct API)
   "openai/gpt-4.1",
   "openai/gpt-4.1-mini",
   "openai/gpt-4.1-nano",
@@ -55,22 +56,24 @@ export const ALL_MODEL_IDS: readonly string[] = [
   "openai/gpt-4o-mini",
   "openai/o3",
   "openai/o4-mini",
-  "deepseek/DeepSeek-R1-0528",
-  "deepseek/DeepSeek-V3-0324",
-  "xai/grok-3",
-  "xai/grok-3-mini",
-  "meta/Llama-4-Maverick-17B-128E-Instruct-FP8",
-  "meta/Llama-4-Scout-17B-16E-Instruct",
-  "microsoft/Phi-4-reasoning",
-  "microsoft/Phi-4",
-  "microsoft/Phi-4-mini-instruct",
-  "mistral/Codestral-2501",
-  "mistral/Mistral-Medium-3",
+  "openai/gpt-5.3",
+  // Anthropic (via CLI or SDK)
   "anthropic/claude-opus-4.6",
   "anthropic/claude-sonnet-4.6",
   "anthropic/claude-haiku-4.5",
-  "google/gemini-3.1-pro",
-  "openai/gpt-5.3",
+  "anthropic/claude-sonnet-4.5",
+  "anthropic/claude-opus-4.5",
+  "anthropic/claude-opus-4.1",
+  "anthropic/claude-sonnet-4",
+  "anthropic/claude-opus-4",
+  // Google
+  "google/gemini-2.5-pro",
+  "google/gemini-2.5-flash",
+  "google/gemini-2.5-flash-lite",
+  "google/gemini-2.0-flash",
+  "google/gemini-3-flash-preview",
+  "google/gemini-3-pro-preview",
+  "google/gemini-3.1-pro-preview",
 ];
 
 // -- Default configuration --

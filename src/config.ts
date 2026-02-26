@@ -5,10 +5,10 @@
 
 export interface PyreezConfig {
   providers: {
-    github?: { apiKey: string };
     anthropic?: { apiKey: string; baseUrl?: string };
     google?: { apiKey: string };
     openai?: { apiKey: string };
+    claudeCli?: { enabled: boolean };
   };
   defaultModel?: string;
 }
@@ -17,22 +17,17 @@ export interface PyreezConfig {
  * Load config from environment variables.
  * All providers are optional — only configure ones with keys present.
  *
- * PYREEZ_GITHUB_PAT  — GitHub PAT (models:read scope)
  * PYREEZ_ANTHROPIC_KEY — Anthropic API key
  * PYREEZ_GOOGLE_API_KEY — Google AI API key
  * PYREEZ_OPENAI_KEY — OpenAI API key
+ * PYREEZ_CLAUDE_CLI — set to "1" to use `claude -p` for anthropic/* models (no API cost)
  * PYREEZ_MODEL — default model (optional, default "openai/gpt-4.1")
  */
 export function loadConfigFromEnv(): PyreezConfig {
   const config: PyreezConfig = {
     providers: {},
-    defaultModel: Bun.env.PYREEZ_MODEL ?? "openai/gpt-4.1",
+    defaultModel: Bun.env.PYREEZ_MODEL ?? "anthropic/claude-sonnet-4.6",
   };
-
-  const githubPat = Bun.env.PYREEZ_GITHUB_PAT;
-  if (githubPat) {
-    config.providers.github = { apiKey: githubPat };
-  }
 
   const anthropicKey = Bun.env.PYREEZ_ANTHROPIC_KEY;
   if (anthropicKey) {
@@ -49,10 +44,19 @@ export function loadConfigFromEnv(): PyreezConfig {
     config.providers.openai = { apiKey: openaiKey };
   }
 
+  // Claude CLI provider: uses `claude -p` via Claude Code subscription
+  // Takes priority over PYREEZ_ANTHROPIC_KEY when both are set
+  const claudeCli = Bun.env.PYREEZ_CLAUDE_CLI;
+  if (claudeCli === "1") {
+    config.providers.claudeCli = { enabled: true };
+    // Remove SDK-based anthropic provider — CLI replaces it
+    delete config.providers.anthropic;
+  }
+
   // At least one provider must be configured
   if (Object.keys(config.providers).length === 0) {
     throw new Error(
-      "No LLM providers configured. Set at least one of: PYREEZ_GITHUB_PAT, PYREEZ_ANTHROPIC_KEY, PYREEZ_GOOGLE_KEY, PYREEZ_OPENAI_KEY",
+      "No LLM providers configured. Set at least one of: PYREEZ_ANTHROPIC_KEY, PYREEZ_GOOGLE_API_KEY, PYREEZ_OPENAI_KEY, or PYREEZ_CLAUDE_CLI=1",
     );
   }
 

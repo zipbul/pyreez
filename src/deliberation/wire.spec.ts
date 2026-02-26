@@ -54,20 +54,20 @@ const {
 // -- Fixtures --
 
 const STUB_TEAM: TeamComposition = {
-  producer: { model: "openai/gpt-4.1", role: "producer" },
+  producer: { model: "anthropic/claude-sonnet-4.6", role: "producer" },
   reviewers: [
     {
-      model: "meta/llama-4-scout",
+      model: "google/gemini-2.5-pro",
       role: "reviewer",
       perspective: "보안",
     },
     {
-      model: "mistralai/mistral-large",
+      model: "google/gemini-2.5-flash",
       role: "reviewer",
       perspective: "성능",
     },
   ],
-  leader: { model: "openai/gpt-4.1-mini", role: "leader" },
+  leader: { model: "anthropic/claude-haiku-4.5", role: "leader" },
 };
 
 const STUB_OUTPUT: DeliberateOutput = {
@@ -82,7 +82,7 @@ const STUB_OUTPUT: DeliberateOutput = {
   },
   totalTokens: 0,
   totalLLMCalls: 3,
-  modelsUsed: ["openai/gpt-4.1"],
+  modelsUsed: ["anthropic/claude-sonnet-4.6"],
 };
 
 function stubModel(id: string): ModelInfo {
@@ -90,7 +90,7 @@ function stubModel(id: string): ModelInfo {
   return {
     id,
     name: id,
-    provider: "github",
+    provider: "anthropic",
     contextWindow: 128000,
     capabilities: dims,
     cost: { inputPer1M: 0, outputPer1M: 0 },
@@ -110,7 +110,7 @@ describe("createChatAdapter", () => {
         id: "1",
         object: "chat.completion",
         created: 0,
-        model: "openai/gpt-4.1",
+        model: "anthropic/claude-sonnet-4.6",
         choices: [
           {
             index: 0,
@@ -124,7 +124,7 @@ describe("createChatAdapter", () => {
     const adapter = createChatAdapter(chatFn);
 
     // Act
-    const result = await adapter("openai/gpt-4.1", [
+    const result = await adapter("anthropic/claude-sonnet-4.6", [
       { role: "user", content: "hi" },
     ]);
 
@@ -254,10 +254,10 @@ describe("createDeliberateFn", () => {
     mockDeliberate.mockImplementation(async () => STUB_OUTPUT);
 
     const registry = {
-      getAll: () => [stubModel("openai/gpt-4.1")],
-      getAvailable: () => [stubModel("openai/gpt-4.1")],
+      getAll: () => [stubModel("anthropic/claude-sonnet-4.6")],
+      getAvailable: () => [stubModel("anthropic/claude-sonnet-4.6")],
       getById: (id: string) =>
-        id === "openai/gpt-4.1" ? stubModel("openai/gpt-4.1") : undefined,
+        id === "anthropic/claude-sonnet-4.6" ? stubModel("anthropic/claude-sonnet-4.6") : undefined,
     };
     const chat = mock(async () => "response");
     const fn = createDeliberateFn({ registry, chat });
@@ -300,9 +300,9 @@ describe("createDeliberateFn", () => {
       task: "task",
       perspectives: ["보안", "성능"],
       team: {
-        producer: "openai/gpt-4.1",
-        reviewers: ["meta/llama-4-scout", "mistralai/mistral-large"],
-        leader: "openai/gpt-4.1-mini",
+        producer: "anthropic/claude-sonnet-4.6",
+        reviewers: ["google/gemini-2.5-pro", "google/gemini-2.5-flash"],
+        leader: "anthropic/claude-haiku-4.5",
       },
     };
 
@@ -312,9 +312,9 @@ describe("createDeliberateFn", () => {
     // Assert
     const options = mockComposeTeam.mock.calls[0]![0];
     expect(options.overrides).toEqual({
-      producer: "openai/gpt-4.1",
-      reviewers: ["meta/llama-4-scout", "mistralai/mistral-large"],
-      leader: "openai/gpt-4.1-mini",
+      producer: "anthropic/claude-sonnet-4.6",
+      reviewers: ["google/gemini-2.5-pro", "google/gemini-2.5-flash"],
+      leader: "anthropic/claude-haiku-4.5",
     });
 
     // Cleanup
@@ -621,13 +621,13 @@ describe("createDeliberateFn", () => {
     // Arrange
     const stubRound1: Round = {
       number: 1,
-      production: { model: "openai/gpt-4.1", content: "content 1" },
+      production: { model: "anthropic/claude-sonnet-4.6", content: "content 1" },
       reviews: [],
       synthesis: undefined,
     };
     const stubRound2: Round = {
       number: 2,
-      production: { model: "openai/gpt-4.1", content: "content 2" },
+      production: { model: "anthropic/claude-sonnet-4.6", content: "content 2" },
       reviews: [],
       synthesis: undefined,
     };
@@ -857,7 +857,7 @@ describe("createChatAdapter", () => {
         id: "1",
         object: "chat.completion" as const,
         created: 0,
-        model: "deepseek/DeepSeek-R1-0528",
+        model: "anthropic/claude-opus-4.6",
         choices: [
           {
             index: 0,
@@ -874,7 +874,7 @@ describe("createChatAdapter", () => {
     const adapter = createChatAdapter(chatFn);
 
     // Act
-    const result = await adapter("deepseek/DeepSeek-R1-0528", [
+    const result = await adapter("anthropic/claude-opus-4.6", [
       { role: "user", content: "test" },
     ]);
 

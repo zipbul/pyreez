@@ -8,10 +8,10 @@ import { loadConfigFromEnv } from "./config";
 // -- Helpers --
 
 const ENV_KEYS = [
-  "PYREEZ_GITHUB_PAT",
   "PYREEZ_ANTHROPIC_KEY",
   "PYREEZ_GOOGLE_API_KEY",
   "PYREEZ_OPENAI_KEY",
+  "PYREEZ_CLAUDE_CLI",
   "PYREEZ_MODEL",
 ] as const;
 
@@ -55,17 +55,17 @@ describe("loadConfigFromEnv", () => {
     restoreEnv(envSnap);
   });
 
-  it("should return github provider when PAT is set", () => {
-    Bun.env.PYREEZ_GITHUB_PAT = "test-pat";
+  it("should return anthropic provider when key is set", () => {
+    Bun.env.PYREEZ_ANTHROPIC_KEY = "test-key";
 
     const result = loadConfigFromEnv();
 
-    expect(result.providers.github).toEqual({ apiKey: "test-pat" });
-    expect(result.defaultModel).toBe("openai/gpt-4.1");
+    expect(result.providers.anthropic).toEqual({ apiKey: "test-key" });
+    expect(result.defaultModel).toBe("anthropic/claude-sonnet-4.6");
   });
 
   it("should use custom defaultModel when PYREEZ_MODEL is set", () => {
-    Bun.env.PYREEZ_GITHUB_PAT = "my-pat";
+    Bun.env.PYREEZ_ANTHROPIC_KEY = "my-key";
     Bun.env.PYREEZ_MODEL = "openai/gpt-4o";
 
     const result = loadConfigFromEnv();
@@ -102,14 +102,13 @@ describe("loadConfigFromEnv", () => {
   });
 
   it("should configure multiple providers when multiple keys are set", () => {
-    Bun.env.PYREEZ_GITHUB_PAT = "gh-pat";
     Bun.env.PYREEZ_ANTHROPIC_KEY = "sk-ant";
+    Bun.env.PYREEZ_OPENAI_KEY = "sk-openai";
 
     const result = loadConfigFromEnv();
 
-    expect(result.providers.github).toBeDefined();
     expect(result.providers.anthropic).toBeDefined();
+    expect(result.providers.openai).toBeDefined();
     expect(result.providers.google).toBeUndefined();
-    expect(result.providers.openai).toBeUndefined();
   });
 });

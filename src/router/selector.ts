@@ -162,7 +162,7 @@ function fallbackResult(
       model: {
         id: "fallback/none",
         name: "No Model Available",
-        provider: "github",
+        provider: "anthropic",
         contextWindow: 0,
         capabilities: {} as any,
         cost: { inputPer1M: 0, outputPer1M: 0 },

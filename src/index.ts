@@ -12,8 +12,8 @@ import { loadConfigFromEnv } from "./config";
 import { createChatAdapter, createDeliberateFn } from "./deliberation/wire";
 import { FileDeliberationStore } from "./deliberation/file-store";
 import { ProviderRegistry } from "./llm/registry";
-import { GitHubProvider } from "./llm/providers/github";
 import { AnthropicProvider } from "./llm/providers/anthropic";
+import { ClaudeCliProvider } from "./llm/providers/claude-cli";
 import { GoogleProvider } from "./llm/providers/google";
 import { OpenAIProvider } from "./llm/providers/openai";
 import type { LLMProvider } from "./llm/types";
@@ -38,10 +38,9 @@ async function main(): Promise<void> {
 
   // Build providers from config
   const providers: LLMProvider[] = [];
-  if (config.providers.github) {
-    providers.push(new GitHubProvider(config.providers.github));
-  }
-  if (config.providers.anthropic) {
+  if (config.providers.claudeCli) {
+    providers.push(new ClaudeCliProvider());
+  } else if (config.providers.anthropic) {
     providers.push(new AnthropicProvider(config.providers.anthropic));
   }
   if (config.providers.google) {

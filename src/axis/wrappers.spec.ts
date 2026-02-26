@@ -52,15 +52,15 @@ describe("BtScoringSystem", () => {
 
   it("returns ModelScore[] with correct length for valid modelIds", async () => {
     const scores = await scoring.getScores([
-      "openai/gpt-4.1",
-      "openai/gpt-4.1-mini",
+      "anthropic/claude-sonnet-4.6",
+      "anthropic/claude-haiku-4.5",
     ]);
     expect(scores).toHaveLength(2);
   });
 
   it("returns ModelScore with modelId, dimensions, and overall > 0", async () => {
-    const [score] = await scoring.getScores(["openai/gpt-4.1"]);
-    expect(score!.modelId).toBe("openai/gpt-4.1");
+    const [score] = await scoring.getScores(["anthropic/claude-sonnet-4.6"]);
+    expect(score!.modelId).toBe("anthropic/claude-sonnet-4.6");
     expect(score!.overall).toBeGreaterThan(0);
     expect(typeof score!.dimensions).toBe("object");
   });
@@ -71,7 +71,7 @@ describe("BtScoringSystem", () => {
   });
 
   it("dimensions contain mu and sigma fields", async () => {
-    const [score] = await scoring.getScores(["openai/gpt-4.1"]);
+    const [score] = await scoring.getScores(["anthropic/claude-sonnet-4.6"]);
     const someKey = Object.keys(score!.dimensions)[0]!;
     expect(score!.dimensions[someKey]).toHaveProperty("mu");
     expect(score!.dimensions[someKey]).toHaveProperty("sigma");
@@ -133,7 +133,7 @@ describe("TwoTrackCeSelector", () => {
 
   async function makeScores(): Promise<ModelScore[]> {
     const s = new BtScoringSystem();
-    return s.getScores(["openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano"]);
+    return s.getScores(["anthropic/claude-sonnet-4.6", "anthropic/claude-haiku-4.5", "google/gemini-2.5-flash-lite"]);
   }
 
   it("returns EnsemblePlan with at least one model", async () => {
@@ -186,8 +186,8 @@ describe("BtScoringSystem.update", () => {
 
   it("should update in-memory ratings after pairwise result", async () => {
     const scoring = new BtScoringSystem();
-    const modelA = "openai/gpt-4.1";
-    const modelB = "openai/gpt-4.1-mini";
+    const modelA = "anthropic/claude-sonnet-4.6";
+    const modelB = "anthropic/claude-haiku-4.5";
 
     const [beforeA] = await scoring.getScores([modelA]);
     const muBefore = beforeA!.dimensions.REASONING?.mu;
@@ -211,8 +211,8 @@ describe("BtScoringSystem.update", () => {
     // Should not throw for invalid outcome — just skip
     await scoring.update([
       {
-        modelAId: "openai/gpt-4.1",
-        modelBId: "openai/gpt-4.1-mini",
+        modelAId: "anthropic/claude-sonnet-4.6",
+        modelBId: "anthropic/claude-haiku-4.5",
         outcome: "INVALID",
         dimension: "REASONING",
       },
@@ -224,8 +224,8 @@ describe("BtScoringSystem.update", () => {
       readFile: mock(() => Promise.resolve(JSON.stringify({
         version: 1,
         models: {
-          "openai/gpt-4.1": { scores: { REASONING: { mu: 500, sigma: 200, comparisons: 0 } } },
-          "openai/gpt-4.1-mini": { scores: { REASONING: { mu: 500, sigma: 200, comparisons: 0 } } },
+          "anthropic/claude-sonnet-4.6": { scores: { REASONING: { mu: 500, sigma: 200, comparisons: 0 } } },
+          "anthropic/claude-haiku-4.5": { scores: { REASONING: { mu: 500, sigma: 200, comparisons: 0 } } },
         },
       }))),
       writeFile: mock(() => Promise.resolve()),
@@ -234,8 +234,8 @@ describe("BtScoringSystem.update", () => {
     const scoring = new BtScoringSystem({ persistIO: mockIO });
     await scoring.update([
       {
-        modelAId: "openai/gpt-4.1",
-        modelBId: "openai/gpt-4.1-mini",
+        modelAId: "anthropic/claude-sonnet-4.6",
+        modelBId: "anthropic/claude-haiku-4.5",
         outcome: "A>B",
         dimension: "REASONING",
       },
@@ -249,8 +249,8 @@ describe("BtScoringSystem.update", () => {
     // No persistIO → should not throw, just update in-memory
     await scoring.update([
       {
-        modelAId: "openai/gpt-4.1",
-        modelBId: "openai/gpt-4.1-mini",
+        modelAId: "anthropic/claude-sonnet-4.6",
+        modelBId: "anthropic/claude-haiku-4.5",
         outcome: "B>A",
         dimension: "CODE_GENERATION",
       },
@@ -271,8 +271,8 @@ describe("StepBtScoringSystem.update", () => {
       readFile: mock(() => Promise.resolve(JSON.stringify({
         version: 1,
         models: {
-          "openai/gpt-4.1": { scores: { REASONING: { mu: 500, sigma: 200, comparisons: 0 } } },
-          "openai/gpt-4.1-mini": { scores: { REASONING: { mu: 500, sigma: 200, comparisons: 0 } } },
+          "anthropic/claude-sonnet-4.6": { scores: { REASONING: { mu: 500, sigma: 200, comparisons: 0 } } },
+          "anthropic/claude-haiku-4.5": { scores: { REASONING: { mu: 500, sigma: 200, comparisons: 0 } } },
         },
       }))),
       writeFile: mock(() => Promise.resolve()),
@@ -281,8 +281,8 @@ describe("StepBtScoringSystem.update", () => {
     const scoring = new StepBtScoringSystem({ persistIO: mockIO });
     await scoring.update([
       {
-        modelAId: "openai/gpt-4.1",
-        modelBId: "openai/gpt-4.1-mini",
+        modelAId: "anthropic/claude-sonnet-4.6",
+        modelBId: "anthropic/claude-haiku-4.5",
         outcome: "A>>B",
         dimension: "REASONING",
       },
@@ -295,8 +295,8 @@ describe("StepBtScoringSystem.update", () => {
     const scoring = new StepBtScoringSystem();
     await scoring.update([
       {
-        modelAId: "openai/gpt-4.1",
-        modelBId: "openai/gpt-4.1-mini",
+        modelAId: "anthropic/claude-sonnet-4.6",
+        modelBId: "anthropic/claude-haiku-4.5",
         outcome: "BOGUS",
         dimension: "REASONING",
       },
@@ -306,7 +306,7 @@ describe("StepBtScoringSystem.update", () => {
 
 // -- Ensemble tests (ensembleSize > 1) --
 
-const ENSEMBLE_MODELS = ["openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano"];
+const ENSEMBLE_MODELS = ["anthropic/claude-sonnet-4.6", "anthropic/claude-haiku-4.5", "google/gemini-2.5-flash-lite"];
 
 async function makeEnsembleScores(): Promise<ModelScore[]> {
   return new BtScoringSystem().getScores(ENSEMBLE_MODELS);

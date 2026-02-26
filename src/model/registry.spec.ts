@@ -13,12 +13,12 @@ describe("ModelRegistry", () => {
   const registry = new ModelRegistry();
 
   describe("getAll", () => {
-    it("should return array of 34 models", () => {
+    it("should return array of 23 models", () => {
       // Arrange & Act
       const models = registry.getAll();
 
       // Assert
-      expect(models).toBeArrayOfSize(34);
+      expect(models).toBeArrayOfSize(23);
     });
 
     it("should return equal results on repeated calls", () => {
@@ -32,30 +32,30 @@ describe("ModelRegistry", () => {
   });
 
   describe("getById", () => {
-    it('should return GPT-4.1 when id is "openai/gpt-4.1"', () => {
+    it('should return Claude Sonnet 4.6 when id is "anthropic/claude-sonnet-4.6"', () => {
       // Arrange & Act
-      const model = registry.getById("openai/gpt-4.1");
+      const model = registry.getById("anthropic/claude-sonnet-4.6");
 
       // Assert
       expect(model).toBeDefined();
-      expect(model!.id).toBe("openai/gpt-4.1");
-      expect(model!.name).toBe("GPT-4.1");
+      expect(model!.id).toBe("anthropic/claude-sonnet-4.6");
+      expect(model!.name).toBe("Claude Sonnet 4.6");
     });
 
     it("should return model with correct capabilities when found", () => {
       // Arrange & Act
-      const model = registry.getById("openai/gpt-4.1");
+      const model = registry.getById("anthropic/claude-sonnet-4.6");
 
       // Assert
       expect(model).toBeDefined();
-      expect(model!.capabilities.REASONING.mu).toBe(1000);  // calibrated: 900→1000 (comparisons=12)
+      expect(model!.capabilities.REASONING.mu).toBe(900);
       expect(model!.capabilities.CODE_GENERATION.mu).toBe(900);
-      expect(model!.contextWindow).toBe(1_000_000);
+      expect(model!.contextWindow).toBe(200_000);
     });
 
-    it("should return model with REASONING mu=1000 for DeepSeek-R1-0528", () => {
+    it("should return model with REASONING mu=1000 for Claude Opus 4.6", () => {
       // Arrange & Act
-      const model = registry.getById("deepseek/DeepSeek-R1-0528");
+      const model = registry.getById("anthropic/claude-opus-4.6");
 
       // Assert
       expect(model).toBeDefined();
@@ -111,7 +111,7 @@ describe("ModelRegistry", () => {
   describe("getByIds", () => {
     it("should return matching models for valid IDs", () => {
       // Arrange
-      const ids = ["openai/gpt-4.1", "openai/gpt-4o-mini"];
+      const ids = ["anthropic/claude-sonnet-4.6", "google/gemini-2.5-flash"];
 
       // Act
       const models = registry.getByIds(ids);
@@ -131,15 +131,15 @@ describe("ModelRegistry", () => {
 
     it("should return only matched models when some IDs are invalid", () => {
       // Arrange
-      const ids = ["openai/gpt-4.1", "nonexistent", "microsoft/Phi-4"];
+      const ids = ["anthropic/claude-sonnet-4.6", "nonexistent", "google/gemini-2.5-pro"];
 
       // Act
       const models = registry.getByIds(ids);
 
       // Assert
       expect(models).toBeArrayOfSize(2);
-      expect(models[0]!.id).toBe("openai/gpt-4.1");
-      expect(models[1]!.id).toBe("microsoft/Phi-4");
+      expect(models[0]!.id).toBe("anthropic/claude-sonnet-4.6");
+      expect(models[1]!.id).toBe("google/gemini-2.5-pro");
     });
   });
 
@@ -156,27 +156,27 @@ describe("ModelRegistry", () => {
     });
 
     it("should include model when context equals threshold exactly", () => {
-      // Arrange — Phi-4 has 16K context
-      const phi4 = registry.getById("microsoft/Phi-4")!;
-      const threshold = phi4.contextWindow;
+      // Arrange — Claude Haiku 4.5 has 200K context
+      const haiku = registry.getById("anthropic/claude-haiku-4.5")!;
+      const threshold = haiku.contextWindow;
 
       // Act
       const models = registry.filterByContext(threshold);
 
       // Assert
-      expect(models.some((m) => m.id === "microsoft/Phi-4")).toBe(true);
+      expect(models.some((m) => m.id === "anthropic/claude-haiku-4.5")).toBe(true);
     });
 
     it("should exclude model when context is below threshold", () => {
-      // Arrange — Phi-4 has 16K context
-      const phi4 = registry.getById("microsoft/Phi-4")!;
-      const threshold = phi4.contextWindow + 1;
+      // Arrange — Claude Haiku 4.5 has 200K context
+      const haiku = registry.getById("anthropic/claude-haiku-4.5")!;
+      const threshold = haiku.contextWindow + 1;
 
       // Act
       const models = registry.filterByContext(threshold);
 
       // Assert
-      expect(models.some((m) => m.id === "microsoft/Phi-4")).toBe(false);
+      expect(models.some((m) => m.id === "anthropic/claude-haiku-4.5")).toBe(false);
     });
   });
 
@@ -226,7 +226,7 @@ describe("ModelRegistry (BT rating)", () => {
   describe("parseModels v2", () => {
     it("should parse v2 JSON with mu/sigma/comparisons correctly", () => {
       // Arrange & Act — current registry loads from models.json
-      const model = registry.getById("openai/gpt-4.1");
+      const model = registry.getById("anthropic/claude-sonnet-4.6");
 
       // Assert — capabilities should be DimensionRating objects
       expect(model).toBeDefined();
@@ -237,12 +237,12 @@ describe("ModelRegistry (BT rating)", () => {
       expect(typeof reasoning.mu).toBe("number");
     });
 
-    it("should parse all 34 models with 21 dimensions each", () => {
+    it("should parse all 23 models with 21 dimensions each", () => {
       // Arrange & Act
       const models = registry.getAll();
 
       // Assert
-      expect(models).toBeArrayOfSize(34);
+      expect(models).toBeArrayOfSize(23);
       for (const model of models) {
         for (const dim of ALL_DIMENSIONS) {
           const rating = model.capabilities[dim] as any;
@@ -258,7 +258,7 @@ describe("ModelRegistry (BT rating)", () => {
         {
           id: "test/partial",
           name: "Partial",
-          provider: "github",
+          provider: "anthropic",
           contextWindow: 100_000,
           capabilities: (() => {
             const caps: Record<string, any> = {};
@@ -303,7 +303,7 @@ describe("ModelRegistry (BT rating)", () => {
         {
           id: "test/zero",
           name: "Zero",
-          provider: "github",
+          provider: "anthropic",
           contextWindow: 100_000,
           capabilities: (() => {
             const caps: Record<string, any> = {};
@@ -331,7 +331,7 @@ describe("ModelRegistry (BT rating)", () => {
     it("should apply defaults when scores field is empty object", () => {
       // Arrange & Act — from real JSON, after migration empty scores → all defaults
       // This tests that parseModels handles missing score entries
-      const model = registry.getById("openai/gpt-4.1");
+      const model = registry.getById("anthropic/claude-sonnet-4.6");
 
       // Assert — all dimensions should have DimensionRating shape
       for (const dim of ALL_DIMENSIONS) {
@@ -386,15 +386,15 @@ describe("ModelRegistry (BT rating)", () => {
   describe("getByIds with DimensionRating", () => {
     it("should return only existing models in request order", () => {
       // Arrange
-      const ids = ["openai/gpt-4.1", "nonexistent/x", "openai/gpt-4o-mini"];
+      const ids = ["anthropic/claude-sonnet-4.6", "nonexistent/x", "google/gemini-2.5-flash"];
 
       // Act
       const models = registry.getByIds(ids);
 
       // Assert
       expect(models).toBeArrayOfSize(2);
-      expect(models[0]!.id).toBe("openai/gpt-4.1");
-      expect(models[1]!.id).toBe("openai/gpt-4o-mini");
+      expect(models[0]!.id).toBe("anthropic/claude-sonnet-4.6");
+      expect(models[1]!.id).toBe("google/gemini-2.5-flash");
       // Verify DimensionRating structure
       const rating = models[0]!.capabilities.REASONING as any;
       expect(rating).toHaveProperty("mu");
@@ -449,7 +449,7 @@ describe("ModelRegistry (BT rating)", () => {
       const available: ModelInfo = {
         id: "test/available",
         name: "Available",
-        provider: "github",
+        provider: "anthropic",
         contextWindow: 32000,
         capabilities: {} as any,
         cost: { inputPer1M: 1, outputPer1M: 2 },
@@ -459,7 +459,7 @@ describe("ModelRegistry (BT rating)", () => {
       const unavailable: ModelInfo = {
         id: "test/unavailable",
         name: "Unavailable",
-        provider: "github",
+        provider: "anthropic",
         contextWindow: 32000,
         capabilities: {} as any,
         cost: { inputPer1M: 1, outputPer1M: 2 },
@@ -481,7 +481,7 @@ describe("ModelRegistry (BT rating)", () => {
       const noField: ModelInfo = {
         id: "test/no-field",
         name: "NoField",
-        provider: "github",
+        provider: "anthropic",
         contextWindow: 32000,
         capabilities: {} as any,
         cost: { inputPer1M: 1, outputPer1M: 2 },

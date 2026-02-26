@@ -397,16 +397,16 @@ async function main(): Promise<void> {
   // live or live-sample: requires PAT
   const { loadConfigFromEnv } = await import("../config");
   const { ProviderRegistry } = await import("../llm/registry");
-  const { GitHubProvider } = await import("../llm/providers/github");
   const { AnthropicProvider } = await import("../llm/providers/anthropic");
+  const { ClaudeCliProvider } = await import("../llm/providers/claude-cli");
   const { GoogleProvider } = await import("../llm/providers/google");
   const { OpenAIProvider } = await import("../llm/providers/openai");
   const { createChatAdapter } = await import("../deliberation/wire");
 
   const appConfig = loadConfigFromEnv();
   const providers: import("../llm/types").LLMProvider[] = [];
-  if (appConfig.providers.github) providers.push(new GitHubProvider(appConfig.providers.github));
-  if (appConfig.providers.anthropic) providers.push(new AnthropicProvider(appConfig.providers.anthropic));
+  if (appConfig.providers.claudeCli) providers.push(new ClaudeCliProvider());
+  else if (appConfig.providers.anthropic) providers.push(new AnthropicProvider(appConfig.providers.anthropic));
   if (appConfig.providers.google) providers.push(new GoogleProvider(appConfig.providers.google));
   if (appConfig.providers.openai) providers.push(new OpenAIProvider(appConfig.providers.openai));
   const { ModelRegistry } = await import("../model/registry");

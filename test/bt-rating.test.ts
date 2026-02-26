@@ -42,7 +42,7 @@ function makeBTModel(overrides: {
   return {
     id: overrides.id,
     name: overrides.id,
-    provider: "github",
+    provider: "anthropic",
     contextWindow: overrides.contextWindow ?? 100_000,
     capabilities: caps as any,
 
