@@ -1,11 +1,10 @@
 /**
- * PyreezEngine — 5-slot compositor tests.
+ * PyreezEngine — 3-stage pipeline tests.
  */
 import { describe, it, expect, mock } from "bun:test";
 import { PyreezEngine } from "./engine";
 import type {
   ScoringSystem,
-  Classifier,
   Profiler,
   Selector,
   DeliberationProtocol,
@@ -13,14 +12,12 @@ import type {
 } from "./interfaces";
 import type {
   ModelScore,
-  ClassifyOutput,
+  TaskClassification,
   AxisTaskRequirement,
   EnsemblePlan,
   DeliberationResult,
   BudgetConfig,
   ChatFn,
-  SlotTrace,
-  RunTrace,
 } from "./types";
 
 // -- Fixtures --
@@ -31,13 +28,11 @@ const mockScore: ModelScore = {
   overall: 0.7,
 };
 
-const mockClassified: ClassifyOutput = {
+const mockClassification: TaskClassification = {
   domain: "CODING",
   taskType: "IMPLEMENT_FEATURE",
-  vocabKind: "taskType",
   complexity: "simple",
   criticality: "low",
-  method: "rule",
 };
 
 const mockReq: AxisTaskRequirement = {
@@ -70,11 +65,9 @@ const mockResult: DeliberationResult = {
 };
 
 const budget: BudgetConfig = { perRequest: 1.0 };
-const chatFn: ChatFn = mock(async () => "chat response");
 
 function makeMocks(planOverride?: EnsemblePlan): {
   scoring: ScoringSystem;
-  classifier: Classifier;
   profiler: Profiler;
   selector: Selector;
   deliberation: DeliberationProtocol;
@@ -85,9 +78,6 @@ function makeMocks(planOverride?: EnsemblePlan): {
     scoring: {
       getScores: mock(async () => [mockScore]),
       update: mock(async () => {}),
-    },
-    classifier: {
-      classify: mock(async () => mockClassified),
     },
     profiler: {
       profile: mock(async () => mockReq),
@@ -105,13 +95,11 @@ function makeMocks(planOverride?: EnsemblePlan): {
 // -- Tests --
 
 describe("PyreezEngine", () => {
-  describe("run() — 5-slot pipeline", () => {
+  describe("run() — 3-stage pipeline", () => {
     it("calls getScores with provided modelIds", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
-        makeMocks();
+      const { scoring, profiler, selector, deliberation, chat } = makeMocks();
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -119,7 +107,7 @@ describe("PyreezEngine", () => {
         ["test/model-a", "test/model-b"],
       );
 
-      await engine.run("write a function", budget);
+      await engine.run("write a function", budget, mockClassification);
 
       expect(scoring.getScores).toHaveBeenCalledWith([
         "test/model-a",
@@ -127,12 +115,10 @@ describe("PyreezEngine", () => {
       ]);
     });
 
-    it("passes classified output to profiler", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
-        makeMocks();
+    it("passes classification to profiler", async () => {
+      const { scoring, profiler, selector, deliberation, chat } = makeMocks();
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -140,17 +126,15 @@ describe("PyreezEngine", () => {
         ["test/model-a"],
       );
 
-      await engine.run("write a function", budget);
+      await engine.run("write a function", budget, mockClassification);
 
-      expect(profiler.profile).toHaveBeenCalledWith(mockClassified);
+      expect(profiler.profile).toHaveBeenCalledWith(mockClassification);
     });
 
     it("passes DeliberationResult through as return value", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
-        makeMocks();
+      const { scoring, profiler, selector, deliberation, chat } = makeMocks();
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -158,17 +142,16 @@ describe("PyreezEngine", () => {
         ["test/model-a"],
       );
 
-      const result = await engine.run("write a function", budget);
+      const result = await engine.run("write a function", budget, mockClassification);
 
       expect(result).toBe(mockResult);
     });
 
     it("skips deliberation and returns single-model result when plan has 1 model", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
+      const { scoring, profiler, selector, deliberation, chat } =
         makeMocks(mockPlanSingle);
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -176,7 +159,7 @@ describe("PyreezEngine", () => {
         ["test/model-a"],
       );
 
-      const result = await engine.run("simple task", budget);
+      const result = await engine.run("simple task", budget, mockClassification);
 
       expect(deliberation.deliberate).not.toHaveBeenCalled();
       expect(result.protocol).toBe("single");
@@ -186,15 +169,13 @@ describe("PyreezEngine", () => {
     });
 
     it("calls learner.enhance() before selector when learner is provided", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
-        makeMocks();
+      const { scoring, profiler, selector, deliberation, chat } = makeMocks();
       const learner: LearningLayer = {
         record: mock(async () => {}),
         enhance: mock(async (scores) => scores),
       };
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -203,24 +184,22 @@ describe("PyreezEngine", () => {
         learner,
       );
 
-      await engine.run("task", budget);
+      await engine.run("task", budget, mockClassification);
 
       expect(learner.enhance).toHaveBeenCalledWith(
         [mockScore],
-        mockClassified,
+        mockClassification,
       );
     });
 
     it("calls learner.record() with classified, plan, result after deliberation", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
-        makeMocks();
+      const { scoring, profiler, selector, deliberation, chat } = makeMocks();
       const learner: LearningLayer = {
         record: mock(async () => {}),
         enhance: mock(async (scores) => scores),
       };
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -229,22 +208,19 @@ describe("PyreezEngine", () => {
         learner,
       );
 
-      await engine.run("task", budget);
+      await engine.run("task", budget, mockClassification);
 
-      // record is called (fire-and-forget)
       expect(learner.record).toHaveBeenCalledWith(
-        mockClassified,
+        mockClassification,
         mockPlanMulti,
         mockResult,
       );
     });
 
     it("does not throw when learner is not provided", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
-        makeMocks();
+      const { scoring, profiler, selector, deliberation, chat } = makeMocks();
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -252,17 +228,15 @@ describe("PyreezEngine", () => {
         ["test/model-a"],
       );
 
-      await expect(engine.run("task", budget)).resolves.toBeDefined();
+      await expect(engine.run("task", budget, mockClassification)).resolves.toBeDefined();
     });
   });
 
-  describe("traceOnly() — Slot 1-4 only", () => {
+  describe("traceOnly() — Stage 1-2 only", () => {
     it("should return SlotTrace with scores, classified, requirement, plan", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
-        makeMocks();
+      const { scoring, profiler, selector, deliberation, chat } = makeMocks();
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -270,20 +244,18 @@ describe("PyreezEngine", () => {
         ["test/model-a"],
       );
 
-      const trace = await engine.traceOnly("task", budget);
+      const trace = await engine.traceOnly("task", budget, mockClassification);
 
       expect(trace.scores).toEqual([mockScore]);
-      expect(trace.classified).toBe(mockClassified);
+      expect(trace.classified).toBe(mockClassification);
       expect(trace.requirement).toBe(mockReq);
       expect(trace.plan).toBe(mockPlanMulti);
     });
 
     it("should NOT call chat or deliberation", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
-        makeMocks();
+      const { scoring, profiler, selector, deliberation, chat } = makeMocks();
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -291,15 +263,14 @@ describe("PyreezEngine", () => {
         ["test/model-a"],
       );
 
-      await engine.traceOnly("task", budget);
+      await engine.traceOnly("task", budget, mockClassification);
 
       expect(chat).not.toHaveBeenCalled();
       expect(deliberation.deliberate).not.toHaveBeenCalled();
     });
 
     it("should apply learner.enhance when learner is provided", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
-        makeMocks();
+      const { scoring, profiler, selector, deliberation, chat } = makeMocks();
       const enhancedScore: ModelScore = { ...mockScore, overall: 0.9 };
       const learner: LearningLayer = {
         record: mock(async () => {}),
@@ -307,7 +278,6 @@ describe("PyreezEngine", () => {
       };
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -316,7 +286,7 @@ describe("PyreezEngine", () => {
         learner,
       );
 
-      const trace = await engine.traceOnly("task", budget);
+      const trace = await engine.traceOnly("task", budget, mockClassification);
 
       expect(learner.enhance).toHaveBeenCalled();
       expect(trace.scores).toEqual([enhancedScore]);
@@ -325,11 +295,9 @@ describe("PyreezEngine", () => {
 
   describe("runWithTrace() — full pipeline with trace", () => {
     it("should return RunTrace with all SlotTrace fields + result", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
-        makeMocks();
+      const { scoring, profiler, selector, deliberation, chat } = makeMocks();
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -337,21 +305,20 @@ describe("PyreezEngine", () => {
         ["test/model-a"],
       );
 
-      const trace = await engine.runWithTrace("task", budget);
+      const trace = await engine.runWithTrace("task", budget, mockClassification);
 
       expect(trace.scores).toEqual([mockScore]);
-      expect(trace.classified).toBe(mockClassified);
+      expect(trace.classified).toBe(mockClassification);
       expect(trace.requirement).toBe(mockReq);
       expect(trace.plan).toBe(mockPlanMulti);
       expect(trace.result).toBe(mockResult);
     });
 
     it("should use single-model shortcut when plan has 1 model", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
+      const { scoring, profiler, selector, deliberation, chat } =
         makeMocks(mockPlanSingle);
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -359,7 +326,7 @@ describe("PyreezEngine", () => {
         ["test/model-a"],
       );
 
-      const trace = await engine.runWithTrace("task", budget);
+      const trace = await engine.runWithTrace("task", budget, mockClassification);
 
       expect(deliberation.deliberate).not.toHaveBeenCalled();
       expect(trace.result.protocol).toBe("single");
@@ -367,11 +334,9 @@ describe("PyreezEngine", () => {
     });
 
     it("run() should return same result as runWithTrace().result", async () => {
-      const { scoring, classifier, profiler, selector, deliberation, chat } =
-        makeMocks();
+      const { scoring, profiler, selector, deliberation, chat } = makeMocks();
       const engine = new PyreezEngine(
         scoring,
-        classifier,
         profiler,
         selector,
         deliberation,
@@ -379,8 +344,7 @@ describe("PyreezEngine", () => {
         ["test/model-a"],
       );
 
-      const result = await engine.run("task", budget);
-      // run() delegates to runWithTrace(), so it returns the deliberation result
+      const result = await engine.run("task", budget, mockClassification);
       expect(result).toBe(mockResult);
     });
   });

@@ -1,32 +1,29 @@
 /**
- * Axis boundary types — shared across all 5 slots.
+ * Axis boundary types — shared across the 3-stage pipeline.
  *
- * These types define the interfaces between slots in the 5-slot pipeline.
- * Each slot is independently replaceable as long as it honors these boundaries.
+ * Stage 1: Understand — host provides TaskClassification, engine does profile lookup
+ * Stage 2: Select — BT scoring + 2-Track CE selector
+ * Stage 3: Execute — Role-Based deliberation or single-model call
  */
 
-// -- Slot 2 output: ClassifyOutput --
+// -- Stage 1 input: TaskClassification (provided by host agent) --
 
 /**
- * Classification result with vocabKind discriminator.
- * vocabKind tells Profiler which lookup table to use.
+ * Task classification provided by the host agent via MCP tool parameters.
+ * Replaces server-side keyword/LLM classification.
  */
-export interface ClassifyOutput {
+export interface TaskClassification {
   domain: string;
   taskType: string;
-  /** Which vocabulary system was used. "taskType" = 62-type system, "step" = ~20 WorkflowStep system. */
-  vocabKind: "taskType" | "step";
   complexity: "simple" | "moderate" | "complex";
-  criticality: "low" | "medium" | "high" | "critical";
-  method: "rule" | "llm" | "embedding" | "step-declare";
+  criticality?: "low" | "medium" | "high" | "critical";
   language?: string;
-  tokens?: { estimatedInput: number; estimatedOutput: number };
 }
 
-// -- Slot 3 output: AxisTaskRequirement --
+// -- Stage 1 output: AxisTaskRequirement --
 
 /**
- * Task requirement profile — output of Profiler slot.
+ * Task requirement profile — output of profile lookup.
  * Named AxisTaskRequirement to avoid collision with src/profile/types.ts TaskRequirement.
  */
 export interface AxisTaskRequirement {
@@ -42,17 +39,21 @@ export interface AxisTaskRequirement {
     maxPerRequest?: number;
     strategy?: string;
   };
-  /** Criticality carried through from ClassifyOutput for Selector's quality-first decision. */
+  /** Domain carried through from TaskClassification for Selector's domain-specific scoring. */
+  domain?: string;
+  /** Task type carried through from TaskClassification for Selector's task-specific scoring. */
+  taskType?: string;
+  /** Criticality carried through from TaskClassification for Selector's quality-first decision. */
   criticality?: string;
   /** Token estimates passed from Profiler for cost filtering in Selector. */
   estimatedInputTokens?: number;
   estimatedOutputTokens?: number;
 }
 
-// -- Slot 4 output: EnsemblePlan --
+// -- Stage 2 output: EnsemblePlan --
 
 /**
- * Model selection plan — output of Selector slot.
+ * Model selection plan — output of Selector.
  */
 export interface EnsemblePlan {
   models: Array<{
@@ -67,10 +68,10 @@ export interface EnsemblePlan {
   reason: string;
 }
 
-// -- Slot 5 output: DeliberationResult --
+// -- Stage 3 output: DeliberationResult --
 
 /**
- * Final deliberation result — output of DeliberationProtocol slot.
+ * Final deliberation result — output of DeliberationProtocol.
  */
 export interface DeliberationResult {
   result: string;
@@ -78,14 +79,14 @@ export interface DeliberationResult {
   consensusReached: boolean;
   totalLLMCalls: number;
   modelsUsed: string[];
-  /** Which protocol variant was used (e.g., "leader_decides", "single", "diverge-synth"). */
+  /** Which protocol variant was used (e.g., "leader_decides", "single", "role-based"). */
   protocol: string;
 }
 
-// -- Slot 1 output: ModelScore --
+// -- Scoring output: ModelScore --
 
 /**
- * Model score — output of ScoringSystem slot.
+ * Model score — output of ScoringSystem.
  * Contains per-dimension BT ratings plus an overall composite score.
  */
 export interface ModelScore {
@@ -102,16 +103,6 @@ export interface ModelScore {
  */
 export interface BudgetConfig {
   perRequest: number;
-}
-
-/**
- * Optional hints from the orchestrator to assist classification.
- */
-export interface RouteHints {
-  domain_hint?: string;
-  task_type_hint?: string;
-  complexity_hint?: "simple" | "moderate" | "complex";
-  step?: string;
 }
 
 /**
@@ -139,41 +130,17 @@ export interface PairwiseResult {
   taskType?: string;
 }
 
-// -- AxisConfig types --
-
-/**
- * Full axis pipeline configuration.
- * Used by createEngine() factory to compose the correct slot implementations.
- */
-export interface AxisConfig {
-  scoring: "bt-21" | "bt-step" | "elo" | "llm-judge" | "benchmark";
-  classifier: "keyword" | "step-declare" | "llm" | "embedding";
-  profiler: "domain-override" | "step-profile" | "moe-gating";
-  selector: "2track-ce" | "4strategy" | "cascade" | "preference" | "mab";
-  deliberation: "role-based" | "diverge-synth" | "adp" | "free-debate" | "voting" | "single-best";
-  consensus?: "leader_decides" | "all_approve" | "majority";
-  learning?: {
-    tier0: boolean;
-    tier1: boolean;
-    tier2: boolean;
-    tier3: boolean;
-  };
-  modelIds?: string[];
-  /** 1 = single model (default), 2+ = multi-model → Deliberation slot executes. */
-  ensembleSize?: number;
-}
-
 // -- Trace types (for benchmark / dry-run) --
 
-/** Slot 1-4 intermediate results (no LLM calls). */
+/** Stage 1-2 intermediate results (no LLM calls). */
 export interface SlotTrace {
   scores: ModelScore[];
-  classified: ClassifyOutput;
+  classified: TaskClassification;
   requirement: AxisTaskRequirement;
   plan: EnsemblePlan;
 }
 
-/** Full pipeline trace including Slot 5 deliberation result. */
+/** Full pipeline trace including Stage 3 deliberation result. */
 export interface RunTrace extends SlotTrace {
   result: DeliberationResult;
 }

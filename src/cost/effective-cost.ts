@@ -29,6 +29,7 @@ export const PROVIDER_CACHING: Record<ProviderName, ProviderCachingInfo> = {
   anthropic: { supported: true,  readDiscount: 0.9,  writePremium: 0.25, automatic: false },
   google:    { supported: true,  readDiscount: 0.75, writePremium: 0,    automatic: true  },
   openai:    { supported: true,  readDiscount: 0.5,  writePremium: 0,    automatic: true  },
+  local:     { supported: false, readDiscount: 0,    writePremium: 0,    automatic: false },
 };
 
 /** Fraction of input tokens that are cacheable (system prompt + task context). */

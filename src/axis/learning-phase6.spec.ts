@@ -1,6 +1,6 @@
 import { describe, it, expect, mock } from "bun:test";
 import type {
-  ClassifyOutput,
+  TaskClassification,
   EnsemblePlan,
   ModelScore,
   DeliberationResult,
@@ -14,14 +14,12 @@ import type { MfLearner } from "./mf-learner";
 
 // -- Helpers --
 
-function makeClassified(taskType = "IMPLEMENT_FEATURE"): ClassifyOutput {
+function makeClassified(taskType = "IMPLEMENT_FEATURE"): TaskClassification {
   return {
     domain: "CODING",
     taskType,
-    vocabKind: "taskType",
     complexity: "moderate",
     criticality: "medium",
-    method: "rule",
   };
 }
 

@@ -14,10 +14,17 @@
  * 3. Score = historical win rate for that model on that query type
  */
 
-import type { CapabilityDimension } from "../model/types";
-import type { PairwiseResult, PairwiseOutcome } from "../evaluation/types";
-
 // -- Types --
+
+/**
+ * Minimal pairwise input for preference recording.
+ * Evaluation's PairwiseResult structurally satisfies this (structural subtyping).
+ */
+export interface PreferenceInput {
+  modelA: string;
+  modelB: string;
+  outcome: string;
+}
 
 /**
  * A preference entry: win/loss/tie record for a model on a task type.
@@ -48,7 +55,7 @@ export class PreferenceTable {
   private readonly entries = new Map<string, Map<string, PreferenceEntry>>();
 
   /** Record a single pairwise result into the preference table. */
-  record(result: PairwiseResult, taskType: string): void {
+  record(result: PreferenceInput, taskType: string): void {
     this.ensureEntry(taskType, result.modelA);
     this.ensureEntry(taskType, result.modelB);
 
@@ -74,7 +81,7 @@ export class PreferenceTable {
   }
 
   /** Record multiple results. */
-  recordAll(results: PairwiseResult[], taskType: string): void {
+  recordAll(results: PreferenceInput[], taskType: string): void {
     for (const r of results) this.record(r, taskType);
   }
 

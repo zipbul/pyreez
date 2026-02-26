@@ -1775,8 +1775,8 @@
       "scores": {
         "REASONING": {
           "mu": 1000,
-          "sigma": 242.8448263484032,
-          "comparisons": 12
+          "sigma": 149.16832180901807,
+          "comparisons": 28
         },
         "MATH_REASONING": {
           "mu": 800,
@@ -1891,9 +1891,9 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 874.7900315662744,
-          "sigma": 242.8448263484032,
-          "comparisons": 12
+          "mu": 908.5174647070514,
+          "sigma": 168.49602766910314,
+          "comparisons": 24
         },
         "MATH_REASONING": {
           "mu": 700,
@@ -2008,9 +2008,9 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 535.9603315407269,
-          "sigma": 214.98877871193986,
-          "comparisons": 16
+          "mu": 477.94380727831435,
+          "sigma": 124.25303608915205,
+          "comparisons": 34
         },
         "MATH_REASONING": {
           "mu": 500,
@@ -2700,6 +2700,360 @@
         }
       },
       "provider": "openai"
+    },
+    "local/ai/deepseek-r1-distill-llama": {
+      "name": "DeepSeek R1 Distill Llama",
+      "contextWindow": 32768,
+      "supportsToolCalling": false,
+      "available": true,
+      "cost": {
+        "inputPer1M": 0,
+        "outputPer1M": 0
+      },
+      "scores": {
+        "REASONING": {
+          "mu": 650,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "MATH_REASONING": {
+          "mu": 600,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "MULTI_STEP_DEPTH": {
+          "mu": 550,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CREATIVITY": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "ANALYSIS": {
+          "mu": 600,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "JUDGMENT": {
+          "mu": 550,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CODE_GENERATION": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CODE_UNDERSTANDING": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "DEBUGGING": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "SYSTEM_THINKING": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "TOOL_USE": {
+          "mu": 200,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "HALLUCINATION_RESISTANCE": {
+          "mu": 550,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CONFIDENCE_CALIBRATION": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "SELF_CONSISTENCY": {
+          "mu": 550,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "AMBIGUITY_HANDLING": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "INSTRUCTION_FOLLOWING": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "STRUCTURED_OUTPUT": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "LONG_CONTEXT": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "MULTILINGUAL": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "SPEED": {
+          "mu": 300,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "COST_EFFICIENCY": {
+          "mu": 1000,
+          "sigma": 350,
+          "comparisons": 0
+        }
+      },
+      "provider": "local"
+    },
+    "local/ai/qwen3-coder": {
+      "name": "Qwen3 Coder",
+      "contextWindow": 32768,
+      "supportsToolCalling": false,
+      "available": true,
+      "cost": {
+        "inputPer1M": 0,
+        "outputPer1M": 0
+      },
+      "scores": {
+        "REASONING": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "MATH_REASONING": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "MULTI_STEP_DEPTH": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CREATIVITY": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "ANALYSIS": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "JUDGMENT": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CODE_GENERATION": {
+          "mu": 600,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CODE_UNDERSTANDING": {
+          "mu": 600,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "DEBUGGING": {
+          "mu": 550,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "SYSTEM_THINKING": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "TOOL_USE": {
+          "mu": 200,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "HALLUCINATION_RESISTANCE": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CONFIDENCE_CALIBRATION": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "SELF_CONSISTENCY": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "AMBIGUITY_HANDLING": {
+          "mu": 350,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "INSTRUCTION_FOLLOWING": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "STRUCTURED_OUTPUT": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "LONG_CONTEXT": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "MULTILINGUAL": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "SPEED": {
+          "mu": 350,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "COST_EFFICIENCY": {
+          "mu": 1000,
+          "sigma": 350,
+          "comparisons": 0
+        }
+      },
+      "provider": "local"
+    },
+    "local/ai/phi4": {
+      "name": "Phi-4",
+      "contextWindow": 16384,
+      "supportsToolCalling": false,
+      "available": true,
+      "cost": {
+        "inputPer1M": 0,
+        "outputPer1M": 0
+      },
+      "scores": {
+        "REASONING": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "MATH_REASONING": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "MULTI_STEP_DEPTH": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CREATIVITY": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "ANALYSIS": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "JUDGMENT": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CODE_GENERATION": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CODE_UNDERSTANDING": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "DEBUGGING": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "SYSTEM_THINKING": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "TOOL_USE": {
+          "mu": 200,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "HALLUCINATION_RESISTANCE": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "CONFIDENCE_CALIBRATION": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "SELF_CONSISTENCY": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "AMBIGUITY_HANDLING": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "INSTRUCTION_FOLLOWING": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "STRUCTURED_OUTPUT": {
+          "mu": 450,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "LONG_CONTEXT": {
+          "mu": 300,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "MULTILINGUAL": {
+          "mu": 400,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "SPEED": {
+          "mu": 500,
+          "sigma": 350,
+          "comparisons": 0
+        },
+        "COST_EFFICIENCY": {
+          "mu": 1000,
+          "sigma": 350,
+          "comparisons": 0
+        }
+      },
+      "provider": "local"
     }
   }
 }

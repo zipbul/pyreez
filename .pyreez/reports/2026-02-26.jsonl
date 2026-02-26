@@ -1,0 +1,1 @@
+{"model":"anthropic/claude-sonnet-4.6","taskType":"IMPLEMENT_FEATURE","quality":8,"latencyMs":2500,"tokens":{"input":1200,"output":800}}

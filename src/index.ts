@@ -2,7 +2,7 @@
  * Pyreez entry point.
  * Wires infrastructure modules and starts the MCP server over stdio.
  *
- * Architecture: pyreez = Infrastructure layer (6 MCP tools).
+ * Architecture: pyreez = Infrastructure layer (7 MCP tools).
  * Host (e.g., Copilot) = Orchestrator.
  */
 
@@ -16,6 +16,7 @@ import { AnthropicProvider } from "./llm/providers/anthropic";
 import { ClaudeCliProvider } from "./llm/providers/claude-cli";
 import { GoogleProvider } from "./llm/providers/google";
 import { OpenAIProvider } from "./llm/providers/openai";
+import { LocalProvider } from "./llm/providers/local";
 import type { LLMProvider } from "./llm/types";
 import { PyreezMcpServer } from "./mcp/server";
 import { ModelRegistry } from "./model/registry";
@@ -23,8 +24,13 @@ import { calibrate, extractRatingsMap, persistRatings } from "./model/calibratio
 import { BunFileIO } from "./report/bun-file-io";
 import { FileReporter } from "./report/file-reporter";
 import { FileRunLogger } from "./report/run-logger";
-import { route } from "./router/router";
-import { createEngine, DEFAULT_CONFIG } from "./axis/factory";
+import { PyreezEngine } from "./axis/engine";
+import {
+  BtScoringSystem,
+  DomainOverrideProfiler,
+  TwoTrackCeSelector,
+  RoleBasedProtocol,
+} from "./axis/wrappers";
 import type { ChatFn } from "./axis/types";
 import type { ChatMessage } from "./llm/types";
 
@@ -49,6 +55,9 @@ async function main(): Promise<void> {
   if (config.providers.openai) {
     providers.push(new OpenAIProvider(config.providers.openai));
   }
+  if (config.providers.local) {
+    providers.push(new LocalProvider(config.providers.local));
+  }
 
   const providerRegistry = new ProviderRegistry(
     providers,
@@ -66,7 +75,21 @@ async function main(): Promise<void> {
     return chatAdapter(modelId, messages);
   };
 
-  const engine = createEngine(DEFAULT_CONFIG, axisChatFn);
+  // Build 3-stage pipeline directly (no factory)
+  const modelIds = registry.getAvailable().map((m) => m.id);
+  const scoring = new BtScoringSystem();
+  const profiler = new DomainOverrideProfiler();
+  const selector = new TwoTrackCeSelector(3); // ensemble size 3 for deliberation
+  const deliberation = new RoleBasedProtocol("leader_decides", 3);
+
+  const engine = new PyreezEngine(
+    scoring,
+    profiler,
+    selector,
+    deliberation,
+    axisChatFn,
+    modelIds,
+  );
 
   const deliberateFn = createDeliberateFn({
     registry,
@@ -80,7 +103,6 @@ async function main(): Promise<void> {
     chatFn: (req) => providerRegistry.chat(req),
     registry,
     reporter,
-    routeFn: (prompt, budget, hints) => route(prompt, budget, undefined, hints),
     summaryFn: () => reporter.summary(),
     deliberateFn,
     deliberationStore,

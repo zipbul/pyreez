@@ -13,7 +13,7 @@
 import { join } from "node:path";
 import type { LearningLayer, ScoringSystem } from "./interfaces";
 import type {
-  ClassifyOutput,
+  TaskClassification,
   EnsemblePlan,
   DeliberationResult,
   ModelScore,
@@ -23,6 +23,7 @@ import type { FileIO } from "../report/types";
 import {
   PreferenceTable,
   winRate,
+  type PreferenceInput,
 } from "../router/preference";
 import type { LlmJudge } from "./judge";
 import type { MoeLearner } from "./moe-learner";
@@ -105,7 +106,7 @@ export class LocalLearningLayer implements LearningLayer {
   // -- LearningLayer interface --
 
   async record(
-    classified: ClassifyOutput,
+    classified: TaskClassification,
     plan: EnsemblePlan,
     result: DeliberationResult,
   ): Promise<void> {
@@ -114,11 +115,13 @@ export class LocalLearningLayer implements LearningLayer {
     // Extract pairwise results from multi-model deliberation
     const pairwise = this.extractPairwiseResults(classified, plan, result);
     for (const pw of pairwise) {
-      // Map axis PairwiseResult → evaluation PairwiseResult for PreferenceTable
-      this.preferenceTable.record(
-        { modelA: pw.modelAId, modelB: pw.modelBId, outcome: pw.outcome } as any,
-        classified.taskType,
-      );
+      // Map axis PairwiseResult → PreferenceInput for PreferenceTable
+      const input: PreferenceInput = {
+        modelA: pw.modelAId,
+        modelB: pw.modelBId,
+        outcome: pw.outcome,
+      };
+      this.preferenceTable.record(input, classified.taskType);
       this.pendingPairwise.push(pw);
     }
 
@@ -178,7 +181,7 @@ export class LocalLearningLayer implements LearningLayer {
 
   async enhance(
     scores: ModelScore[],
-    classified: ClassifyOutput,
+    classified: TaskClassification,
   ): Promise<ModelScore[]> {
     if (scores.length === 0) return [];
 
@@ -252,19 +255,19 @@ export class LocalLearningLayer implements LearningLayer {
         // This is a simplification — full restore would need internal table access
         for (let i = 0; i < entry.wins; i++) {
           this.preferenceTable.record(
-            { modelA: entry.modelId, modelB: "__restore__", outcome: "A>B" } as any,
+            { modelA: entry.modelId, modelB: "__restore__", outcome: "A>B" },
             taskType,
           );
         }
         for (let i = 0; i < entry.losses; i++) {
           this.preferenceTable.record(
-            { modelA: entry.modelId, modelB: "__restore__", outcome: "B>A" } as any,
+            { modelA: entry.modelId, modelB: "__restore__", outcome: "B>A" },
             taskType,
           );
         }
         for (let i = 0; i < entry.ties; i++) {
           this.preferenceTable.record(
-            { modelA: entry.modelId, modelB: "__restore__", outcome: "A=B" } as any,
+            { modelA: entry.modelId, modelB: "__restore__", outcome: "A=B" },
             taskType,
           );
         }
@@ -279,7 +282,7 @@ export class LocalLearningLayer implements LearningLayer {
    * T3 LLM-as-Judge (Phase 6) will provide proper quality-based scoring.
    */
   private extractPairwiseResults(
-    classified: ClassifyOutput,
+    classified: TaskClassification,
     plan: EnsemblePlan,
     result: DeliberationResult,
   ): PairwiseResult[] {

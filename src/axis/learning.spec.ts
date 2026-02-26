@@ -1,6 +1,6 @@
 import { describe, it, expect, mock, beforeEach, spyOn } from "bun:test";
 import type {
-  ClassifyOutput,
+  TaskClassification,
   EnsemblePlan,
   ModelScore,
   DeliberationResult,
@@ -13,14 +13,12 @@ import { LocalLearningLayer } from "./learning";
 
 // -- Helpers --
 
-function makeClassified(taskType = "IMPLEMENT_FEATURE"): ClassifyOutput {
+function makeClassified(taskType = "IMPLEMENT_FEATURE"): TaskClassification {
   return {
     domain: "CODING",
     taskType,
-    vocabKind: "taskType",
     complexity: "moderate",
     criticality: "medium",
-    method: "rule",
   };
 }
 

@@ -13,12 +13,12 @@ describe("ModelRegistry", () => {
   const registry = new ModelRegistry();
 
   describe("getAll", () => {
-    it("should return array of 23 models", () => {
+    it("should return array of 26 models", () => {
       // Arrange & Act
       const models = registry.getAll();
 
       // Assert
-      expect(models).toBeArrayOfSize(23);
+      expect(models).toBeArrayOfSize(26);
     });
 
     it("should return equal results on repeated calls", () => {
@@ -96,14 +96,14 @@ describe("ModelRegistry", () => {
       }
     });
 
-    it("should have cost with positive inputPer1M and outputPer1M for each model", () => {
+    it("should have cost with non-negative inputPer1M and outputPer1M for each model", () => {
       // Arrange
       const models = registry.getAll();
 
-      // Act & Assert
+      // Act & Assert — local models have $0 cost
       for (const model of models) {
-        expect(model.cost.inputPer1M).toBeGreaterThan(0);
-        expect(model.cost.outputPer1M).toBeGreaterThan(0);
+        expect(model.cost.inputPer1M).toBeGreaterThanOrEqual(0);
+        expect(model.cost.outputPer1M).toBeGreaterThanOrEqual(0);
       }
     });
   });
@@ -237,12 +237,12 @@ describe("ModelRegistry (BT rating)", () => {
       expect(typeof reasoning.mu).toBe("number");
     });
 
-    it("should parse all 23 models with 21 dimensions each", () => {
+    it("should parse all 26 models with 21 dimensions each", () => {
       // Arrange & Act
       const models = registry.getAll();
 
       // Assert
-      expect(models).toBeArrayOfSize(23);
+      expect(models).toBeArrayOfSize(26);
       for (const model of models) {
         for (const dim of ALL_DIMENSIONS) {
           const rating = model.capabilities[dim] as any;

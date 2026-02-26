@@ -1,13 +1,13 @@
 /**
- * PyreezEngine — 5-slot pipeline compositor.
+ * PyreezEngine — 3-stage pipeline compositor.
  *
- * Orchestrates: Scoring → Classify → (LearningLayer.enhance) → Profile → Select → Deliberate
+ * Orchestrates: Scoring → (LearningLayer.enhance) → Profile → Select → Deliberate
+ * Classification is provided by the host agent (not done server-side).
  * LearningLayer is optional. When provided: enhance() before select, record() after deliberate (fire-and-forget).
  */
 
 import type {
   ScoringSystem,
-  Classifier,
   Profiler,
   Selector,
   DeliberationProtocol,
@@ -16,8 +16,8 @@ import type {
 import type {
   BudgetConfig,
   ChatFn,
+  TaskClassification,
   DeliberationResult,
-  RouteHints,
   SlotTrace,
   RunTrace,
 } from "./types";
@@ -25,7 +25,6 @@ import type {
 export class PyreezEngine {
   constructor(
     private readonly scoring: ScoringSystem,
-    private readonly classifier: Classifier,
     private readonly profiler: Profiler,
     private readonly selector: Selector,
     private readonly deliberation: DeliberationProtocol,
@@ -34,38 +33,37 @@ export class PyreezEngine {
     private readonly learner?: LearningLayer,
   ) {}
 
-  /** Run Slot 1-4 only (no LLM calls). For benchmark dry mode. */
+  /** Run Stage 1-2 only (no LLM calls). For benchmark dry mode. */
   async traceOnly(
     prompt: string,
     budget: BudgetConfig,
-    hints?: RouteHints,
+    classification: TaskClassification,
   ): Promise<SlotTrace> {
-    // Slot 1: get scores
+    // Scoring: get BT ratings
     let scores = await this.scoring.getScores(this.modelIds);
-
-    // Slot 2: classify
-    const classified = await this.classifier.classify(prompt, hints);
 
     // Learning Layer: apply L2~L4 personal corrections (optional)
     if (this.learner) {
-      scores = await this.learner.enhance(scores, classified);
+      scores = await this.learner.enhance(scores, classification);
     }
 
-    // Slot 3→4: profile → select
-    const requirement = await this.profiler.profile(classified);
+    // Stage 1: profile lookup
+    const requirement = await this.profiler.profile(classification);
+
+    // Stage 2: select
     const plan = await this.selector.select(requirement, scores, budget);
 
-    return { scores, classified, requirement, plan };
+    return { scores, classified: classification, requirement, plan };
   }
 
-  /** Run full 5-slot pipeline and return intermediate trace + result. */
+  /** Run full 3-stage pipeline and return intermediate trace + result. */
   async runWithTrace(
     prompt: string,
     budget: BudgetConfig,
-    hints?: RouteHints,
+    classification: TaskClassification,
   ): Promise<RunTrace> {
-    const trace = await this.traceOnly(prompt, budget, hints);
-    const { scores, classified, plan } = trace;
+    const trace = await this.traceOnly(prompt, budget, classification);
+    const { scores, plan } = trace;
 
     let result: DeliberationResult;
 
@@ -81,7 +79,7 @@ export class PyreezEngine {
         protocol: "single",
       };
     } else {
-      // Slot 5: deliberate
+      // Stage 3: deliberate
       result = await this.deliberation.deliberate(
         prompt,
         plan,
@@ -92,18 +90,18 @@ export class PyreezEngine {
 
     // Learning Layer: fire-and-forget record
     if (this.learner) {
-      this.learner.record(classified, plan, result).catch(() => {});
+      this.learner.record(classification, plan, result).catch(() => {});
     }
 
     return { ...trace, result };
   }
 
-  /** Run full 5-slot pipeline and return the final result. */
+  /** Run full 3-stage pipeline and return the final result. */
   async run(
     prompt: string,
     budget: BudgetConfig,
-    hints?: RouteHints,
+    classification: TaskClassification,
   ): Promise<DeliberationResult> {
-    return (await this.runWithTrace(prompt, budget, hints)).result;
+    return (await this.runWithTrace(prompt, budget, classification)).result;
   }
 }

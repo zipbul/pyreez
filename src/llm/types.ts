@@ -5,7 +5,7 @@
 
 // --- Provider Types ---
 
-export type ProviderName = "anthropic" | "google" | "openai";
+export type ProviderName = "anthropic" | "google" | "openai" | "local";
 
 export interface LLMProvider {
   readonly name: ProviderName;

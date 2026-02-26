@@ -3,7 +3,7 @@
  * 5-step algorithm: HARD FILTER → COMPOSITE SCORE → COST-EFFICIENCY → BUDGET-AWARE → FALLBACK.
  */
 
-import type { ModelInfo, CapabilityDimension } from "../model/types";
+import type { ModelInfo, CapabilityDimension, ModelCapabilities } from "../model/types";
 import { SIGMA_BASE } from "../model/types";
 import type { TaskRequirement, CapabilityRequirement } from "../profile/types";
 import type {
@@ -164,7 +164,7 @@ function fallbackResult(
         name: "No Model Available",
         provider: "anthropic",
         contextWindow: 0,
-        capabilities: {} as any,
+        capabilities: {} as ModelCapabilities,
         cost: { inputPer1M: 0, outputPer1M: 0 },
         supportsToolCalling: false,
       },

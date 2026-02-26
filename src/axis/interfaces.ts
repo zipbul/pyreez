@@ -1,23 +1,23 @@
 /**
- * Axis slot interfaces — 5-slot pipeline + LearningLayer.
+ * Axis slot interfaces — 3-stage pipeline + LearningLayer.
  *
- * All slot interfaces use Promise<T> returns.
- * Sync variants resolve immediately. Async variants (LLM-based) resolve on completion.
+ * Stage 1: Understand — Profiler maps TaskClassification → AxisTaskRequirement
+ * Stage 2: Select — ScoringSystem + Selector
+ * Stage 3: Execute — DeliberationProtocol
  */
 
 import type {
-  ClassifyOutput,
+  TaskClassification,
   AxisTaskRequirement,
   EnsemblePlan,
   DeliberationResult,
   ModelScore,
   BudgetConfig,
-  RouteHints,
   PairwiseResult,
   ChatFn,
 } from "./types";
 
-// -- Slot 1 --
+// -- Scoring --
 
 /**
  * Scoring system — owns global (scores/models.json) + personal (.pyreez/learning/bt-ratings.json) BT ratings.
@@ -28,27 +28,16 @@ export interface ScoringSystem {
   update(results: PairwiseResult[]): Promise<void>;
 }
 
-// -- Slot 2 --
+// -- Profiler --
 
 /**
- * Classifier — classifies prompt into domain/taskType/complexity/criticality.
- * output.vocabKind tells Profiler which lookup table to use.
- */
-export interface Classifier {
-  classify(prompt: string, hints?: RouteHints): Promise<ClassifyOutput>;
-}
-
-// -- Slot 3 --
-
-/**
- * Profiler — maps ClassifyOutput to capability requirements.
- * Must be compatible with the Classifier's vocabKind (see Classifier-Profiler matrix).
+ * Profiler — maps TaskClassification to capability requirements.
  */
 export interface Profiler {
-  profile(input: ClassifyOutput): Promise<AxisTaskRequirement>;
+  profile(input: TaskClassification): Promise<AxisTaskRequirement>;
 }
 
-// -- Slot 4 --
+// -- Selector --
 
 /**
  * Selector — picks the best model(s) from scored candidates.
@@ -61,11 +50,11 @@ export interface Selector {
   ): Promise<EnsemblePlan>;
 }
 
-// -- Slot 5 --
+// -- Deliberation --
 
 /**
  * Deliberation protocol — coordinates multiple models to produce a final result.
- * scores parameter: D2 (role-based) uses it for role assignment. Other protocols may ignore it.
+ * scores parameter: role-based protocol uses it for role assignment.
  */
 export interface DeliberationProtocol {
   deliberate(
@@ -79,27 +68,24 @@ export interface DeliberationProtocol {
 // -- Learning Layer (optional) --
 
 /**
- * Learning layer — cross-cutting concern that improves all slots over time.
- * L1 BT: delegated to ScoringSystem.
- * L2~L4: managed directly here (preference, MoE weights, MF).
+ * Learning layer — cross-cutting concern that improves scoring over time.
+ * L2: preference tracking (win/loss from deliberations)
  */
 export interface LearningLayer {
   /**
-   * Record call result. Internally: store → T3 Judge (if active) → L2~L4 update (async).
-   * Fire-and-forget from PyreezEngine — errors are swallowed.
+   * Record call result. Fire-and-forget from PyreezEngine — errors are swallowed.
    */
   record(
-    classified: ClassifyOutput,
+    classified: TaskClassification,
     plan: EnsemblePlan,
     result: DeliberationResult,
   ): Promise<void>;
 
   /**
-   * Apply L2~L4 personal corrections to scores.
-   * L1 BT is already included in ScoringSystem.getScores() — do NOT re-apply.
+   * Apply personal corrections to scores.
    */
   enhance(
     scores: ModelScore[],
-    classified: ClassifyOutput,
+    classified: TaskClassification,
   ): Promise<ModelScore[]>;
 }

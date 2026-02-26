@@ -1,8 +1,10 @@
 /**
- * PyreezMcpServer — MCP server exposing 6 infrastructure tools.
+ * PyreezMcpServer — MCP server exposing 7 infrastructure tools.
  *
- * Tools: pyreez_route, pyreez_ask, pyreez_ask_many, pyreez_scores, pyreez_report, pyreez_deliberate
+ * Tools: pyreez_route, pyreez_ask, pyreez_ask_many, pyreez_scores, pyreez_report, pyreez_deliberate, pyreez_calibrate
  * Architecture: pyreez = Infrastructure layer, Host = Orchestrator.
+ *
+ * Classification is provided by the host agent (domain, task_type, complexity are required params).
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -14,41 +16,54 @@ import type { ModelRegistry } from "../model/registry";
 import type { ModelInfo } from "../model/types";
 import type { Reporter, CallRecord } from "../report/types";
 import type { RunLogger } from "../report/run-logger";
-import type { RouteResult } from "../router/router";
 import type { BudgetConfig } from "../router/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 import type { DeliberationStore } from "../deliberation/store-types";
 import { stripThinkTags } from "../deliberation/wire";
 import type { CalibrationResult } from "../model/calibration";
 import type { PyreezEngine } from "../axis/engine";
+import type { TaskClassification } from "../axis/types";
 
 export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
   chatFn: (request: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
   registry: ModelRegistry;
   reporter: Reporter;
-  routeFn: (prompt: string, budget?: BudgetConfig, hints?: import("../router/types").RouteHints) => RouteResult | null;
   summaryFn?: () => Promise<import("../report/types").ReportSummary>;
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
   deliberationStore?: DeliberationStore;
   runLogger?: RunLogger;
-  engine?: PyreezEngine;
+  engine: PyreezEngine;
   calibrateFn?: () => Promise<CalibrationResult>;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
+
+/** Max characters for error messages returned to MCP clients. */
+const MAX_ERROR_LENGTH = 500;
+
+/**
+ * Sanitize error messages before returning to MCP clients.
+ * Strips file paths and truncates to prevent leaking internals.
+ */
+function sanitizeError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  // Strip absolute file paths (Unix/Windows)
+  const cleaned = raw.replace(/(?:\/[\w.-]+){3,}/g, "[path]");
+  if (cleaned.length <= MAX_ERROR_LENGTH) return cleaned;
+  return cleaned.slice(0, MAX_ERROR_LENGTH) + "…";
+}
 
 export class PyreezMcpServer {
   private readonly mcpServer: McpServer;
   private readonly chatFn: (request: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
   private readonly registry: ModelRegistry;
   private readonly reporter: Reporter;
-  private readonly routeFn: PyreezMcpServerConfig["routeFn"];
   private readonly summaryFn?: PyreezMcpServerConfig["summaryFn"];
   private readonly deliberateFn?: PyreezMcpServerConfig["deliberateFn"];
   private readonly deliberationStore?: DeliberationStore;
   private readonly runLogger?: RunLogger;
-  private readonly engine?: PyreezEngine;
+  private readonly engine: PyreezEngine;
   private readonly calibrateFn?: () => Promise<CalibrationResult>;
 
   constructor(config: PyreezMcpServerConfig) {
@@ -64,15 +79,14 @@ export class PyreezMcpServer {
     if (!config.reporter) {
       throw new Error("reporter is required");
     }
-    if (!config.routeFn) {
-      throw new Error("routeFn is required");
+    if (!config.engine) {
+      throw new Error("engine is required");
     }
 
     this.mcpServer = config.mcpServer;
     this.chatFn = config.chatFn;
     this.registry = config.registry;
     this.reporter = config.reporter;
-    this.routeFn = config.routeFn;
     this.summaryFn = config.summaryFn;
     this.deliberateFn = config.deliberateFn;
     this.deliberationStore = config.deliberationStore;
@@ -89,24 +103,23 @@ export class PyreezMcpServer {
       {
         title: "Pyreez Route",
         description:
-          "Route a task through CLASSIFY → PROFILE → SELECT pipeline to find the optimal model. Submit task in English.",
+          "Route a task through PROFILE → SCORE → SELECT pipeline to find the optimal model. Host agent must provide classification.",
         inputSchema: z.object({
-          task: z.string().describe("Task description to route"),
+          task: z.string().max(100_000).describe("Task description to route"),
           budget: z
             .number()
             .optional()
             .describe("Max cost per request in USD (default: 1.0)"),
-          domain_hint: z
+          domain: z
             .enum([
               "IDEATION", "PLANNING", "REQUIREMENTS", "ARCHITECTURE",
               "CODING", "TESTING", "REVIEW", "DOCUMENTATION",
               "DEBUGGING", "OPERATIONS", "RESEARCH", "COMMUNICATION",
             ])
-            .optional()
             .describe(
-              "Task domain. Bypasses keyword classification. IDEATION=brainstorm/idea, PLANNING=goal/scope/priority, REQUIREMENTS=spec/acceptance, ARCHITECTURE=system design/data model, CODING=implement/refactor/optimize, TESTING=test write/strategy, REVIEW=code review/comparison/security, DOCUMENTATION=api doc/tutorial/diagram, DEBUGGING=error diagnosis/fix, OPERATIONS=deploy/ci-cd/setup, RESEARCH=tech research/benchmark, COMMUNICATION=explain/summarize/translate",
+              "Task domain. IDEATION=brainstorm/idea, PLANNING=goal/scope/priority, REQUIREMENTS=spec/acceptance, ARCHITECTURE=system design/data model, CODING=implement/refactor/optimize, TESTING=test write/strategy, REVIEW=code review/comparison/security, DOCUMENTATION=api doc/tutorial/diagram, DEBUGGING=error diagnosis/fix, OPERATIONS=deploy/ci-cd/setup, RESEARCH=tech research/benchmark, COMMUNICATION=explain/summarize/translate",
             ),
-          task_type_hint: z
+          task_type: z
             .enum([
               "BRAINSTORM", "ANALOGY", "CONSTRAINT_DISCOVERY", "OPTION_GENERATION", "FEASIBILITY_QUICK",
               "GOAL_DEFINITION", "SCOPE_DEFINITION", "PRIORITIZATION", "MILESTONE_PLANNING", "RISK_ASSESSMENT", "RESOURCE_ESTIMATION", "TRADEOFF_ANALYSIS",
@@ -121,13 +134,11 @@ export class PyreezMcpServer {
               "TECH_RESEARCH", "BENCHMARK", "COMPATIBILITY_CHECK", "BEST_PRACTICE", "TREND_ANALYSIS",
               "SUMMARIZE", "EXPLAIN", "REPORT", "TRANSLATE", "QUESTION_ANSWER",
             ])
-            .optional()
             .describe(
-              "Specific task type within the domain. Requires domain_hint. Overrides the default task type for that domain.",
+              "Specific task type within the domain.",
             ),
-          complexity_hint: z
+          complexity: z
             .enum(["simple", "moderate", "complex"])
-            .optional()
             .describe(
               "Task complexity. simple=single focused task, moderate=multi-step or requires domain knowledge, complex=cross-cutting/architectural/multi-system",
             ),
@@ -142,14 +153,15 @@ export class PyreezMcpServer {
         title: "Pyreez Ask",
         description: "Send a chat completion request to a specific model. Submit messages in English.",
         inputSchema: z.object({
-          model: z.string().describe("Model ID (e.g., openai/gpt-4.1)"),
+          model: z.string().max(200).describe("Model ID (e.g., openai/gpt-4.1)"),
           messages: z
             .array(
               z.object({
-                role: z.string().describe("Message role"),
-                content: z.string().describe("Message content"),
+                role: z.string().max(20).describe("Message role"),
+                content: z.string().max(500_000).describe("Message content"),
               }),
             )
+            .max(100)
             .describe("Chat messages"),
           temperature: z.number().optional().describe("Sampling temperature"),
           max_tokens: z
@@ -169,15 +181,17 @@ export class PyreezMcpServer {
           "Send the same chat request to multiple models in parallel. Submit messages in English.",
         inputSchema: z.object({
           models: z
-            .array(z.string())
+            .array(z.string().max(200))
+            .max(10)
             .describe("Array of model IDs to query"),
           messages: z
             .array(
               z.object({
-                role: z.string().describe("Message role"),
-                content: z.string().describe("Message content"),
+                role: z.string().max(20).describe("Message role"),
+                content: z.string().max(500_000).describe("Message content"),
               }),
             )
+            .max(100)
             .describe("Chat messages"),
           temperature: z.number().optional().describe("Sampling temperature"),
           max_tokens: z
@@ -297,15 +311,32 @@ export class PyreezMcpServer {
         description:
           "Run multi-model consensus-based deliberation on a task. Submit task and instructions in English.",
         inputSchema: z.object({
-          task: z.string().describe("Task to deliberate on"),
+          task: z.string().max(100_000).describe("Task to deliberate on"),
+          domain: z
+            .enum([
+              "IDEATION", "PLANNING", "REQUIREMENTS", "ARCHITECTURE",
+              "CODING", "TESTING", "REVIEW", "DOCUMENTATION",
+              "DEBUGGING", "OPERATIONS", "RESEARCH", "COMMUNICATION",
+            ])
+            .optional()
+            .describe("Task domain (required when auto_route=true)"),
+          task_type: z
+            .string()
+            .optional()
+            .describe("Specific task type (required when auto_route=true)"),
+          complexity: z
+            .enum(["simple", "moderate", "complex"])
+            .optional()
+            .describe("Task complexity (required when auto_route=true)"),
           perspectives: z
-            .array(z.string())
+            .array(z.string().max(500))
+            .max(10)
             .optional()
             .describe("Review perspectives (e.g., ['코드 품질', '보안', '성능']). Required when auto_route is false."),
           auto_route: z
             .boolean()
             .optional()
-            .describe("When true, use the 5-slot axis pipeline (auto-selects models)"),
+            .describe("When true, use the pipeline (auto-selects models). Requires domain, task_type, complexity."),
           producer_instructions: z
             .string()
             .optional()
@@ -388,9 +419,9 @@ export class PyreezMcpServer {
   async handleRoute(args: {
     task: string;
     budget?: number;
-    domain_hint?: string;
-    task_type_hint?: string;
-    complexity_hint?: string;
+    domain: string;
+    task_type: string;
+    complexity: string;
   }): Promise<CallToolResult> {
     return this.logRun("route", async () => {
     if (!args.task) {
@@ -401,23 +432,26 @@ export class PyreezMcpServer {
       const budget: BudgetConfig = {
         perRequest: args.budget ?? DEFAULT_BUDGET.perRequest,
       };
-      const hints = {
-        domain_hint: args.domain_hint as any,
-        task_type_hint: args.task_type_hint as any,
-        complexity_hint: args.complexity_hint as any,
+      const classification: TaskClassification = {
+        domain: args.domain,
+        taskType: args.task_type,
+        complexity: args.complexity as TaskClassification["complexity"],
       };
-      const result = this.routeFn(args.task, budget, hints);
+      const result = await this.engine.traceOnly(args.task, budget, classification);
 
-      if (!result) {
-        return this.errorResult(
-          "Error: classification failed — could not route task",
-        );
-      }
-
-      return this.textResult(JSON.stringify(result, null, 2));
+      return this.textResult(JSON.stringify({
+        classification,
+        requirement: result.requirement,
+        selection: {
+          models: result.plan.models,
+          strategy: result.plan.strategy,
+          estimatedCost: result.plan.estimatedCost,
+          reason: result.plan.reason,
+        },
+      }, null, 2));
     } catch (error) {
       return this.errorResult(
-        `Error: ${error instanceof Error ? error.message : String(error)}`,
+        `Error: ${sanitizeError(error)}`,
       );
     }
     });
@@ -456,7 +490,7 @@ export class PyreezMcpServer {
       return this.textResult(stripThinkTags(content));
     } catch (error) {
       return this.errorResult(
-        `Error: ${error instanceof Error ? error.message : String(error)}`,
+        `Error: ${sanitizeError(error)}`,
       );
     }
     });
@@ -527,12 +561,10 @@ export class PyreezMcpServer {
         let score: number;
         let conf: number;
         if (raw != null && typeof raw === "object" && "mu" in raw) {
-          // BT format: { mu, sigma, comparisons }
           const bt = raw as { mu: number; sigma: number };
           score = bt.mu;
           conf = Math.round(Math.max(0, 1 - bt.sigma / 350) * 100) / 100;
         } else {
-          // Legacy format: plain number (no confidence available)
           score = typeof raw === "number" ? raw : 0;
           conf = 0;
         }
@@ -599,7 +631,7 @@ export class PyreezMcpServer {
         return this.textResult(JSON.stringify(results, null, 2));
       } catch (error) {
         return this.errorResult(
-          `Error: ${error instanceof Error ? error.message : String(error)}`,
+          `Error: ${sanitizeError(error)}`,
         );
       }
     }
@@ -613,7 +645,7 @@ export class PyreezMcpServer {
         return this.textResult(JSON.stringify(summary, null, 2));
       } catch (error) {
         return this.errorResult(
-          `Error: ${error instanceof Error ? error.message : String(error)}`,
+          `Error: ${sanitizeError(error)}`,
         );
       }
     }
@@ -645,16 +677,17 @@ export class PyreezMcpServer {
       return this.textResult(JSON.stringify({ recorded: true }));
     } catch (error) {
       return this.errorResult(
-        `Error: ${error instanceof Error ? error.message : String(error)}`,
+        `Error: ${sanitizeError(error)}`,
       );
     }
     });
   }
 
-  // --- Lifecycle ---
-
   async handleDeliberate(args: {
     task: string;
+    domain?: string;
+    task_type?: string;
+    complexity?: string;
     perspectives?: string[];
     auto_route?: boolean;
     producer_instructions?: string;
@@ -667,15 +700,25 @@ export class PyreezMcpServer {
       return this.errorResult("Error: task is required");
     }
 
-    // auto_route + engine: use the 5-slot axis pipeline
-    if (args.auto_route && this.engine) {
+    // auto_route: use the 3-stage pipeline
+    if (args.auto_route) {
+      if (!args.domain || !args.task_type || !args.complexity) {
+        return this.errorResult(
+          "Error: domain, task_type, and complexity are required when auto_route=true",
+        );
+      }
       try {
         const budget = { perRequest: 1.0 };
-        const result = await this.engine.run(args.task, budget);
+        const classification: TaskClassification = {
+          domain: args.domain,
+          taskType: args.task_type,
+          complexity: args.complexity as TaskClassification["complexity"],
+        };
+        const result = await this.engine.run(args.task, budget, classification);
         return this.textResult(JSON.stringify(result, null, 2));
       } catch (error) {
         return this.errorResult(
-          `Error: ${error instanceof Error ? error.message : String(error)}`,
+          `Error: ${sanitizeError(error)}`,
         );
       }
     }
@@ -701,13 +744,11 @@ export class PyreezMcpServer {
       return this.textResult(JSON.stringify(result, null, 2));
     } catch (error) {
       return this.errorResult(
-        `Error: ${error instanceof Error ? error.message : String(error)}`,
+        `Error: ${sanitizeError(error)}`,
       );
     }
     });
   }
-
-  // --- Lifecycle (server) ---
 
   async handleCalibrate(): Promise<CallToolResult> {
     return this.logRun("calibrate", async () => {
@@ -719,7 +760,7 @@ export class PyreezMcpServer {
         return this.textResult(JSON.stringify(result, null, 2));
       } catch (error) {
         return this.errorResult(
-          `Error: ${error instanceof Error ? error.message : String(error)}`,
+          `Error: ${sanitizeError(error)}`,
         );
       }
     });

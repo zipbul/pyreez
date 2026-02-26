@@ -8,6 +8,7 @@ export interface PyreezConfig {
     anthropic?: { apiKey: string; baseUrl?: string };
     google?: { apiKey: string };
     openai?: { apiKey: string };
+    local?: { baseUrl: string; socketPath?: string };
     claudeCli?: { enabled: boolean };
   };
   defaultModel?: string;
@@ -21,6 +22,8 @@ export interface PyreezConfig {
  * PYREEZ_GOOGLE_API_KEY — Google AI API key
  * PYREEZ_OPENAI_KEY — OpenAI API key
  * PYREEZ_CLAUDE_CLI — set to "1" to use `claude -p` for anthropic/* models (no API cost)
+ * PYREEZ_LOCAL_URL — Local LLM base URL (e.g., Docker Model Runner, Ollama, LM Studio)
+ * PYREEZ_LOCAL_SOCKET — Unix socket path for Docker Model Runner (e.g., /var/run/docker.sock)
  * PYREEZ_MODEL — default model (optional, default "openai/gpt-4.1")
  */
 export function loadConfigFromEnv(): PyreezConfig {
@@ -53,10 +56,20 @@ export function loadConfigFromEnv(): PyreezConfig {
     delete config.providers.anthropic;
   }
 
+  // Local LLM provider (Docker Model Runner, Ollama, LM Studio, etc.)
+  const localUrl = Bun.env.PYREEZ_LOCAL_URL;
+  const localSocket = Bun.env.PYREEZ_LOCAL_SOCKET;
+  if (localUrl || localSocket) {
+    config.providers.local = {
+      baseUrl: localUrl ?? "http://localhost/exp/vDD4.40/engines",
+      socketPath: localSocket,
+    };
+  }
+
   // At least one provider must be configured
   if (Object.keys(config.providers).length === 0) {
     throw new Error(
-      "No LLM providers configured. Set at least one of: PYREEZ_ANTHROPIC_KEY, PYREEZ_GOOGLE_API_KEY, PYREEZ_OPENAI_KEY, or PYREEZ_CLAUDE_CLI=1",
+      "No LLM providers configured. Set at least one of: PYREEZ_ANTHROPIC_KEY, PYREEZ_GOOGLE_API_KEY, PYREEZ_OPENAI_KEY, PYREEZ_LOCAL_URL, PYREEZ_LOCAL_SOCKET, or PYREEZ_CLAUDE_CLI=1",
     );
   }
 
