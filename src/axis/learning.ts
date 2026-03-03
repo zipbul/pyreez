@@ -283,7 +283,7 @@ export class LocalLearningLayer implements LearningLayer {
    */
   private extractPairwiseResults(
     classified: TaskClassification,
-    plan: EnsemblePlan,
+    _plan: EnsemblePlan,
     result: DeliberationResult,
   ): PairwiseResult[] {
     const models = result.modelsUsed;

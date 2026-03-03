@@ -5,7 +5,7 @@
  * All FileIO operations are test-doubled via DI injection.
  */
 
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, mock } from "bun:test";
 import { FileDeliberationStore } from "./file-store";
 import type { FileIO } from "../report/types";
 import type { DeliberationRecord } from "./store-types";

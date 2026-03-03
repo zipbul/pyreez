@@ -15,7 +15,7 @@ import type { ModelRegistry } from "../model/registry";
 import type { ModelInfo } from "../model/types";
 import type { Reporter, CallRecord } from "../report/types";
 import type { RunLogger } from "../report/run-logger";
-import type { BudgetConfig } from "../router/types";
+import type { BudgetConfig } from "../axis/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 import type { DeliberationStore } from "../deliberation/store-types";
 import type { CalibrationResult } from "../model/calibration";
@@ -156,10 +156,12 @@ export class PyreezMcpServer {
         inputSchema: z.object({
           model: z
             .string()
+            .max(200)
             .optional()
             .describe("Filter by model ID"),
           dimension: z
             .string()
+            .max(100)
             .optional()
             .describe("Filter by capability dimension (e.g., REASONING)"),
           top: z
@@ -198,7 +200,7 @@ export class PyreezMcpServer {
             .number()
             .optional()
             .describe("Limit number of deliberation results"),
-          model: z.string().optional().describe("Model ID used"),
+          model: z.string().max(200).optional().describe("Model ID used"),
           task_type: z
             .string()
             .optional()
@@ -233,10 +235,12 @@ export class PyreezMcpServer {
             .describe("Context utilization metrics"),
           team_id: z
             .string()
+            .max(200)
             .optional()
             .describe("Team identifier for team-level evaluation"),
           leader_id: z
             .string()
+            .max(200)
             .optional()
             .describe("Team Leader model ID"),
         }),
@@ -291,10 +295,12 @@ export class PyreezMcpServer {
             .describe("When true, use the pipeline (auto-selects models). Requires domain, task_type, complexity."),
           worker_instructions: z
             .string()
+            .max(10_000)
             .optional()
             .describe("Optional instructions for the workers"),
           leader_instructions: z
             .string()
+            .max(10_000)
             .optional()
             .describe("Optional instructions for the leader"),
           max_rounds: z

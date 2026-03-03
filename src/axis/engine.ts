@@ -35,7 +35,7 @@ export class PyreezEngine {
 
   /** Run Stage 1-2 only (no LLM calls). For benchmark dry mode. */
   async traceOnly(
-    prompt: string,
+    _prompt: string,
     budget: BudgetConfig,
     classification: TaskClassification,
   ): Promise<SlotTrace> {

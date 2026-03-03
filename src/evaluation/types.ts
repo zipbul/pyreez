@@ -7,7 +7,7 @@
  * Layer 4: Dynamic refresh (LiveBench + WildBench methodology)
  */
 
-import type { CapabilityDimension, DimensionRating } from "../model/types";
+import type { CapabilityDimension } from "../model/types";
 
 // -- Difficulty & Domain --
 

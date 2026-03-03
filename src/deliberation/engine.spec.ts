@@ -13,7 +13,6 @@ import {
   type ChatResult,
   type RetryDeps,
 } from "./engine";
-import type { ChatMessage } from "../llm/types";
 import type { TeamComposition, DeliberateInput } from "./types";
 import type { ModelInfo } from "../model/types";
 import { createCooldownManager } from "./cooldown";
@@ -599,7 +598,6 @@ describe("deliberate", () => {
     const input = makeInput();
     const config = makeConfig({ maxRounds: 1 });
 
-    let attempt = 0;
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model === "worker/model-0") {

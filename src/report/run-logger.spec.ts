@@ -1,4 +1,4 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, mock } from "bun:test";
 import { FileRunLogger } from "./run-logger";
 import type { FileIO } from "./types";
 import type { RunRecord } from "./run-logger";

@@ -130,7 +130,7 @@ function stripJsonWrapping(text: string): string {
  * Falls back to plain text content with no decision.
  */
 export function parseSynthesis(
-  model: string,
+  _model: string,
   response: string,
   consensus?: ConsensusMode,
 ): { content: string; decision?: "continue" | "approve" } {

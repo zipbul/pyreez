@@ -6,7 +6,6 @@
  */
 
 import { describe, it, expect, mock, beforeEach } from "bun:test";
-import type { ChatMessage } from "../llm/types";
 import { LLMClientError } from "../llm/errors";
 import type {
   DeliberateInput,
@@ -44,7 +43,7 @@ mock.module("./engine", () => ({
 
 // Import SUT after mocks
 const { createChatAdapter, createDeliberateFn, stripThinkTags } = await import("./wire");
-const { buildWorkerMessages, buildLeaderMessages } = await import("./prompts");
+const { buildWorkerMessages: _buildWorkerMessages, buildLeaderMessages: _buildLeaderMessages } = await import("./prompts");
 
 // -- Fixtures --
 

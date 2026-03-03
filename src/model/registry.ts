@@ -7,7 +7,6 @@ import type {
   ModelInfo,
   ModelCapabilities,
   DimensionRating,
-  CapabilityDimension,
 } from "./types";
 import type { ProviderName } from "../llm/types";
 import { ALL_DIMENSIONS, SIGMA_BASE } from "./types";

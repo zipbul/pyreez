@@ -8,9 +8,6 @@ import {
   calibrate,
   extractRatingsMap,
   persistRatings,
-  STRONG_QUALITY_DIFF,
-  MIN_QUALITY_DIFF,
-  SIGMA_CONVERGED,
   SIGMA_STALE,
 } from "./calibration";
 import { getRating, setRating, type RatingsMap } from "../evaluation/bt-updater";

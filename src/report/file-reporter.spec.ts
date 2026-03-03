@@ -1,6 +1,6 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, mock } from "bun:test";
 import { FileReporter } from "./file-reporter";
-import type { CallRecord, FileIO, ReportSummary } from "./types";
+import type { CallRecord, FileIO } from "./types";
 
 // --- Fixtures ---
 
@@ -424,7 +424,7 @@ describe("FileReporter", () => {
         return Promise.resolve([]);
       }),
       readFile: mock(() => Promise.resolve(fileContent)),
-      appendFile: mock((path: string, data: string) => {
+      appendFile: mock((_path: string, data: string) => {
         fileContent += data;
         return Promise.resolve();
       }),
@@ -450,7 +450,7 @@ describe("FileReporter", () => {
         return Promise.resolve([]);
       }),
       readFile: mock(() => Promise.resolve(fileContent)),
-      appendFile: mock((path: string, data: string) => {
+      appendFile: mock((_path: string, data: string) => {
         fileContent += data;
         hasFiles = true;
         return Promise.resolve();
@@ -479,7 +479,7 @@ describe("FileReporter", () => {
         return Promise.resolve([]);
       }),
       readFile: mock(() => Promise.resolve(fileContent)),
-      appendFile: mock((path: string, data: string) => {
+      appendFile: mock((_path: string, data: string) => {
         fileContent += data;
         hasFiles = true;
         return Promise.resolve();

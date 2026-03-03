@@ -12,7 +12,6 @@
  */
 
 import type { CapabilityDimension, DimensionRating } from "../model/types";
-import { SIGMA_BASE } from "../model/types";
 import type { ModelInfo } from "../model/types";
 import type { CallRecord } from "../report/types";
 import type { PairwiseOutcome, PairwiseResult } from "../evaluation/types";
@@ -20,8 +19,6 @@ import {
   updateRating,
   getRating,
   setRating,
-  SIGMA_MIN,
-  ANOMALY_THRESHOLD,
   type RatingsMap,
 } from "../evaluation/bt-updater";
 

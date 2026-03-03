@@ -35,6 +35,26 @@ import {
 import type { ChatFn } from "./axis/types";
 import type { ChatMessage } from "./llm/types";
 
+/**
+ * Filter registry models to only those from configured providers.
+ * Exported for testability.
+ */
+export function filterModelsByProviders(
+  registry: ModelRegistry,
+  providers: readonly LLMProvider[],
+): { modelIds: string[]; warnings: string[] } {
+  const configuredProviders = new Set(providers.map((p) => p.name));
+  const availableModels = registry.getAvailable().filter((m) => configuredProviders.has(m.provider));
+  const warnings: string[] = [];
+  if (availableModels.length === 0) {
+    warnings.push(
+      `No models match configured providers (${[...configuredProviders].join(", ")}). ` +
+      "Check scores/models.json provider names.",
+    );
+  }
+  return { modelIds: availableModels.map((m) => m.id), warnings };
+}
+
 async function main(): Promise<void> {
   const routing = await loadRoutingConfig();
   const config = loadConfigFromEnv(routing);
@@ -100,16 +120,8 @@ async function main(): Promise<void> {
   };
 
   // Build 3-stage pipeline directly (no factory)
-  // Filter models to only those from configured providers
-  const configuredProviders = new Set(providers.map((p) => p.name));
-  const availableModels = registry.getAvailable().filter((m) => configuredProviders.has(m.provider));
-  if (availableModels.length === 0) {
-    console.error(
-      `Warning: No models match configured providers (${[...configuredProviders].join(", ")}). ` +
-      "Check scores/models.json provider names.",
-    );
-  }
-  const modelIds = availableModels.map((m) => m.id);
+  const { modelIds } = filterModelsByProviders(registry, providers);
+
   const scoring = new BtScoringSystem();
   const profiler = new DomainOverrideProfiler();
   const selector = new TwoTrackCeSelector(3, undefined, config.routing);

@@ -14,7 +14,6 @@ import {
   K_BASE,
   SIGMA_DECAY,
   SIGMA_MIN,
-  ANOMALY_THRESHOLD,
   type RatingsMap,
 } from "./bt-updater";
 import { SIGMA_BASE } from "../model/types";

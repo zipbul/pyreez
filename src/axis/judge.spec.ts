@@ -1,5 +1,4 @@
 import { describe, it, expect, mock } from "bun:test";
-import type { FileIO } from "../report/types";
 import { LlmJudge } from "./judge";
 import type { ChatFn } from "./types";
 

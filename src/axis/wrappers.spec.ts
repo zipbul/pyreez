@@ -144,7 +144,6 @@ describe("BtScoringSystem overall score excludes operational dimensions", () => 
 
     // The overall should NOT equal the mean of ALL dimensions (since SPEED etc are excluded)
     const allDims = Object.entries(score!.dimensions);
-    const allMean = allDims.reduce((sum, [, v]) => sum + v.mu, 0) / allDims.length;
 
     const nonOpDims = allDims.filter(([dim]) => !["SPEED", "COST_EFFICIENCY", "CONTEXT_UTILIZATION"].includes(dim));
     const nonOpMean = nonOpDims.reduce((sum, [, v]) => sum + v.mu, 0) / nonOpDims.length;

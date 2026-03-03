@@ -3,7 +3,6 @@
  * Maps ClassifyResult → TaskRequirement using domain defaults + task overrides.
  */
 
-import type { CapabilityDimension } from "../model/types";
 import type { TaskDomain, TaskType, ClassifyResult } from "../classify/types";
 import type { CapabilityRequirement, TaskRequirement } from "./types";
 

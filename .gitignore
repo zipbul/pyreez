@@ -36,4 +36,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Claude Code MCP config (contains local paths)
 .mcp.json
 
-# pyreez runtime data — git tracked for calibration feedback loop
+# pyreez runtime data (user-specific, not tracked)
+.pyreez/reports/
+.pyreez/deliberations/
+.pyreez/runs/
+.pyreez/benchmarks/
+.pyreez/learning/

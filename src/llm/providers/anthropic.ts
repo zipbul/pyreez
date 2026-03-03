@@ -9,7 +9,6 @@ import type {
   LLMProvider,
   ChatCompletionRequest,
   ChatCompletionResponse,
-  ChatMessage,
 } from "../types";
 
 export interface AnthropicProviderConfig {

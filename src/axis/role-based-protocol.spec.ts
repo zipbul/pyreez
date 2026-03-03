@@ -6,14 +6,12 @@
  */
 import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { DivergeSynthProtocol } from "./wrappers";
-import type { EnsemblePlan, ModelScore, ChatFn, ChatResult } from "./types";
+import type { EnsemblePlan, ModelScore, ChatFn } from "./types";
 import type { ChatMessage } from "../llm/types";
 import type {
   TeamComposition,
   DeliberateInput,
   SharedContext,
-  DeliberateOutput,
-  TokenUsage,
 } from "../deliberation/types";
 import type { EngineDeps, EngineConfig } from "../deliberation/engine";
 

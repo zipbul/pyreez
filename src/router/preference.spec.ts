@@ -7,7 +7,6 @@ import {
   winRate,
   entryConfidence,
   routeByPreference,
-  type PreferenceEntry,
 } from "./preference";
 import type { PairwiseResult } from "../evaluation/types";
 
