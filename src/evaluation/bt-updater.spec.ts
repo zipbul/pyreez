@@ -116,11 +116,15 @@ describe("updateRating", () => {
     expect(updatedB.mu).toBe(500);
   });
 
-  it("should decrease sigma after comparison", () => {
+  it("should decrease sigma after comparison (surprise-aware decay)", () => {
     const a = makeRating(500, SIGMA_BASE);
     const b = makeRating(500, SIGMA_BASE);
     const { updatedA } = updateRating(a, b, "A>B");
-    expect(updatedA.sigma).toBe(SIGMA_BASE * SIGMA_DECAY);
+    // Surprise-aware: decay = SIGMA_DECAY + (1 - SIGMA_DECAY) * min(|surprise|/3, 1)
+    // For equal ratings, expected=0.5, signal=0.75, surprise=0.75*0.5=0.375
+    // decay = 0.97 + 0.03 * min(0.375/3, 1) = 0.97 + 0.03 * 0.125 = 0.97375
+    expect(updatedA.sigma).toBeLessThan(SIGMA_BASE);
+    expect(updatedA.sigma).toBeGreaterThan(SIGMA_BASE * SIGMA_DECAY);
   });
 
   it("should not decrease sigma below SIGMA_MIN", () => {
@@ -153,6 +157,42 @@ describe("updateRating", () => {
     const b = makeRating(500, SIGMA_BASE);
     const { anomaly } = updateRating(a, b, "A>>B");
     expect(anomaly).toBe(true);
+  });
+
+  it("should maintain zero-sum: delta_A + delta_B ≈ 0 when not clamped", () => {
+    const a = makeRating(500, 200);
+    const b = makeRating(500, 200);
+    const { updatedA, updatedB } = updateRating(a, b, "A>B");
+    const deltaA = updatedA.mu - a.mu;
+    const deltaB = updatedB.mu - b.mu;
+    expect(Math.abs(deltaA + deltaB)).toBeLessThan(0.001);
+  });
+
+  it("should maintain zero-sum even when A is clamped at boundary", () => {
+    // A at 0, very high sigma to produce large K → A would go negative but clamps at 0
+    const a = makeRating(0, SIGMA_BASE * 5);
+    const b = makeRating(500, SIGMA_BASE * 5);
+    const { updatedA, updatedB } = updateRating(a, b, "B>>A");
+    // A clamped at 0, B's delta compensates
+    const deltaA = updatedA.mu - 0;
+    const deltaB = updatedB.mu - 500;
+    expect(updatedA.mu).toBe(0); // clamped
+    expect(Math.abs(deltaA + deltaB)).toBeLessThan(0.001);
+  });
+
+  it("should decay sigma less when result is surprising", () => {
+    // Surprising: weak model (200) beats strong model (800)
+    const weak = makeRating(200, 200);
+    const strong = makeRating(800, 200);
+    const { updatedA: surpriseA } = updateRating(weak, strong, "A>>B");
+
+    // Expected: equal models
+    const a = makeRating(500, 200);
+    const b = makeRating(500, 200);
+    const { updatedA: normalA } = updateRating(a, b, "A>B");
+
+    // Surprising result should preserve more uncertainty (higher sigma)
+    expect(surpriseA.sigma).toBeGreaterThan(normalA.sigma);
   });
 });
 

@@ -1,5 +1,10 @@
 /**
  * Unit tests for shared-context.ts — SharedContext factory and query utilities.
+ *
+ * SUT: createSharedContext, addRound, latestRound, latestSynthesis,
+ *      isConsensusReached, totalLLMCalls, modelsUsed
+ *
+ * Diverge-Synth model: Workers + Leader (no producer/reviewer distinction).
  */
 
 import { describe, expect, it } from "bun:test";
@@ -13,81 +18,57 @@ import {
   totalLLMCalls,
 } from "./shared-context";
 import type {
-  Production,
-  Review,
   Round,
   Synthesis,
   TeamComposition,
   TeamMember,
+  WorkerResponse,
 } from "./types";
 
 // -- Fixtures --
 
-function makeTeamMember(
-  model: string,
-  role: "producer" | "reviewer" | "leader",
-  perspective?: string,
-): TeamMember {
-  return { model, role, perspective };
+function makeWorker(model: string): TeamMember {
+  return { model, role: "worker" };
+}
+
+function makeLeader(model: string): TeamMember {
+  return { model, role: "leader" };
 }
 
 function makeTeam(overrides?: Partial<TeamComposition>): TeamComposition {
   return {
-    producer: makeTeamMember("openai/gpt-4.1", "producer"),
-    reviewers: [
-      makeTeamMember("deepseek/deepseek-r1", "reviewer", "코드 품질"),
-      makeTeamMember("meta/llama-4-scout", "reviewer", "보안"),
-    ],
-    leader: makeTeamMember("openai/o4-mini", "leader"),
+    workers: [makeWorker("openai/gpt-4.1"), makeWorker("deepseek/deepseek-r1")],
+    leader: makeLeader("openai/o4-mini"),
     ...overrides,
   };
 }
 
-function makeProduction(model = "openai/gpt-4.1"): Production {
-  return { model, content: "function hello() { return 'world'; }" };
-}
-
-function makeReview(
-  model = "deepseek/deepseek-r1",
-  perspective = "코드 품질",
-): Review {
-  return {
-    model,
-    perspective,
-    issues: [{ severity: "minor", description: "변수명 불명확" }],
-    approval: true,
-    reasoning: "전반적으로 양호",
-  };
+function makeResponse(
+  model = "openai/gpt-4.1",
+  content = "function hello() { return 'world'; }",
+): WorkerResponse {
+  return { model, content };
 }
 
 function makeSynthesis(
-  decision: "continue" | "approve" | "escalate" = "continue",
+  decision?: "continue" | "approve",
   model = "openai/o4-mini",
 ): Synthesis {
-  return {
-    model,
-    consensusStatus: decision === "approve" ? "reached" : "progressing",
-    keyAgreements: ["기본 구조 합의"],
-    keyDisagreements: [],
-    actionItems: decision === "continue" ? ["변수명 개선"] : [],
-    decision,
-  };
+  return { model, content: "Synthesized result", decision };
 }
 
 function makeRound(
   number: number,
   options?: {
-    production?: Production;
-    reviews?: Review[];
+    responses?: WorkerResponse[];
     synthesis?: Synthesis;
   },
 ): Round {
   return {
     number,
-    production: options?.production ?? makeProduction(),
-    reviews: options?.reviews ?? [
-      makeReview("deepseek/deepseek-r1", "코드 품질"),
-      makeReview("meta/llama-4-scout", "보안"),
+    responses: options?.responses ?? [
+      makeResponse("openai/gpt-4.1"),
+      makeResponse("deepseek/deepseek-r1"),
     ],
     synthesis: options?.synthesis,
   };
@@ -97,57 +78,65 @@ function makeRound(
 
 describe("createSharedContext", () => {
   it("should create empty SharedContext with valid task and team", () => {
+    // Arrange
     const team = makeTeam();
-    const ctx = createSharedContext("TypeScript 렉서 구현", team);
 
-    expect(ctx.task).toBe("TypeScript 렉서 구현");
+    // Act
+    const ctx = createSharedContext("Implement a TypeScript lexer", team);
+
+    // Assert
+    expect(ctx.task).toBe("Implement a TypeScript lexer");
     expect(ctx.team).toBe(team);
     expect(ctx.rounds).toEqual([]);
   });
 
   it("should trim whitespace from task", () => {
+    // Arrange / Act
     const ctx = createSharedContext("  hello world  ", makeTeam());
 
+    // Assert
     expect(ctx.task).toBe("hello world");
   });
 
   it("should throw when task is empty string", () => {
+    // Arrange / Act / Assert
     expect(() => createSharedContext("", makeTeam())).toThrow(
       "Task description must be a non-empty string",
     );
   });
 
   it("should throw when task is whitespace only", () => {
+    // Arrange / Act / Assert
     expect(() => createSharedContext("   \t\n  ", makeTeam())).toThrow(
       "Task description must be a non-empty string",
     );
   });
 
-  it("should throw when team has no producer", () => {
+  it("should throw when team has no workers", () => {
+    // Arrange / Act / Assert
     expect(() =>
       createSharedContext("task", {
-        producer: undefined as unknown as TeamMember,
-        reviewers: [makeTeamMember("m1", "reviewer")],
-        leader: makeTeamMember("m2", "leader"),
+        workers: [],
+        leader: makeLeader("m1"),
       }),
-    ).toThrow("Team must have a producer");
+    ).toThrow("Team must have at least one worker");
   });
 
-  it("should throw when team has no reviewers", () => {
+  it("should throw when team.workers is undefined", () => {
+    // Arrange / Act / Assert
     expect(() =>
       createSharedContext("task", {
-        producer: makeTeamMember("m1", "producer"),
-        reviewers: [],
-        leader: makeTeamMember("m2", "leader"),
+        workers: undefined as unknown as readonly TeamMember[],
+        leader: makeLeader("m1"),
       }),
-    ).toThrow("Team must have at least one reviewer");
+    ).toThrow("Team must have at least one worker");
   });
 
   it("should throw when team has no leader", () => {
+    // Arrange / Act / Assert
     expect(() =>
       createSharedContext("task", {
-        producer: makeTeamMember("m1", "producer"),
-        reviewers: [makeTeamMember("m2", "reviewer")],
+        workers: [makeWorker("m1")],
         leader: undefined as unknown as TeamMember,
       }),
     ).toThrow("Team must have a leader");
@@ -158,20 +147,28 @@ describe("createSharedContext", () => {
 
 describe("addRound", () => {
   it("should add first round to empty context", () => {
+    // Arrange
     const ctx = createSharedContext("task", makeTeam());
     const round = makeRound(1, { synthesis: makeSynthesis("continue") });
+
+    // Act
     const updated = addRound(ctx, round);
 
+    // Assert
     expect(updated.rounds).toHaveLength(1);
     expect(updated.rounds[0]).toBe(round);
   });
 
   it("should chain multiple rounds sequentially", () => {
+    // Arrange
     let ctx = createSharedContext("task", makeTeam());
+
+    // Act
     ctx = addRound(ctx, makeRound(1, { synthesis: makeSynthesis("continue") }));
     ctx = addRound(ctx, makeRound(2, { synthesis: makeSynthesis("continue") }));
     ctx = addRound(ctx, makeRound(3, { synthesis: makeSynthesis("approve") }));
 
+    // Assert
     expect(ctx.rounds).toHaveLength(3);
     expect(ctx.rounds[0]!.number).toBe(1);
     expect(ctx.rounds[1]!.number).toBe(2);
@@ -179,28 +176,36 @@ describe("addRound", () => {
   });
 
   it("should not mutate the original context (immutability)", () => {
+    // Arrange
     const original = createSharedContext("task", makeTeam());
     const round = makeRound(1);
+
+    // Act
     const updated = addRound(original, round);
 
+    // Assert
     expect(original.rounds).toHaveLength(0);
     expect(updated.rounds).toHaveLength(1);
     expect(original).not.toBe(updated);
   });
 
   it("should throw when round number is not sequential", () => {
+    // Arrange
     const ctx = createSharedContext("task", makeTeam());
     const round = makeRound(2); // expected 1
 
+    // Act / Assert
     expect(() => addRound(ctx, round)).toThrow(
       "Round number must be 1, got 2",
     );
   });
 
   it("should throw when round number is 0 on empty context", () => {
+    // Arrange
     const ctx = createSharedContext("task", makeTeam());
-    const round: Round = { number: 0, reviews: [] };
+    const round: Round = { number: 0, responses: [] };
 
+    // Act / Assert
     expect(() => addRound(ctx, round)).toThrow(
       "Round number must be 1, got 0",
     );
@@ -211,19 +216,45 @@ describe("addRound", () => {
 
 describe("latestRound", () => {
   it("should return undefined when no rounds exist", () => {
+    // Arrange
     const ctx = createSharedContext("task", makeTeam());
 
+    // Act / Assert
     expect(latestRound(ctx)).toBeUndefined();
   });
 
   it("should return the most recent round", () => {
+    // Arrange
     let ctx = createSharedContext("task", makeTeam());
     const r1 = makeRound(1, { synthesis: makeSynthesis("continue") });
     const r2 = makeRound(2, { synthesis: makeSynthesis("approve") });
     ctx = addRound(ctx, r1);
     ctx = addRound(ctx, r2);
 
+    // Act / Assert
     expect(latestRound(ctx)).toBe(r2);
+  });
+});
+
+// -- latestSynthesis --
+
+describe("latestSynthesis", () => {
+  it("should return undefined when no rounds exist", () => {
+    // Arrange
+    const ctx = createSharedContext("task", makeTeam());
+
+    // Act / Assert
+    expect(latestSynthesis(ctx)).toBeUndefined();
+  });
+
+  it("should return synthesis from the latest round", () => {
+    // Arrange
+    let ctx = createSharedContext("task", makeTeam());
+    const synth = makeSynthesis("approve");
+    ctx = addRound(ctx, makeRound(1, { synthesis: synth }));
+
+    // Act / Assert
+    expect(latestSynthesis(ctx)).toBe(synth);
   });
 });
 
@@ -231,35 +262,55 @@ describe("latestRound", () => {
 
 describe("isConsensusReached", () => {
   it("should return false when no rounds exist", () => {
+    // Arrange
     const ctx = createSharedContext("task", makeTeam());
 
+    // Act / Assert
     expect(isConsensusReached(ctx)).toBe(false);
   });
 
   it("should return true when latest synthesis decision is 'approve'", () => {
+    // Arrange
     let ctx = createSharedContext("task", makeTeam());
     ctx = addRound(
       ctx,
       makeRound(1, { synthesis: makeSynthesis("approve") }),
     );
 
+    // Act / Assert
     expect(isConsensusReached(ctx)).toBe(true);
   });
 
-  it("should return false when decision is 'continue' despite synthesis existing", () => {
+  it("should return false when decision is 'continue'", () => {
+    // Arrange
     let ctx = createSharedContext("task", makeTeam());
     ctx = addRound(
       ctx,
       makeRound(1, { synthesis: makeSynthesis("continue") }),
     );
 
+    // Act / Assert
     expect(isConsensusReached(ctx)).toBe(false);
   });
 
   it("should return false when round has no synthesis", () => {
+    // Arrange
     let ctx = createSharedContext("task", makeTeam());
     ctx = addRound(ctx, makeRound(1)); // no synthesis
 
+    // Act / Assert
+    expect(isConsensusReached(ctx)).toBe(false);
+  });
+
+  it("should return false when synthesis has no decision field", () => {
+    // Arrange
+    let ctx = createSharedContext("task", makeTeam());
+    ctx = addRound(
+      ctx,
+      makeRound(1, { synthesis: makeSynthesis(undefined) }),
+    );
+
+    // Act / Assert
     expect(isConsensusReached(ctx)).toBe(false);
   });
 });
@@ -268,61 +319,72 @@ describe("isConsensusReached", () => {
 
 describe("totalLLMCalls", () => {
   it("should return 0 when no rounds exist", () => {
+    // Arrange
     const ctx = createSharedContext("task", makeTeam());
 
+    // Act / Assert
     expect(totalLLMCalls(ctx)).toBe(0);
   });
 
-  it("should count all LLM calls across rounds", () => {
+  it("should count responses + synthesis correctly for a single round", () => {
+    // Arrange
     let ctx = createSharedContext("task", makeTeam());
-    // Round 1: 1 production + 2 reviews + 1 synthesis = 4
+    // 2 worker responses + 1 synthesis = 3
     ctx = addRound(
       ctx,
       makeRound(1, { synthesis: makeSynthesis("continue") }),
     );
-    // Round 2: 1 production + 2 reviews + 1 synthesis = 4
+
+    // Act / Assert
+    expect(totalLLMCalls(ctx)).toBe(3);
+  });
+
+  it("should count across multiple rounds", () => {
+    // Arrange
+    let ctx = createSharedContext("task", makeTeam());
+    // Round 1: 2 responses + 1 synthesis = 3
+    ctx = addRound(
+      ctx,
+      makeRound(1, { synthesis: makeSynthesis("continue") }),
+    );
+    // Round 2: 2 responses + 1 synthesis = 3
     ctx = addRound(
       ctx,
       makeRound(2, { synthesis: makeSynthesis("approve") }),
     );
 
-    expect(totalLLMCalls(ctx)).toBe(8);
+    // Act / Assert
+    expect(totalLLMCalls(ctx)).toBe(6);
   });
 
-  it("should handle round with partial data (no production or synthesis)", () => {
+  it("should not count synthesis when absent", () => {
+    // Arrange
     let ctx = createSharedContext("task", makeTeam());
-    // Round with no production, 2 reviews, no synthesis = 2
-    ctx = addRound(ctx, {
-      number: 1,
-      production: undefined,
-      reviews: [
-        makeReview("deepseek/deepseek-r1"),
-        makeReview("meta/llama-4-scout"),
-      ],
-      synthesis: undefined,
-    });
+    // 2 responses, no synthesis = 2
+    ctx = addRound(ctx, makeRound(1));
 
+    // Act / Assert
     expect(totalLLMCalls(ctx)).toBe(2);
   });
 
-  it("should correctly count mixed rounds (some partial)", () => {
+  it("should handle mixed rounds (some with synthesis, some without)", () => {
+    // Arrange
     let ctx = createSharedContext("task", makeTeam());
-    // Round 1: full = 1 + 2 + 1 = 4
+    // Round 1: 2 responses + 1 synthesis = 3
     ctx = addRound(
       ctx,
       makeRound(1, { synthesis: makeSynthesis("continue") }),
     );
-    // Round 2: no synth = 1 + 2 = 3
+    // Round 2: 2 responses, no synthesis = 2
     ctx = addRound(ctx, makeRound(2));
-    // Round 3: no prod, 1 review, synth = 0 + 1 + 1 = 2
-    ctx = addRound(ctx, {
-      number: 3,
-      production: undefined,
-      reviews: [makeReview()],
+    // Round 3: 1 response + 1 synthesis = 2
+    ctx = addRound(ctx, makeRound(3, {
+      responses: [makeResponse("openai/gpt-4.1")],
       synthesis: makeSynthesis("approve"),
-    });
+    }));
 
-    expect(totalLLMCalls(ctx)).toBe(9);
+    // Act / Assert
+    expect(totalLLMCalls(ctx)).toBe(7);
   });
 });
 
@@ -330,127 +392,118 @@ describe("totalLLMCalls", () => {
 
 describe("modelsUsed", () => {
   it("should return empty array when no rounds exist", () => {
+    // Arrange
     const ctx = createSharedContext("task", makeTeam());
 
+    // Act / Assert
     expect(modelsUsed(ctx)).toEqual([]);
   });
 
-  it("should collect unique models across rounds", () => {
+  it("should collect unique models from responses and synthesis", () => {
+    // Arrange
     let ctx = createSharedContext("task", makeTeam());
     ctx = addRound(
       ctx,
       makeRound(1, { synthesis: makeSynthesis("approve") }),
     );
 
+    // Act
     const models = modelsUsed(ctx);
-    expect(models).toContain("openai/gpt-4.1"); // production
-    expect(models).toContain("deepseek/deepseek-r1"); // reviewer 1
-    expect(models).toContain("meta/llama-4-scout"); // reviewer 2
+
+    // Assert
+    expect(models).toContain("openai/gpt-4.1"); // worker response
+    expect(models).toContain("deepseek/deepseek-r1"); // worker response
     expect(models).toContain("openai/o4-mini"); // synthesis
+    expect(models).toHaveLength(3);
+  });
+
+  it("should deduplicate when same model appears in multiple roles", () => {
+    // Arrange
+    const sameModel = "openai/gpt-4.1";
+    let ctx = createSharedContext("task", makeTeam());
+    ctx = addRound(ctx, makeRound(1, {
+      responses: [makeResponse(sameModel), makeResponse(sameModel)],
+      synthesis: makeSynthesis("approve", sameModel),
+    }));
+
+    // Act / Assert
+    expect(modelsUsed(ctx)).toEqual([sameModel]);
+  });
+
+  it("should collect across multiple rounds", () => {
+    // Arrange
+    let ctx = createSharedContext("task", makeTeam());
+    ctx = addRound(ctx, makeRound(1, {
+      responses: [makeResponse("model/a")],
+      synthesis: makeSynthesis("continue", "model/b"),
+    }));
+    ctx = addRound(ctx, makeRound(2, {
+      responses: [makeResponse("model/c")],
+      synthesis: makeSynthesis("approve", "model/d"),
+    }));
+
+    // Act
+    const models = modelsUsed(ctx);
+
+    // Assert
+    expect(models).toContain("model/a");
+    expect(models).toContain("model/b");
+    expect(models).toContain("model/c");
+    expect(models).toContain("model/d");
     expect(models).toHaveLength(4);
   });
 
-  it("should deduplicate when same model used in multiple roles", () => {
+  it("should not include undefined when round has no synthesis", () => {
+    // Arrange
     let ctx = createSharedContext("task", makeTeam());
-    const sameModel = "openai/gpt-4.1";
-    ctx = addRound(ctx, {
-      number: 1,
-      production: makeProduction(sameModel),
-      reviews: [makeReview(sameModel)],
-      synthesis: makeSynthesis("approve", sameModel),
-    });
+    ctx = addRound(ctx, makeRound(1)); // no synthesis
 
-    expect(modelsUsed(ctx)).toEqual([sameModel]);
+    // Act
+    const models = modelsUsed(ctx);
+
+    // Assert
+    expect(models).toHaveLength(2);
+    expect(models).toContain("openai/gpt-4.1");
+    expect(models).toContain("deepseek/deepseek-r1");
+    expect(models).not.toContain(undefined as any);
   });
 });
 
-// -- latestSynthesis --
-
-describe("latestSynthesis", () => {
-  it("should return undefined when no rounds exist", () => {
-    const ctx = createSharedContext("task", makeTeam());
-
-    expect(latestSynthesis(ctx)).toBeUndefined();
-  });
-
-  it("should return synthesis from the latest round", () => {
-    let ctx = createSharedContext("task", makeTeam());
-    const synth = makeSynthesis("approve");
-    ctx = addRound(ctx, makeRound(1, { synthesis: synth }));
-
-    expect(latestSynthesis(ctx)).toBe(synth);
-  });
-});
-
-// -- State Transition --
+// -- State Transition (lifecycle) --
 
 describe("SharedContext lifecycle", () => {
   it("should transition from no-consensus to consensus across rounds", () => {
-    let ctx = createSharedContext("TypeScript 렉서 구현", makeTeam());
+    // Arrange
+    let ctx = createSharedContext("Implement a TypeScript lexer", makeTeam());
 
-    // Initial state
+    // Assert — initial state
     expect(isConsensusReached(ctx)).toBe(false);
     expect(latestRound(ctx)).toBeUndefined();
     expect(totalLLMCalls(ctx)).toBe(0);
     expect(modelsUsed(ctx)).toEqual([]);
 
-    // Round 1: continue
+    // Act — round 1: continue
     ctx = addRound(
       ctx,
       makeRound(1, { synthesis: makeSynthesis("continue") }),
     );
+
+    // Assert — after round 1
     expect(isConsensusReached(ctx)).toBe(false);
     expect(latestRound(ctx)?.number).toBe(1);
-    expect(totalLLMCalls(ctx)).toBe(4);
-    expect(modelsUsed(ctx)).toHaveLength(4);
-    // Should contain expected model IDs from round
-    expect(modelsUsed(ctx)).toContain("openai/gpt-4.1");
-    expect(modelsUsed(ctx)).toContain("openai/o4-mini");
+    expect(totalLLMCalls(ctx)).toBe(3); // 2 responses + 1 synthesis
+    expect(modelsUsed(ctx)).toHaveLength(3);
 
-    // Round 2: approve
+    // Act — round 2: approve
     ctx = addRound(
       ctx,
       makeRound(2, { synthesis: makeSynthesis("approve") }),
     );
+
+    // Assert — after round 2
     expect(isConsensusReached(ctx)).toBe(true);
     expect(latestRound(ctx)?.number).toBe(2);
-    expect(totalLLMCalls(ctx)).toBe(8);
+    expect(totalLLMCalls(ctx)).toBe(6); // 2*(2 responses + 1 synthesis)
     expect(latestSynthesis(ctx)?.decision).toBe("approve");
-  });
-
-  // -- NE: undefined reviewers --
-
-  it("should throw when team.reviewers is undefined", () => {
-    // Arrange / Act / Assert
-    expect(() =>
-      createSharedContext("task", makeTeam({ reviewers: undefined as any })),
-    ).toThrow("Team must have at least one reviewer");
-  });
-
-  // -- ED: production undefined in modelsUsed --
-
-  it("should not include undefined in modelsUsed when round has no production", () => {
-    // Arrange — round with production omitted
-    const team = makeTeam();
-    let ctx = createSharedContext("task", team);
-    const round: Round = {
-      number: 1,
-      reviews: [
-        makeReview("deepseek/deepseek-r1", "코드 품질"),
-        makeReview("meta/llama-4-scout", "보안"),
-      ],
-      synthesis: makeSynthesis("continue"),
-    };
-    ctx = addRound(ctx, round);
-
-    // Act
-    const models = modelsUsed(ctx);
-
-    // Assert — 3 models (2 reviewers + 1 synthesis), no undefined
-    expect(models).toHaveLength(3);
-    expect(models).toContain("deepseek/deepseek-r1");
-    expect(models).toContain("meta/llama-4-scout");
-    expect(models).toContain("openai/o4-mini");
-    expect(models).not.toContain(undefined as any);
   });
 });

@@ -1,10 +1,10 @@
 /**
- * Deliberation Store types — record persistence and query for stigmergic reports.
+ * Deliberation Store types — record persistence and query.
  *
  * @module Deliberation Store Types
  */
 
-import type { Round } from "./types";
+import type { Round, TokenUsage } from "./types";
 
 /**
  * A persisted record of a completed deliberation session.
@@ -13,18 +13,19 @@ export interface DeliberationRecord {
   readonly id: string;
   readonly task: string;
   readonly timestamp: number;
-  readonly perspectives: readonly string[];
   readonly consensusReached: boolean;
   readonly roundsExecuted: number;
   readonly result: string;
   readonly modelsUsed: readonly string[];
   readonly totalLLMCalls: number;
-  readonly finalApprovals?: number;
-  readonly producerInstructions?: string;
+  readonly totalTokens?: TokenUsage;
+  readonly workerInstructions?: string;
   readonly leaderInstructions?: string;
   readonly consensus?: string;
-  /** Full round-by-round conversation log (production → reviews → synthesis). */
+  /** Full round-by-round log (worker responses + synthesis). */
   readonly rounds?: readonly Round[];
+  /** Lightweight round summaries (number + synthesis text only). */
+  readonly roundsSummary?: readonly { number: number; synthesis?: string }[];
 }
 
 /**
@@ -32,7 +33,6 @@ export interface DeliberationRecord {
  */
 export interface DeliberationQuery {
   readonly task?: string;
-  readonly perspective?: string;
   readonly model?: string;
   readonly consensusReached?: boolean;
   readonly limit?: number;

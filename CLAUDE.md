@@ -76,7 +76,20 @@ Entry point creates LLMClient → ModelRegistry → FileReporter → FileDeliber
 
 ### Environment
 
-Requires `PYREEZ_GITHUB_PAT` (GitHub PAT with `models:read` scope). Optional `PYREEZ_MODEL` (default: `openai/gpt-4.1`). Config loaded in `src/config.ts` targeting `https://models.github.ai`.
+Provider API keys (set at least one):
+- `PYREEZ_ANTHROPIC_KEY` — Anthropic API key
+- `PYREEZ_GOOGLE_API_KEY` — Google AI API key
+- `PYREEZ_OPENAI_KEY` — OpenAI API key
+- `PYREEZ_DEEPSEEK_KEY` — DeepSeek API key
+- `PYREEZ_XAI_KEY` — xAI (Grok) API key
+- `PYREEZ_MISTRAL_KEY` — Mistral AI API key
+- `PYREEZ_QWEN_KEY` — Qwen/Alibaba Cloud API key
+- `PYREEZ_GROQ_KEY` — Groq API key
+- `PYREEZ_CLAUDE_CLI` — set to `"1"` to use `claude -p` for anthropic/* models (no API cost)
+- `PYREEZ_LOCAL_URL` — Local LLM base URL (Docker Model Runner, Ollama, LM Studio)
+- `PYREEZ_LOCAL_SOCKET` — Unix socket path for Docker Model Runner
+
+Optional: `PYREEZ_MODEL` (default: `anthropic/claude-sonnet-4.6`). Config loaded in `src/config.ts`.
 
 ## Testing Conventions
 

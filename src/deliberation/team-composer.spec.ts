@@ -1,14 +1,13 @@
 /**
- * Unit tests for team-composer.ts — Team Composer (Diversity Engine).
+ * Unit tests for team-composer.ts — Diverge-Synth Team Composer.
  *
- * 37 tests across 5 exported functions.
- * @module Diversity Engine
+ * SUT: extractProvider, scoreDimensions, selectTopModel, composeTeam
+ * @module Team Composer Tests
  */
 
 import { describe, it, expect } from "bun:test";
 import {
   extractProvider,
-  perspectiveToDimensions,
   scoreDimensions,
   selectTopModel,
   composeTeam,
@@ -24,7 +23,7 @@ const TEST_DEFAULT_RATING: DimensionRating = { mu: 500, sigma: 350, comparisons:
 
 /**
  * Create a ModelInfo with DimensionRating capabilities.
- * Number values in overrides are treated as old 0-10 scale (×100 → mu).
+ * Number values in overrides are treated as old 0-10 scale (x100 -> mu).
  */
 function makeModel(overrides: {
   id: string;
@@ -50,7 +49,29 @@ function makeModel(overrides: {
   };
 }
 
-/** 7 models from 4 providers for diversity testing. */
+/** Create a ModelInfo with explicit DimensionRating values (BT rating style). */
+function makeBTModel(overrides: {
+  id: string;
+  capabilities?: Partial<
+    Record<CapabilityDimension, { mu: number; sigma: number; comparisons: number }>
+  >;
+}): ModelInfo {
+  const caps: Record<string, { mu: number; sigma: number; comparisons: number }> = {};
+  for (const dim of ALL_DIMENSIONS) {
+    caps[dim] = overrides.capabilities?.[dim] ?? { mu: 500, sigma: 350, comparisons: 0 };
+  }
+  return {
+    id: overrides.id,
+    name: overrides.id.split("/")[1] ?? overrides.id,
+    provider: "anthropic",
+    contextWindow: 128_000,
+    capabilities: caps as any,
+    cost: { inputPer1M: 2, outputPer1M: 8 },
+    supportsToolCalling: true,
+  };
+}
+
+/** Multiple models from different providers. */
 function makeModels(): ModelInfo[] {
   return [
     makeModel({
@@ -104,23 +125,6 @@ function makeModels(): ModelInfo[] {
         CODE_UNDERSTANDING: 8,
       },
     }),
-    makeModel({
-      id: "cohere/command-a",
-      capabilities: {
-        ANALYSIS: 7,
-        JUDGMENT: 7,
-        HALLUCINATION_RESISTANCE: 8,
-        DEBUGGING: 8,
-      },
-    }),
-    makeModel({
-      id: "microsoft/phi-4",
-      capabilities: {
-        CODE_GENERATION: 6,
-        SPEED: 9,
-        COST_EFFICIENCY: 9,
-      },
-    }),
   ];
 }
 
@@ -151,49 +155,12 @@ describe("extractProvider", () => {
 });
 
 // ================================================================
-// perspectiveToDimensions
-// ================================================================
-
-describe("perspectiveToDimensions", () => {
-  it("should map security keywords to security dimensions", () => {
-    const dims = perspectiveToDimensions("보안 검토");
-    const dimNames = dims.map((d) => d.dimension);
-    expect(dimNames).toContain("HALLUCINATION_RESISTANCE");
-    expect(dimNames).toContain("DEBUGGING");
-  });
-
-  it("should map performance keywords to speed dimensions", () => {
-    const dims = perspectiveToDimensions("performance optimization");
-    const dimNames = dims.map((d) => d.dimension);
-    expect(dimNames).toContain("SPEED");
-    expect(dimNames).toContain("SYSTEM_THINKING");
-  });
-
-  it("should return default dimensions for unknown keywords", () => {
-    const dims = perspectiveToDimensions("something completely unrelated 12345");
-    const dimNames = dims.map((d) => d.dimension);
-    expect(dimNames).toContain("ANALYSIS");
-    expect(dimNames).toContain("JUDGMENT");
-  });
-
-  it("should handle multi-keyword perspective matching first pattern", () => {
-    // Contains both security and performance keywords
-    const dims = perspectiveToDimensions("보안 and performance");
-    // Should match at least one pattern
-    expect(dims.length).toBeGreaterThan(0);
-    const dimNames = dims.map((d) => d.dimension);
-    // First match wins - security keywords
-    expect(dimNames).toContain("HALLUCINATION_RESISTANCE");
-  });
-});
-
-// ================================================================
 // scoreDimensions
 // ================================================================
 
 describe("scoreDimensions", () => {
   it("should compute weighted sum for single dimension", () => {
-    // mu=900, sigma=SIGMA_BASE → penalty=0.5
+    // mu=900, sigma=SIGMA_BASE -> penalty=0.5
     const model = makeModel({
       id: "openai/gpt-4.1",
       capabilities: { CODE_GENERATION: 9 },
@@ -206,8 +173,6 @@ describe("scoreDimensions", () => {
   });
 
   it("should compute weighted sum for multiple dimensions", () => {
-    // CODE_GENERATION: mu=800, sigma=350 → penalty=0.5
-    // CREATIVITY: mu=600, sigma=350 → penalty=0.5
     const model = makeModel({
       id: "openai/gpt-4.1",
       capabilities: { CODE_GENERATION: 8, CREATIVITY: 6 },
@@ -223,6 +188,71 @@ describe("scoreDimensions", () => {
   it("should return 0 for empty dimensions array", () => {
     const model = makeModel({ id: "openai/gpt-4.1" });
     expect(scoreDimensions(model, [])).toBe(0);
+  });
+});
+
+describe("scoreDimensions (BT rating)", () => {
+  it("should compute weighted sum using mu and sigma", () => {
+    // Arrange -- mu=800, sigma=350 -> penalty = 1/(1+350/350) = 0.5
+    const model = makeBTModel({
+      id: "test/bt-model",
+      capabilities: {
+        CODE_GENERATION: { mu: 800, sigma: 350, comparisons: 10 },
+      },
+    });
+
+    // Act
+    const score = scoreDimensions(model, [
+      { dimension: "CODE_GENERATION", weight: 1.0 },
+    ]);
+
+    // Assert -- 800 * 0.5 * 1.0 = 400
+    expect(score).toBeCloseTo(400, 1);
+  });
+
+  it("should return 0 for empty dimensions", () => {
+    const model = makeBTModel({ id: "test/empty-dims" });
+    expect(scoreDimensions(model, [])).toBe(0);
+  });
+
+  it("should use penalty=1 when sigma=0", () => {
+    // sigma=0 -> penalty = 1/(1+0/350) = 1
+    const model = makeBTModel({
+      id: "test/full-confidence",
+      capabilities: {
+        REASONING: { mu: 900, sigma: 0, comparisons: 100 },
+      },
+    });
+
+    const score = scoreDimensions(model, [
+      { dimension: "REASONING", weight: 1.0 },
+    ]);
+
+    // 900 * 1.0 * 1.0 = 900
+    expect(score).toBeCloseTo(900, 1);
+  });
+
+  it("should produce same result regardless of dimension order", () => {
+    const model = makeBTModel({
+      id: "test/order",
+      capabilities: {
+        CODE_GENERATION: { mu: 800, sigma: 100, comparisons: 20 },
+        REASONING: { mu: 600, sigma: 200, comparisons: 15 },
+      },
+    });
+    const dimsAB = [
+      { dimension: "CODE_GENERATION" as CapabilityDimension, weight: 0.6 },
+      { dimension: "REASONING" as CapabilityDimension, weight: 0.4 },
+    ];
+    const dimsBA = [
+      { dimension: "REASONING" as CapabilityDimension, weight: 0.4 },
+      { dimension: "CODE_GENERATION" as CapabilityDimension, weight: 0.6 },
+    ];
+
+    const scoreAB = scoreDimensions(model, dimsAB);
+    const scoreBA = scoreDimensions(model, dimsBA);
+
+    expect(scoreAB).toBeCloseTo(scoreBA, 5);
   });
 });
 
@@ -265,100 +295,57 @@ describe("selectTopModel", () => {
 });
 
 // ================================================================
-// composeTeam — validation
+// composeTeam -- validation
 // ================================================================
 
 describe("composeTeam", () => {
   describe("validation", () => {
-    it("should throw when perspectives has fewer than 2 items", () => {
+    it("should throw when task is empty", () => {
       expect(() =>
         composeTeam(
-          { task: "Do something", perspectives: ["only one"] },
+          { task: "", modelIds: ["openai/gpt-4.1"] },
           makeDeps(),
         ),
-      ).toThrow(/at least 2 perspectives/i);
+      ).toThrow(/task/i);
     });
 
-    it("should throw when perspectives is empty", () => {
-      expect(() =>
-        composeTeam({ task: "Do something", perspectives: [] }, makeDeps()),
-      ).toThrow(/at least 2 perspectives/i);
-    });
-
-    it("should throw when override model ID not found in registry", () => {
+    it("should throw when task is whitespace", () => {
       expect(() =>
         composeTeam(
-          {
-            task: "Do something",
-            perspectives: ["a", "b"],
-            overrides: { producer: "nonexistent/model" },
-          },
+          { task: "   ", modelIds: ["openai/gpt-4.1"] },
+          makeDeps(),
+        ),
+      ).toThrow(/task/i);
+    });
+
+    it("should throw when modelIds is empty", () => {
+      expect(() =>
+        composeTeam(
+          { task: "Do something", modelIds: [] },
+          makeDeps(),
+        ),
+      ).toThrow(/at least one model/i);
+    });
+
+    it("should throw when a model ID is not found in registry", () => {
+      expect(() =>
+        composeTeam(
+          { task: "Do something", modelIds: ["nonexistent/model"] },
           makeDeps(),
         ),
       ).toThrow(/not found/i);
     });
-
-    it("should throw when no models available", () => {
-      expect(() =>
-        composeTeam(
-          { task: "Do something", perspectives: ["a", "b"] },
-          makeDeps([]),
-        ),
-      ).toThrow(/no models/i);
-    });
-
-    it("should throw when task is empty or whitespace", () => {
-      expect(() =>
-        composeTeam({ task: "", perspectives: ["a", "b"] }, makeDeps()),
-      ).toThrow(/task/i);
-
-      expect(() =>
-        composeTeam({ task: "   ", perspectives: ["a", "b"] }, makeDeps()),
-      ).toThrow(/task/i);
-    });
   });
 
   // ================================================================
-  // composeTeam — auto selection
+  // composeTeam -- auto selection (leader by JUDGMENT)
   // ================================================================
 
   describe("auto selection", () => {
-    it("should auto-select producer with CODE_GENERATION emphasis", () => {
-      const codeModel = makeModel({
-        id: "openai/code-king",
-        capabilities: { CODE_GENERATION: 10, CREATIVITY: 10 },
-      });
-      const otherModel = makeModel({
-        id: "meta/other",
-        capabilities: { CODE_GENERATION: 3, CREATIVITY: 3 },
-      });
-      const weakModel = makeModel({
-        id: "deepseek/weak",
-        capabilities: { CODE_GENERATION: 2, CREATIVITY: 2 },
-      });
-      const deps = makeDeps([codeModel, otherModel, weakModel]);
-
-      const team = composeTeam(
-        { task: "Write code", perspectives: ["보안", "성능"] },
-        deps,
-      );
-      expect(team.producer.model).toBe("openai/code-king");
-    });
-
-    it("should auto-select reviewers matching each perspective", () => {
-      const team = composeTeam(
-        { task: "Review code", perspectives: ["보안 검토", "성능 최적화"] },
-        makeDeps(),
-      );
-      expect(team.reviewers).toHaveLength(2);
-      expect(team.reviewers[0]!.perspective).toBe("보안 검토");
-      expect(team.reviewers[1]!.perspective).toBe("성능 최적화");
-    });
-
-    it("should auto-select leader with JUDGMENT emphasis", () => {
+    it("should auto-select leader with best JUDGMENT composite score", () => {
       const judgeModel = makeModel({
         id: "mistral/judge",
-        capabilities: { JUDGMENT: 10, ANALYSIS: 10, REASONING: 10 },
+        capabilities: { JUDGMENT: 10, ANALYSIS: 10, REASONING: 10, SELF_CONSISTENCY: 10 },
       });
       const otherModel = makeModel({
         id: "openai/other",
@@ -371,22 +358,34 @@ describe("composeTeam", () => {
       const deps = makeDeps([judgeModel, otherModel, thirdModel]);
 
       const team = composeTeam(
-        { task: "Evaluate", perspectives: ["a", "b"] },
+        { task: "Evaluate", modelIds: ["mistral/judge", "openai/other", "meta/third"] },
         deps,
       );
       expect(team.leader.model).toBe("mistral/judge");
+      expect(team.leader.role).toBe("leader");
     });
 
-    it("should create full team with no overrides", () => {
+    it("should assign remaining models as workers", () => {
+      const deps = makeDeps();
+      const modelIds = ["openai/gpt-4.1", "deepseek/deepseek-v3", "mistral/mistral-large"];
+
+      const team = composeTeam({ task: "Build feature", modelIds }, deps);
+
+      // Leader is one of the models, workers are the rest
+      expect(team.workers.length).toBe(2);
+      expect(team.workers.every((w) => w.role === "worker")).toBe(true);
+      // All models accounted for
+      const allModels = [...team.workers.map((w) => w.model), team.leader.model];
+      expect(allModels.sort()).toEqual([...modelIds].sort());
+    });
+
+    it("should create full team with workers and leader", () => {
+      const deps = makeDeps();
       const team = composeTeam(
-        { task: "Build feature", perspectives: ["코드 품질", "보안"] },
-        makeDeps(),
+        { task: "Build feature", modelIds: ["openai/gpt-4.1", "meta/llama-4-scout", "mistral/mistral-large"] },
+        deps,
       );
-      expect(team.producer).toBeDefined();
-      expect(team.producer.role).toBe("producer");
-      expect(team.producer.model).toMatch(/\w+\/\w+/);
-      expect(team.reviewers).toHaveLength(2);
-      expect(team.reviewers.every((r) => r.role === "reviewer")).toBe(true);
+      expect(team.workers.length).toBeGreaterThanOrEqual(1);
       expect(team.leader).toBeDefined();
       expect(team.leader.role).toBe("leader");
       expect(team.leader.model).toMatch(/\w+\/\w+/);
@@ -394,206 +393,11 @@ describe("composeTeam", () => {
   });
 
   // ================================================================
-  // composeTeam — overrides
+  // composeTeam -- single model
   // ================================================================
 
-  describe("overrides", () => {
-    it("should use override producer model directly", () => {
-      const team = composeTeam(
-        {
-          task: "Build feature",
-          perspectives: ["a", "b"],
-          overrides: { producer: "microsoft/phi-4" },
-        },
-        makeDeps(),
-      );
-      expect(team.producer.model).toBe("microsoft/phi-4");
-    });
-
-    it("should use override reviewer models directly", () => {
-      const team = composeTeam(
-        {
-          task: "Build feature",
-          perspectives: ["보안", "성능"],
-          overrides: { reviewers: ["cohere/command-a", "deepseek/deepseek-v3"] },
-        },
-        makeDeps(),
-      );
-      expect(team.reviewers[0]!.model).toBe("cohere/command-a");
-      expect(team.reviewers[1]!.model).toBe("deepseek/deepseek-v3");
-    });
-
-    it("should use override leader model directly", () => {
-      const team = composeTeam(
-        {
-          task: "Build feature",
-          perspectives: ["a", "b"],
-          overrides: { leader: "meta/llama-4-scout" },
-        },
-        makeDeps(),
-      );
-      expect(team.leader.model).toBe("meta/llama-4-scout");
-    });
-
-    it("should handle partial overrides mixing auto and manual", () => {
-      const team = composeTeam(
-        {
-          task: "Build feature",
-          perspectives: ["보안", "성능"],
-          overrides: { producer: "microsoft/phi-4" },
-        },
-        makeDeps(),
-      );
-      expect(team.producer.model).toBe("microsoft/phi-4");
-      // Reviewers and leader auto-selected
-      expect(team.reviewers).toHaveLength(2);
-      expect(team.leader).toBeDefined();
-      expect(team.leader.model).toMatch(/\w+\/\w+/);
-    });
-  });
-
-  // ================================================================
-  // composeTeam — diversity
-  // ================================================================
-
-  describe("diversity", () => {
-    it("should achieve ≥3 providers when models are diverse", () => {
-      const team = composeTeam(
-        { task: "Build", perspectives: ["보안", "성능"] },
-        makeDeps(),
-      );
-      const providers = new Set([
-        extractProvider(team.producer.model),
-        ...team.reviewers.map((r) => extractProvider(r.model)),
-        extractProvider(team.leader.model),
-      ]);
-      expect(providers.size).toBeGreaterThanOrEqual(3);
-    });
-
-    it("should swap reviewer to meet diversity threshold", () => {
-      // 3 models: 2 from openai, 1 from meta, 1 from deepseek
-      // Force producer+leader to openai, reviewer should get non-openai
-      const models = [
-        makeModel({
-          id: "openai/best-code",
-          capabilities: { CODE_GENERATION: 10, CREATIVITY: 10, JUDGMENT: 10, ANALYSIS: 10 },
-        }),
-        makeModel({
-          id: "openai/second",
-          capabilities: { CODE_GENERATION: 8, HALLUCINATION_RESISTANCE: 8, DEBUGGING: 8 },
-        }),
-        makeModel({
-          id: "meta/diverse",
-          capabilities: { CODE_GENERATION: 6, HALLUCINATION_RESISTANCE: 7, DEBUGGING: 7 },
-        }),
-        makeModel({
-          id: "deepseek/also-diverse",
-          capabilities: { SPEED: 8, SYSTEM_THINKING: 7 },
-        }),
-      ];
-      const deps = makeDeps(models);
-
-      const team = composeTeam(
-        { task: "Code", perspectives: ["보안", "성능"] },
-        deps,
-      );
-
-      const providers = new Set([
-        extractProvider(team.producer.model),
-        ...team.reviewers.map((r) => extractProvider(r.model)),
-        extractProvider(team.leader.model),
-      ]);
-      expect(providers.size).toBeGreaterThanOrEqual(3);
-    });
-
-    it("should handle all overrides from same provider as best effort", () => {
-      const team = composeTeam(
-        {
-          task: "Build",
-          perspectives: ["a", "b"],
-          overrides: {
-            producer: "openai/gpt-4.1",
-            reviewers: ["openai/gpt-4.1-mini", "openai/gpt-4.1"],
-            leader: "openai/gpt-4.1",
-          },
-        },
-        makeDeps(),
-      );
-      // All overrides accepted even though single provider
-      expect(team.producer.model).toBe("openai/gpt-4.1");
-      expect(team.leader.model).toBe("openai/gpt-4.1");
-    });
-
-    it("should handle registry with only 2 providers as best effort", () => {
-      const models = [
-        makeModel({
-          id: "openai/a",
-          capabilities: { CODE_GENERATION: 9, JUDGMENT: 8, ANALYSIS: 8 },
-        }),
-        makeModel({
-          id: "openai/b",
-          capabilities: { HALLUCINATION_RESISTANCE: 8, DEBUGGING: 8 },
-        }),
-        makeModel({
-          id: "meta/c",
-          capabilities: { SPEED: 8, SYSTEM_THINKING: 7 },
-        }),
-      ];
-      const deps = makeDeps(models);
-
-      // Should not throw — forms best available team
-      const team = composeTeam(
-        { task: "Build", perspectives: ["보안", "성능"] },
-        deps,
-      );
-      expect(team.producer).toBeDefined();
-      expect(team.producer.model).toMatch(/\w+\/\w+/);
-      expect(team.reviewers).toHaveLength(2);
-      expect(team.leader).toBeDefined();
-      expect(team.leader.model).toMatch(/\w+\/\w+/);
-    });
-
-    it("should not swap when diversity is already met", () => {
-      // 4 models from 4 providers — diversity natural
-      const models = [
-        makeModel({
-          id: "openai/a",
-          capabilities: { CODE_GENERATION: 9, CREATIVITY: 9 },
-        }),
-        makeModel({
-          id: "meta/b",
-          capabilities: { HALLUCINATION_RESISTANCE: 9, DEBUGGING: 9 },
-        }),
-        makeModel({
-          id: "deepseek/c",
-          capabilities: { SPEED: 9, SYSTEM_THINKING: 9 },
-        }),
-        makeModel({
-          id: "mistral/d",
-          capabilities: { JUDGMENT: 9, ANALYSIS: 9, REASONING: 9 },
-        }),
-      ];
-      const deps = makeDeps(models);
-
-      const team = composeTeam(
-        { task: "Build", perspectives: ["보안", "성능"] },
-        deps,
-      );
-      const providers = new Set([
-        extractProvider(team.producer.model),
-        ...team.reviewers.map((r) => extractProvider(r.model)),
-        extractProvider(team.leader.model),
-      ]);
-      expect(providers.size).toBeGreaterThanOrEqual(3);
-    });
-  });
-
-  // ================================================================
-  // composeTeam — corner cases
-  // ================================================================
-
-  describe("corner cases", () => {
-    it("should handle 1 model in registry for all roles", () => {
+  describe("single model", () => {
+    it("should use single model as both worker and leader", () => {
       const models = [
         makeModel({
           id: "openai/only",
@@ -603,210 +407,101 @@ describe("composeTeam", () => {
       const deps = makeDeps(models);
 
       const team = composeTeam(
-        { task: "Build", perspectives: ["a", "b"] },
+        { task: "Build", modelIds: ["openai/only"] },
         deps,
       );
-      // Single model used for all roles
-      expect(team.producer.model).toBe("openai/only");
-      expect(team.reviewers[0]!.model).toBe("openai/only");
-      expect(team.reviewers[1]!.model).toBe("openai/only");
+      // Single model is both leader and the sole worker
       expect(team.leader.model).toBe("openai/only");
+      expect(team.workers).toHaveLength(1);
+      expect(team.workers[0]!.model).toBe("openai/only");
+    });
+  });
+
+  // ================================================================
+  // composeTeam -- leader override
+  // ================================================================
+
+  describe("leader override", () => {
+    it("should use override leader model directly", () => {
+      const deps = makeDeps();
+
+      const team = composeTeam(
+        {
+          task: "Build feature",
+          modelIds: ["openai/gpt-4.1", "meta/llama-4-scout", "mistral/mistral-large"],
+          overrides: { leader: "openai/gpt-4.1" },
+        },
+        deps,
+      );
+      expect(team.leader.model).toBe("openai/gpt-4.1");
+      expect(team.leader.role).toBe("leader");
     });
 
-    it("should reject when task empty AND perspectives < 2", () => {
+    it("should place non-leader models as workers when leader is overridden", () => {
+      const deps = makeDeps();
+
+      const team = composeTeam(
+        {
+          task: "Build feature",
+          modelIds: ["openai/gpt-4.1", "meta/llama-4-scout", "mistral/mistral-large"],
+          overrides: { leader: "openai/gpt-4.1" },
+        },
+        deps,
+      );
+      const workerModels = team.workers.map((w) => w.model).sort();
+      expect(workerModels).toEqual(["meta/llama-4-scout", "mistral/mistral-large"]);
+    });
+
+    it("should throw when override leader is not found in registry", () => {
       expect(() =>
-        composeTeam({ task: "", perspectives: ["one"] }, makeDeps()),
-      ).toThrow();
+        composeTeam(
+          {
+            task: "Build",
+            modelIds: ["openai/gpt-4.1"],
+            overrides: { leader: "nonexistent/model" },
+          },
+          makeDeps(),
+        ),
+      ).toThrow(/not found/i);
     });
+  });
 
+  // ================================================================
+  // composeTeam -- deterministic results
+  // ================================================================
+
+  describe("deterministic results", () => {
     it("should return identical team for identical inputs", () => {
       const deps = makeDeps();
       const opts = {
         task: "Build feature",
-        perspectives: ["보안", "성능"] as readonly string[],
+        modelIds: ["openai/gpt-4.1", "meta/llama-4-scout", "mistral/mistral-large"] as readonly string[],
       };
 
       const team1 = composeTeam(opts, deps);
       const team2 = composeTeam(opts, deps);
 
-      expect(team1.producer.model).toBe(team2.producer.model);
-      expect(team1.reviewers.map((r) => r.model)).toEqual(
-        team2.reviewers.map((r) => r.model),
-      );
       expect(team1.leader.model).toBe(team2.leader.model);
+      expect(team1.workers.map((w) => w.model)).toEqual(
+        team2.workers.map((w) => w.model),
+      );
     });
-  });
 
-  // ================================================================
-  // composeTeam — ordering
-  // ================================================================
-
-  describe("ordering", () => {
-    it("should select same team regardless of model array order", () => {
+    it("should select same team regardless of model array order in registry", () => {
       const models = makeModels();
       const reversed = [...models].reverse();
+      const modelIds = ["openai/gpt-4.1", "deepseek/deepseek-v3", "mistral/mistral-large"];
 
       const team1 = composeTeam(
-        { task: "Build", perspectives: ["보안", "성능"] },
+        { task: "Build", modelIds },
         makeDeps(models),
       );
       const team2 = composeTeam(
-        { task: "Build", perspectives: ["보안", "성능"] },
+        { task: "Build", modelIds },
         makeDeps(reversed),
       );
 
-      expect(team1.producer.model).toBe(team2.producer.model);
       expect(team1.leader.model).toBe(team2.leader.model);
     });
-
-    it("should map perspectives to reviewers preserving perspective order", () => {
-      const team = composeTeam(
-        { task: "Build", perspectives: ["보안 검토", "성능 최적화", "코드 품질"] },
-        makeDeps(),
-      );
-      expect(team.reviewers[0]!.perspective).toBe("보안 검토");
-      expect(team.reviewers[1]!.perspective).toBe("성능 최적화");
-      expect(team.reviewers[2]!.perspective).toBe("코드 품질");
-    });
-  });
-});
-
-// ================================================================
-// scoreDimensions — BT Dimensional Rating
-// ================================================================
-
-/**
- * BT Rating tests for scoreDimensions.
- * Uses DimensionRating { mu, sigma, comparisons }.
- * Expected formula: mu * (1 / (1 + sigma / SIGMA_BASE)) * weight
- * SIGMA_BASE = 350.
- */
-
-const SIGMA_BASE_LOCAL = 350;
-
-/** Create a ModelInfo with DimensionRating-style capabilities for BT rating. */
-function makeBTModel(overrides: {
-  id: string;
-  capabilities?: Partial<
-    Record<CapabilityDimension, { mu: number; sigma: number; comparisons: number }>
-  >;
-}): ModelInfo {
-  const caps: Record<string, { mu: number; sigma: number; comparisons: number }> = {};
-  for (const dim of ALL_DIMENSIONS) {
-    caps[dim] = overrides.capabilities?.[dim] ?? { mu: 500, sigma: 350, comparisons: 0 };
-  }
-  // Cast to ModelInfo — capabilities shape is intentionally DimensionRating.
-  // This will cause runtime failures until SUT is updated (RED).
-  return {
-    id: overrides.id,
-    name: overrides.id.split("/")[1] ?? overrides.id,
-    provider: "anthropic",
-    contextWindow: 128_000,
-    capabilities: caps as any,
-
-    cost: { inputPer1M: 2, outputPer1M: 8 },
-    supportsToolCalling: true,
-  };
-}
-
-describe("scoreDimensions (BT rating)", () => {
-  it("should compute weighted sum using mu and sigma", () => {
-    // Arrange — mu=800, sigma=350 → penalty = 1/(1+350/350) = 0.5
-    const model = makeBTModel({
-      id: "test/bt-model",
-      capabilities: {
-        CODE_GENERATION: { mu: 800, sigma: 350, comparisons: 10 },
-      },
-    });
-
-    // Act
-    const score = scoreDimensions(model, [
-      { dimension: "CODE_GENERATION", weight: 1.0 },
-    ]);
-
-    // Assert — 800 * 0.5 * 1.0 = 400
-    expect(score).toBeCloseTo(400, 1);
-  });
-
-  it("should return 0 for empty dimensions", () => {
-    // Arrange
-    const model = makeBTModel({ id: "test/empty-dims" });
-
-    // Act
-    const score = scoreDimensions(model, []);
-
-    // Assert
-    expect(score).toBe(0);
-  });
-
-  it("should use penalty=1 when sigma=0", () => {
-    // Arrange — sigma=0 → penalty = 1/(1+0/350) = 1
-    const model = makeBTModel({
-      id: "test/full-confidence",
-      capabilities: {
-        REASONING: { mu: 900, sigma: 0, comparisons: 100 },
-      },
-    });
-
-    // Act
-    const score = scoreDimensions(model, [
-      { dimension: "REASONING", weight: 1.0 },
-    ]);
-
-    // Assert — 900 * 1.0 * 1.0 = 900
-    expect(score).toBeCloseTo(900, 1);
-  });
-
-  it("should produce same result regardless of dimension order", () => {
-    // Arrange
-    const model = makeBTModel({
-      id: "test/order",
-      capabilities: {
-        CODE_GENERATION: { mu: 800, sigma: 100, comparisons: 20 },
-        REASONING: { mu: 600, sigma: 200, comparisons: 15 },
-      },
-    });
-    const dimsAB = [
-      { dimension: "CODE_GENERATION" as CapabilityDimension, weight: 0.6 },
-      { dimension: "REASONING" as CapabilityDimension, weight: 0.4 },
-    ];
-    const dimsBA = [
-      { dimension: "REASONING" as CapabilityDimension, weight: 0.4 },
-      { dimension: "CODE_GENERATION" as CapabilityDimension, weight: 0.6 },
-    ];
-
-    // Act
-    const scoreAB = scoreDimensions(model, dimsAB);
-    const scoreBA = scoreDimensions(model, dimsBA);
-
-    // Assert
-    expect(scoreAB).toBeCloseTo(scoreBA, 5);
-  });
-
-  // -- leader auto-select edge --
-
-  it("should throw when auto-selecting leader with empty models and producer override", () => {
-    // Arrange — producer is overridden, but models is empty, leader needs auto-select
-    const deps: ComposeTeamDeps = {
-      getModels: () => [],
-      getById: (id: string) => {
-        if (id === "openai/gpt-4.1") {
-          return makeModel({ id: "openai/gpt-4.1" });
-        }
-        return undefined;
-      },
-    };
-
-    // Act & Assert — producer override succeeds, but leader auto-select fails
-    expect(() =>
-      composeTeam(
-        {
-          task: "Test task",
-          perspectives: ["security", "performance"],
-          overrides: { producer: "openai/gpt-4.1" },
-        },
-        deps,
-      ),
-    ).toThrow("No models available to auto-select leader");
   });
 });

@@ -3,7 +3,7 @@
  *
  * Exported:
  *   stripThinkTags — strip DeepSeek `<think>` blocks from LLM responses
- *   createChatAdapter — wraps a chat function into EngineDeps.chat signature (with retry)
+ *   createChatAdapter — wraps a chat function into EngineDeps.chat signature (with retry + token tracking)
  *   createDeliberateFn — factory returning (DeliberateInput) => Promise<DeliberateOutput>
  *   WireDeps — dependency interface for the factory
  *
@@ -14,15 +14,13 @@ import type { ChatMessage, ChatCompletionResponse } from "../llm/types";
 import { LLMClientError } from "../llm/errors";
 import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput } from "./types";
-import type { EngineDeps, EngineConfig, RetryDeps } from "./engine";
+import type { ChatResult, EngineDeps, EngineConfig, RetryDeps } from "./engine";
 import type { DeliberationStore } from "./store-types";
 import { composeTeam } from "./team-composer";
-import type { ComposeTeamOptions } from "./team-composer";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
 import {
-  buildProducerMessages,
-  buildReviewerMessages,
+  buildWorkerMessages,
   buildLeaderMessages,
 } from "./prompts";
 
@@ -37,7 +35,7 @@ export interface WireDeps {
     getAvailable(): ModelInfo[];
     getById(id: string): ModelInfo | undefined;
   };
-  readonly chat: (model: string, messages: ChatMessage[]) => Promise<string>;
+  readonly chat: (model: string, messages: ChatMessage[]) => Promise<ChatResult>;
   readonly store?: DeliberationStore;
 }
 
@@ -49,12 +47,20 @@ export interface WireDeps {
  * Uses non-greedy match to handle multiple blocks correctly.
  */
 export function stripThinkTags(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  // Strip complete <think>...</think> blocks
+  let result = text.replace(/<think>[\s\S]*?<\/think>/g, "");
+  // Strip unclosed <think> only if no matching </think> follows
+  // (prevents stripping literal "<think>" in normal prose)
+  const openIdx = result.lastIndexOf("<think>");
+  if (openIdx !== -1 && result.indexOf("</think>", openIdx) === -1) {
+    result = result.slice(0, openIdx);
+  }
+  return result.trim();
 }
 
 // -- Chat Adapter --
 
-type ChatFn = (
+type RawChatFn = (
   request: { model: string; messages: ChatMessage[] },
 ) => Promise<ChatCompletionResponse>;
 
@@ -105,17 +111,18 @@ const DEFAULT_ADAPTER_OPTIONS = {
 
 /**
  * Wrap a raw LLMClient-style chat function into the
- * `(model, messages) => Promise<string>` signature required by EngineDeps.
+ * `(model, messages) => Promise<ChatResult>` signature required by EngineDeps.
  *
  * Features:
  *   - Strips `<think>` tags from responses (DeepSeek-R1 support)
+ *   - Tracks token usage from response.usage
  *   - Retries on retryable HTTP statuses with exponential backoff + jitter
  *   - Emits RetryEvent via onRetry callback for telemetry
  */
 export function createChatAdapter(
-  chatFn: ChatFn,
+  chatFn: RawChatFn,
   options?: ChatAdapterOptions,
-): (model: string, messages: ChatMessage[]) => Promise<string> {
+): (model: string, messages: ChatMessage[]) => Promise<ChatResult> {
   const opts = { ...DEFAULT_ADAPTER_OPTIONS, ...options };
 
   return async (model, messages) => {
@@ -126,7 +133,11 @@ export function createChatAdapter(
         const response = await chatFn({ model, messages });
         const choice = response.choices[0];
         const raw = choice?.message?.content ?? "";
-        return stripThinkTags(raw);
+        return {
+          content: stripThinkTags(raw),
+          inputTokens: response.usage?.prompt_tokens ?? 0,
+          outputTokens: response.usage?.completion_tokens ?? 0,
+        };
       } catch (error) {
         lastError = error;
 
@@ -181,41 +192,32 @@ export function createDeliberateFn(
   deps: WireDeps,
 ): (input: DeliberateInput) => Promise<DeliberateOutput> {
   return async (input) => {
-    // 1. Map input → ComposeTeamOptions
-    const teamOptions: ComposeTeamOptions = {
-      task: input.task,
-      perspectives: [...input.perspectives],
-      overrides: input.team
-        ? {
-            producer: input.team.producer,
-            reviewers: input.team.reviewers
-              ? [...input.team.reviewers]
-              : undefined,
-            leader: input.team.leader,
-          }
-        : undefined,
-    };
+    // 1. Determine model IDs from available models
+    const available = deps.registry.getAvailable();
+    const modelIds = available.map((m) => m.id);
 
-    // 2. Compose team via registry (available models only)
-    const team = composeTeam(teamOptions, {
-      getModels: () => deps.registry.getAvailable(),
-      getById: (id) => deps.registry.getById(id),
-    });
+    // 2. Compose team
+    const team = composeTeam(
+      { task: input.task, modelIds },
+      {
+        getModels: () => available,
+        getById: (id) => deps.registry.getById(id),
+      },
+    );
 
-    // 3. Assemble engine deps
+    // 3. Assemble engine deps — deps.chat already returns ChatResult
     const engineDeps: EngineDeps = {
       chat: deps.chat,
-      buildProducerMessages,
-      buildReviewerMessages,
+      buildWorkerMessages,
       buildLeaderMessages,
     };
 
-    // 4. Build engine config (only when overrides provided)
+    // 4. Build engine config
     const config: EngineConfig | undefined =
       input.maxRounds != null || input.consensus != null
         ? {
-            maxRounds: input.maxRounds ?? 3,
-            consensus: input.consensus ?? "leader_decides",
+            maxRounds: input.maxRounds ?? 1,
+            consensus: input.consensus,
           }
         : undefined;
 
@@ -228,23 +230,23 @@ export function createDeliberateFn(
     // 6. Run deliberation
     const result = await deliberate(team, input, engineDeps, config, retryDeps);
 
-    // 6. Auto-save to store (best-effort, errors are swallowed)
+    // 7. Auto-save to store (best-effort, errors are swallowed)
     if (deps.store) {
       try {
         await deps.store.save({
           id: crypto.randomUUID(),
           task: input.task,
           timestamp: Date.now(),
-          perspectives: [...input.perspectives],
           consensusReached: result.consensusReached,
           roundsExecuted: result.roundsExecuted,
           result: result.result,
           modelsUsed: [...result.modelsUsed],
           totalLLMCalls: result.totalLLMCalls,
-          producerInstructions: input.producerInstructions,
+          totalTokens: result.totalTokens,
+          workerInstructions: input.workerInstructions,
           leaderInstructions: input.leaderInstructions,
           consensus: input.consensus,
-          rounds: [...result.deliberationLog.rounds],
+          ...(result.rounds ? { roundsSummary: result.rounds } : {}),
         });
       } catch {
         // best-effort save — do not fail the deliberation

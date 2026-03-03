@@ -29,6 +29,11 @@ export const PROVIDER_CACHING: Record<ProviderName, ProviderCachingInfo> = {
   anthropic: { supported: true,  readDiscount: 0.9,  writePremium: 0.25, automatic: false },
   google:    { supported: true,  readDiscount: 0.75, writePremium: 0,    automatic: true  },
   openai:    { supported: true,  readDiscount: 0.5,  writePremium: 0,    automatic: true  },
+  deepseek:  { supported: true,  readDiscount: 0.9,  writePremium: 0,    automatic: true  },
+  xai:       { supported: false, readDiscount: 0,    writePremium: 0,    automatic: false },
+  mistral:   { supported: false, readDiscount: 0,    writePremium: 0,    automatic: false },
+  qwen:      { supported: false, readDiscount: 0,    writePremium: 0,    automatic: false },
+  groq:      { supported: false, readDiscount: 0,    writePremium: 0,    automatic: false },
   local:     { supported: false, readDiscount: 0,    writePremium: 0,    automatic: false },
 };
 

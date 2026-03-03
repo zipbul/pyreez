@@ -18,7 +18,7 @@ describe("ModelRegistry", () => {
       const models = registry.getAll();
 
       // Assert
-      expect(models).toBeArrayOfSize(26);
+      expect(models).toBeArrayOfSize(43);
     });
 
     it("should return equal results on repeated calls", () => {
@@ -50,7 +50,7 @@ describe("ModelRegistry", () => {
       expect(model).toBeDefined();
       expect(model!.capabilities.REASONING.mu).toBe(900);
       expect(model!.capabilities.CODE_GENERATION.mu).toBe(900);
-      expect(model!.contextWindow).toBe(200_000);
+      expect(model!.contextWindow).toBe(1_000_000);
     });
 
     it("should return model with REASONING mu=1000 for Claude Opus 4.6", () => {
@@ -191,6 +191,23 @@ describe("ModelRegistry", () => {
       }
       expect(models.length).toBeGreaterThan(0);
     });
+
+    it("should only return available models from filterByToolCalling", () => {
+      const filtered = registry.filterByToolCalling();
+      for (const m of filtered) {
+        expect(m.available).not.toBe(false);
+      }
+    });
+  });
+
+  describe("filterByContext (availability)", () => {
+    it("should only return available models from filterByContext", () => {
+      // Models with available=false should be excluded
+      const filtered = registry.filterByContext(0);
+      for (const m of filtered) {
+        expect(m.available).not.toBe(false);
+      }
+    });
   });
 
   describe("filterByMultilingual", () => {
@@ -237,12 +254,12 @@ describe("ModelRegistry (BT rating)", () => {
       expect(typeof reasoning.mu).toBe("number");
     });
 
-    it("should parse all 26 models with 21 dimensions each", () => {
+    it("should parse all 43 models with 21 dimensions each", () => {
       // Arrange & Act
       const models = registry.getAll();
 
       // Assert
-      expect(models).toBeArrayOfSize(26);
+      expect(models).toBeArrayOfSize(43);
       for (const model of models) {
         for (const dim of ALL_DIMENSIONS) {
           const rating = model.capabilities[dim] as any;
@@ -373,13 +390,13 @@ describe("ModelRegistry (BT rating)", () => {
       expect(models.length).toBeGreaterThan(0);
     });
 
-    it("should pass all models when minScore=0", () => {
+    it("should pass all available models when minScore=0", () => {
       // Act
-      const allModels = registry.getAll();
+      const availableModels = registry.getAvailable();
       const filtered = registry.filterByMultilingual(0);
 
       // Assert
-      expect(filtered.length).toBe(allModels.length);
+      expect(filtered.length).toBe(availableModels.length);
     });
   });
 
@@ -433,9 +450,9 @@ describe("ModelRegistry (BT rating)", () => {
       expect(reasoning.mu).toBe(80); // 0.8 * 100
       expect(reasoning.sigma).toBe(SIGMA_BASE);
       expect(reasoning.comparisons).toBe(5);
-      // Non-specified dimensions should get default rating
+      // Non-specified dimensions should get default rating (mu=500)
       const codegen = model.capabilities.CODE_GENERATION;
-      expect(codegen.mu).toBe(0);
+      expect(codegen.mu).toBe(500);
       expect(codegen.sigma).toBe(SIGMA_BASE);
       expect(codegen.comparisons).toBe(0);
     });

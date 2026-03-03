@@ -69,9 +69,9 @@ export class PyreezEngine {
 
     // Single-model shortcut: skip deliberation
     if (plan.models.length === 1) {
-      const response = await this.chat(plan.models[0]!.modelId, prompt);
+      const chatResult = await this.chat(plan.models[0]!.modelId, prompt);
       result = {
-        result: response,
+        result: chatResult.content,
         roundsExecuted: 0,
         consensusReached: true,
         totalLLMCalls: 1,

@@ -1,32 +1,36 @@
 /**
- * RoleBasedProtocol — Phase 4: real deliberation engine wiring tests.
+ * DivergeSynthProtocol — Diverge-Synth deliberation wiring tests.
  *
- * SUT: RoleBasedProtocol.deliberate()
+ * SUT: DivergeSynthProtocol.deliberate()
  * Deps: deliberateFn injected via DI to avoid mock.module pollution.
  */
 import { describe, it, expect, mock, beforeEach } from "bun:test";
-import { RoleBasedProtocol } from "./wrappers";
-import type { EnsemblePlan, ModelScore, DeliberationResult, ChatFn } from "./types";
+import { DivergeSynthProtocol } from "./wrappers";
+import type { EnsemblePlan, ModelScore, ChatFn, ChatResult } from "./types";
 import type { ChatMessage } from "../llm/types";
-import type { TeamComposition, DeliberateInput, SharedContext } from "../deliberation/types";
+import type {
+  TeamComposition,
+  DeliberateInput,
+  SharedContext,
+  DeliberateOutput,
+  TokenUsage,
+} from "../deliberation/types";
 import type { EngineDeps, EngineConfig } from "../deliberation/engine";
 
 // -- Fake deliberate function (injected via DI) --
 
-type DeliberateOutput = {
+type FakeDeliberateOutput = {
   result: string;
   roundsExecuted: number;
   consensusReached: boolean;
-  finalApprovals: { model: string; approved: boolean; remainingIssues: string[] }[];
-  deliberationLog: SharedContext;
-  totalTokens: number;
+  totalTokens: { input: number; output: number };
   totalLLMCalls: number;
   modelsUsed: string[];
 };
 
 /**
  * Create a fake deliberateFn that records calls and exercises the chat deps.
- * Each invocation calls chat through deps.buildProducerMessages / buildReviewerMessages / buildLeaderMessages
+ * Each invocation calls chat through deps.buildWorkerMessages / buildLeaderMessages
  * to verify the full wiring chain, then returns a configurable DeliberateOutput.
  */
 function makeFakeDeliberate(opts?: {
@@ -36,15 +40,15 @@ function makeFakeDeliberate(opts?: {
   const calls: Array<{
     team: TeamComposition;
     input: DeliberateInput;
-    config: EngineConfig;
+    config?: EngineConfig;
   }> = [];
 
   const fn = async (
     team: TeamComposition,
     input: DeliberateInput,
     deps: EngineDeps,
-    config: EngineConfig,
-  ): Promise<DeliberateOutput> => {
+    config?: EngineConfig,
+  ): Promise<FakeDeliberateOutput> => {
     calls.push({ team, input, config });
 
     if (opts?.throwError) {
@@ -55,20 +59,16 @@ function makeFakeDeliberate(opts?: {
     const ctx: SharedContext = { task: input.task, team, rounds: [] };
 
     // Exercise the chat path through prompt builders → deps.chat to verify wiring
-    const producerMsgs = deps.buildProducerMessages(ctx);
-    await deps.chat(team.producer.model, producerMsgs);
-
-    for (const r of team.reviewers) {
-      const reviewerMsgs = deps.buildReviewerMessages(ctx, r.perspective ?? "general");
-      await deps.chat(r.model, reviewerMsgs);
+    for (const w of team.workers) {
+      const workerMsgs = deps.buildWorkerMessages(ctx);
+      await deps.chat(w.model, workerMsgs);
     }
 
     const leaderMsgs = deps.buildLeaderMessages(ctx);
     await deps.chat(team.leader.model, leaderMsgs);
 
     const allModels = new Set([
-      team.producer.model,
-      ...team.reviewers.map((r) => r.model),
+      ...team.workers.map((w) => w.model),
       team.leader.model,
     ]);
 
@@ -76,19 +76,9 @@ function makeFakeDeliberate(opts?: {
 
     return {
       result: "deliberation result",
-      roundsExecuted: consensusReached ? 1 : (config.maxRounds ?? 3),
+      roundsExecuted: consensusReached ? 1 : (config?.maxRounds ?? 3),
       consensusReached,
-      finalApprovals: team.reviewers.map((r) => ({
-        model: r.model,
-        approved: consensusReached,
-        remainingIssues: [],
-      })),
-      deliberationLog: {
-        task: input.task,
-        team,
-        rounds: [],
-      },
-      totalTokens: allModels.size * 100,
+      totalTokens: { input: allModels.size * 50, output: allModels.size * 50 },
       totalLLMCalls: allModels.size,
       modelsUsed: [...allModels],
     };
@@ -99,7 +89,9 @@ function makeFakeDeliberate(opts?: {
 
 // -- Fixtures --
 
-function makeScores(...entries: Array<{ id: string; judgment: number; codeGen: number }>): ModelScore[] {
+function makeScores(
+  ...entries: Array<{ id: string; judgment: number; codeGen: number }>
+): ModelScore[] {
   return entries.map((e) => ({
     modelId: e.id,
     dimensions: {
@@ -114,7 +106,9 @@ function makeScores(...entries: Array<{ id: string; judgment: number; codeGen: n
   }));
 }
 
-function makePlan(models: Array<{ modelId: string; role?: string }>): EnsemblePlan {
+function makePlan(
+  models: Array<{ modelId: string; role?: string }>,
+): EnsemblePlan {
   return {
     models,
     strategy: "leader_decides",
@@ -123,31 +117,33 @@ function makePlan(models: Array<{ modelId: string; role?: string }>): EnsemblePl
   };
 }
 
-// A ChatFn that records calls and returns appropriate JSON for producer/reviewer/leader
-function makeChatFn(): ChatFn & { calls: Array<{ modelId: string; input: string | ChatMessage[] }> } {
+/** A ChatFn that records calls and returns ChatResult. */
+function makeChatFn(): ChatFn & {
+  calls: Array<{ modelId: string; input: string | ChatMessage[] }>;
+} {
   const calls: Array<{ modelId: string; input: string | ChatMessage[] }> = [];
   const fn = mock(async (modelId: string, input: string | ChatMessage[]) => {
     calls.push({ modelId, input });
-    return JSON.stringify({ content: "response" });
+    return { content: "response", inputTokens: 10, outputTokens: 20 };
   }) as any;
   fn.calls = calls;
   return fn;
 }
 
-describe("RoleBasedProtocol", () => {
-  let protocol: RoleBasedProtocol;
+describe("DivergeSynthProtocol", () => {
+  let protocol: DivergeSynthProtocol;
   let fakeDelib: ReturnType<typeof makeFakeDeliberate>;
 
   beforeEach(() => {
     fakeDelib = makeFakeDeliberate();
-    protocol = new RoleBasedProtocol("leader_decides", 3, fakeDelib.fn);
+    protocol = new DivergeSynthProtocol("leader_decides", 3, fakeDelib.fn);
   });
 
-  // 1. [HP] 3모델 auto-assign → leader=JUDGMENT최고, producer=CODE_GEN최고
+  // 1. Auto-assign roles from scores (leader=JUDGMENT highest, rest=workers)
   it("should auto-assign roles from scores when plan.models lack role field", async () => {
     const scores = makeScores(
-      { id: "model-a", judgment: 500, codeGen: 800 }, // best CODE_GEN → producer
-      { id: "model-b", judgment: 600, codeGen: 600 }, // reviewer
+      { id: "model-a", judgment: 500, codeGen: 800 },
+      { id: "model-b", judgment: 600, codeGen: 600 },
       { id: "model-c", judgment: 900, codeGen: 500 }, // best JUDGMENT → leader
     );
     const plan = makePlan([
@@ -156,6 +152,7 @@ describe("RoleBasedProtocol", () => {
       { modelId: "model-c" },
     ]);
     const chat = makeChatFn();
+
     const result = await protocol.deliberate("Write a function", plan, scores, chat);
 
     expect(result.modelsUsed).toContain("model-a");
@@ -163,7 +160,7 @@ describe("RoleBasedProtocol", () => {
     expect(result.roundsExecuted).toBeGreaterThan(0);
   });
 
-  // 2. [HP] explicit roles in plan.models → team composition 직접 사용
+  // 2. Explicit roles from plan.models (worker/leader)
   it("should use explicit roles from plan.models when role field is present", async () => {
     const scores = makeScores(
       { id: "model-x", judgment: 500, codeGen: 500 },
@@ -171,65 +168,80 @@ describe("RoleBasedProtocol", () => {
       { id: "model-z", judgment: 500, codeGen: 500 },
     );
     const plan = makePlan([
-      { modelId: "model-x", role: "producer" },
-      { modelId: "model-y", role: "reviewer" },
+      { modelId: "model-x", role: "worker" },
+      { modelId: "model-y", role: "worker" },
       { modelId: "model-z", role: "leader" },
     ]);
     const chat = makeChatFn();
+
     const result = await protocol.deliberate("Review this code", plan, scores, chat);
 
     expect(result.modelsUsed).toContain("model-x");
     expect(result.modelsUsed).toContain("model-z");
-    expect(result.protocol).toBe("role-based");
+    expect(result.protocol).toBe("diverge-synth");
   });
 
-  // 3. [HP] consensus 달성 → consensusReached=true, roundsExecuted>0
+  // 3. Consensus reached
   it("should return consensusReached=true when deliberation reaches consensus", async () => {
     const scores = makeScores(
       { id: "m1", judgment: 700, codeGen: 800 },
       { id: "m2", judgment: 600, codeGen: 600 },
       { id: "m3", judgment: 900, codeGen: 500 },
     );
-    const plan = makePlan([{ modelId: "m1" }, { modelId: "m2" }, { modelId: "m3" }]);
+    const plan = makePlan([
+      { modelId: "m1" },
+      { modelId: "m2" },
+      { modelId: "m3" },
+    ]);
     const chat = makeChatFn();
+
     const result = await protocol.deliberate("Implement feature X", plan, scores, chat);
 
     expect(result.consensusReached).toBe(true);
     expect(result.roundsExecuted).toBeGreaterThan(0);
   });
 
-  // 4. [HP] consensus 미달성 → consensusReached=false
+  // 4. Consensus not reached (maxRounds exhausted)
   it("should return consensusReached=false when maxRounds exhausted", async () => {
     const scores = makeScores(
       { id: "m1", judgment: 700, codeGen: 800 },
       { id: "m2", judgment: 600, codeGen: 600 },
       { id: "m3", judgment: 900, codeGen: 500 },
     );
-    const plan = makePlan([{ modelId: "m1" }, { modelId: "m2" }, { modelId: "m3" }]);
+    const plan = makePlan([
+      { modelId: "m1" },
+      { modelId: "m2" },
+      { modelId: "m3" },
+    ]);
     const chat = makeChatFn();
-    // deliberateFn that never reaches consensus
     const noConsensus = makeFakeDeliberate({ consensusReached: false });
-    const proto = new RoleBasedProtocol("leader_decides", 1, noConsensus.fn);
+    const proto = new DivergeSynthProtocol("leader_decides", 1, noConsensus.fn);
+
     const result = await proto.deliberate("Hard task", plan, scores, chat);
 
     expect(result.consensusReached).toBe(false);
   });
 
-  // 5. [HP] protocol="role-based" 반환
-  it("should always return protocol=role-based", async () => {
+  // 5. protocol="diverge-synth"
+  it("should always return protocol=diverge-synth", async () => {
     const scores = makeScores(
       { id: "m1", judgment: 700, codeGen: 700 },
       { id: "m2", judgment: 600, codeGen: 600 },
       { id: "m3", judgment: 800, codeGen: 500 },
     );
-    const plan = makePlan([{ modelId: "m1" }, { modelId: "m2" }, { modelId: "m3" }]);
+    const plan = makePlan([
+      { modelId: "m1" },
+      { modelId: "m2" },
+      { modelId: "m3" },
+    ]);
     const chat = makeChatFn();
+
     const result = await protocol.deliberate("Task", plan, scores, chat);
 
-    expect(result.protocol).toBe("role-based");
+    expect(result.protocol).toBe("diverge-synth");
   });
 
-  // 6. [HP] result.modelsUsed에 전체 팀 모델 포함
+  // 6. modelsUsed includes all team models
   it("should include all team models in modelsUsed", async () => {
     const scores = makeScores(
       { id: "alpha", judgment: 700, codeGen: 700 },
@@ -242,24 +254,34 @@ describe("RoleBasedProtocol", () => {
       { modelId: "gamma" },
     ]);
     const chat = makeChatFn();
+
     const result = await protocol.deliberate("Task", plan, scores, chat);
 
-    expect(result.modelsUsed.length).toBeGreaterThanOrEqual(2);
+    expect(result.modelsUsed).toContain("alpha");
+    expect(result.modelsUsed).toContain("beta");
+    expect(result.modelsUsed).toContain("gamma");
+    expect(result.modelsUsed.length).toBe(3);
   });
 
-  // 7. [HP] ChatMessage[] chat → engine에 올바르게 전달
+  // 7. ChatMessage[] passed to engine
   it("should pass ChatMessage[] to deliberation engine when chat supports it", async () => {
     const scores = makeScores(
       { id: "m1", judgment: 700, codeGen: 800 },
       { id: "m2", judgment: 600, codeGen: 600 },
       { id: "m3", judgment: 900, codeGen: 500 },
     );
-    const plan = makePlan([{ modelId: "m1" }, { modelId: "m2" }, { modelId: "m3" }]);
+    const plan = makePlan([
+      { modelId: "m1" },
+      { modelId: "m2" },
+      { modelId: "m3" },
+    ]);
     const chatCalls: Array<{ modelId: string; input: string | ChatMessage[] }> = [];
-    const chat: ChatFn = mock(async (modelId: string, input: string | ChatMessage[]) => {
-      chatCalls.push({ modelId, input });
-      return JSON.stringify({ content: "response" });
-    });
+    const chat: ChatFn = mock(
+      async (modelId: string, input: string | ChatMessage[]) => {
+        chatCalls.push({ modelId, input });
+        return { content: "response", inputTokens: 10, outputTokens: 20 };
+      },
+    );
 
     await protocol.deliberate("Task", plan, scores, chat);
 
@@ -268,106 +290,127 @@ describe("RoleBasedProtocol", () => {
     expect(messageCalls.length).toBeGreaterThan(0);
   });
 
-  // 8. [NE] plan.models 빈 배열 → error throw
+  // 8. Empty plan.models throws
   it("should throw error when plan.models is empty", async () => {
     const plan = makePlan([]);
     const scores: ModelScore[] = [];
     const chat = makeChatFn();
 
-    await expect(protocol.deliberate("Task", plan, scores, chat)).rejects.toThrow();
+    await expect(
+      protocol.deliberate("Task", plan, scores, chat),
+    ).rejects.toThrow();
   });
 
-  // 9. [NE] deliberation engine error → propagation
+  // 9. Error propagation
   it("should propagate errors from the deliberation engine", async () => {
     const scores = makeScores(
       { id: "m1", judgment: 700, codeGen: 800 },
       { id: "m2", judgment: 600, codeGen: 600 },
       { id: "m3", judgment: 900, codeGen: 500 },
     );
-    const plan = makePlan([{ modelId: "m1" }, { modelId: "m2" }, { modelId: "m3" }]);
+    const plan = makePlan([
+      { modelId: "m1" },
+      { modelId: "m2" },
+      { modelId: "m3" },
+    ]);
     const chat = makeChatFn();
     const errDelib = makeFakeDeliberate({ throwError: "LLM service unavailable" });
-    const proto = new RoleBasedProtocol("leader_decides", 3, errDelib.fn);
+    const proto = new DivergeSynthProtocol("leader_decides", 3, errDelib.fn);
 
-    await expect(proto.deliberate("Task", plan, scores, chat)).rejects.toThrow("LLM service unavailable");
+    await expect(
+      proto.deliberate("Task", plan, scores, chat),
+    ).rejects.toThrow("LLM service unavailable");
   });
 
-  // 10. [ED] plan.models.length===1 → single model shortcut
-  it("should handle single model plan as shortcut without full deliberation", async () => {
+  // 10. Single model runs through deliberation (engine handles single-model shortcut)
+  it("should run single model through deliberation protocol", async () => {
     const scores = makeScores({ id: "solo", judgment: 700, codeGen: 700 });
     const plan = makePlan([{ modelId: "solo" }]);
-    const chat: ChatFn = mock(async () => "solo response");
+    const chat = makeChatFn();
 
     const result = await protocol.deliberate("Simple task", plan, scores, chat);
 
     expect(result.modelsUsed).toContain("solo");
-    expect(result.totalLLMCalls).toBeLessThanOrEqual(1);
+    expect(result.protocol).toBe("diverge-synth");
+    // Deliberation was invoked (not bypassed)
+    expect(fakeDelib.calls.length).toBeGreaterThan(0);
   });
 
-  // 11. [ED] plan.models.length===2 → producer+leader only, 0 reviewers
-  it("should run deliberation with 0 reviewers when only 2 models in plan", async () => {
+  // 11. 2 models (1 worker + 1 leader)
+  it("should run deliberation with 1 worker + 1 leader when 2 models in plan", async () => {
     const scores = makeScores(
-      { id: "prod", judgment: 500, codeGen: 800 },
-      { id: "lead", judgment: 900, codeGen: 500 },
+      { id: "worker-m", judgment: 500, codeGen: 800 },
+      { id: "leader-m", judgment: 900, codeGen: 500 },
     );
-    const plan = makePlan([{ modelId: "prod" }, { modelId: "lead" }]);
+    const plan = makePlan([{ modelId: "worker-m" }, { modelId: "leader-m" }]);
     const chat = makeChatFn();
+
     const result = await protocol.deliberate("Task", plan, scores, chat);
 
-    expect(result.modelsUsed.length).toBeGreaterThanOrEqual(2);
-    expect(result.protocol).toBe("role-based");
+    expect(result.modelsUsed.length).toBe(2);
+    expect(result.protocol).toBe("diverge-synth");
   });
 
-  // 12. [ED] scores에 plan 모델 없음 → fallback 배정
+  // 12. Scores missing plan models → fallback
   it("should use fallback role assignment when scores do not contain plan models", async () => {
-    const scores = makeScores(
-      { id: "other-model", judgment: 900, codeGen: 900 },
-    );
+    const scores = makeScores({
+      id: "other-model",
+      judgment: 900,
+      codeGen: 900,
+    });
     const plan = makePlan([
       { modelId: "unknown-a" },
       { modelId: "unknown-b" },
       { modelId: "unknown-c" },
     ]);
     const chat = makeChatFn();
+
     const result = await protocol.deliberate("Task", plan, scores, chat);
 
-    // Should still work with fallback ordering
-    expect(result.protocol).toBe("role-based");
+    expect(result.protocol).toBe("diverge-synth");
     expect(result.modelsUsed.length).toBeGreaterThanOrEqual(2);
   });
 
-  // 13. [CO] 빈 scores + explicit roles → team 구성 가능
+  // 13. Empty scores + explicit roles
   it("should compose team from explicit roles even with empty scores", async () => {
     const plan = makePlan([
-      { modelId: "p1", role: "producer" },
-      { modelId: "r1", role: "reviewer" },
+      { modelId: "w1", role: "worker" },
+      { modelId: "w2", role: "worker" },
       { modelId: "l1", role: "leader" },
     ]);
     const chat = makeChatFn();
+
     const result = await protocol.deliberate("Task", plan, [], chat);
 
-    expect(result.protocol).toBe("role-based");
+    expect(result.protocol).toBe("diverge-synth");
   });
 
-  // 14. [CO] 1모델 + consensus 무관한 single shortcut
-  it("should return single shortcut regardless of consensus mode for 1-model plan", async () => {
+  // 14. Single model goes through deliberation (Engine handles single-model shortcut)
+  it("should run deliberation even for 1-model plan", async () => {
     const scores = makeScores({ id: "only", judgment: 700, codeGen: 700 });
     const plan = makePlan([{ modelId: "only" }]);
-    const proto = new RoleBasedProtocol("all_approve", 3, fakeDelib.fn);
-    const chat: ChatFn = mock(async () => "only response");
+    const proto = new DivergeSynthProtocol("leader_decides", 3, fakeDelib.fn);
+    const chat = makeChatFn();
+
     const result = await proto.deliberate("Task", plan, scores, chat);
 
-    expect(result.totalLLMCalls).toBeLessThanOrEqual(1);
+    expect(result.protocol).toBe("diverge-synth");
+    // Single model acts as both worker and leader
+    expect(fakeDelib.calls.length).toBe(1);
   });
 
-  // 15. [ID] 동일 입력 재호출 → 동일 결과 구조
+  // 15. Idempotent results
   it("should return consistent result structure for repeated identical calls", async () => {
     const scores = makeScores(
       { id: "m1", judgment: 700, codeGen: 800 },
       { id: "m2", judgment: 600, codeGen: 600 },
       { id: "m3", judgment: 900, codeGen: 500 },
     );
-    const plan = makePlan([{ modelId: "m1" }, { modelId: "m2" }, { modelId: "m3" }]);
+    const plan = makePlan([
+      { modelId: "m1" },
+      { modelId: "m2" },
+      { modelId: "m3" },
+    ]);
     const chat = makeChatFn();
 
     const result1 = await protocol.deliberate("Same task", plan, scores, chat);

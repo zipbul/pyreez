@@ -78,14 +78,20 @@ export function updateRating(
         ? signal * expected
         : 0;
 
-  const kA = scaledK(ratingA.sigma);
-  const kB = scaledK(ratingB.sigma);
+  // Average K ensures zero-sum before clamping
+  const k = (scaledK(ratingA.sigma) + scaledK(ratingB.sigma)) / 2;
 
-  const newMuA = Math.max(0, Math.min(1000, ratingA.mu + kA * surprise));
-  const newMuB = Math.max(0, Math.min(1000, ratingB.mu - kB * surprise));
+  // Symmetric clamp: A's actual delta determines B's delta (preserves zero-sum at boundaries)
+  const rawMuA = ratingA.mu + k * surprise;
+  const newMuA = Math.max(0, Math.min(1000, rawMuA));
+  const actualDeltaA = newMuA - ratingA.mu;
+  const newMuB = Math.max(0, Math.min(1000, ratingB.mu - actualDeltaA));
 
-  const newSigmaA = Math.max(SIGMA_MIN, ratingA.sigma * SIGMA_DECAY);
-  const newSigmaB = Math.max(SIGMA_MIN, ratingB.sigma * SIGMA_DECAY);
+  // Sigma decay: surprising results preserve more uncertainty
+  const absSurprise = Math.abs(surprise);
+  const decay = SIGMA_DECAY + (1 - SIGMA_DECAY) * Math.min(absSurprise / 3, 1);
+  const newSigmaA = Math.max(SIGMA_MIN, ratingA.sigma * decay);
+  const newSigmaB = Math.max(SIGMA_MIN, ratingB.sigma * decay);
 
   const anomaly =
     Math.abs(newMuA - ratingA.mu) > ANOMALY_THRESHOLD ||

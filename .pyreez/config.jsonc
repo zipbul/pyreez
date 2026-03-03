@@ -1,0 +1,9 @@
+{
+  // Model selection weights (ratio matters, not sum)
+  // qualityWeight: prefer higher-capability models
+  // costWeight: prefer cheaper models
+  "routing": {
+    "qualityWeight": 0.7,
+    "costWeight": 0.3
+  }
+}

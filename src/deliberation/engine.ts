@@ -1,11 +1,11 @@
 /**
- * Deliberation Engine — core execution loop.
+ * Deliberation Engine — Diverge-Synth execution loop.
  *
  * Exported functions:
- *   parseProduction, parseReview, parseSynthesis — LLM JSON response parsers
- *   executeRound — single round execution (producer → reviewers → leader)
- *   deliberate — multi-round loop with consensus check
- *   RoundExecutionError — identifies which role failed during a round
+ *   parseSynthesis — LLM response parser for leader output (consensus mode)
+ *   executeRound — single round: workers (parallel) → leader (synthesis)
+ *   deliberate — multi-round loop
+ *   RoundExecutionError — identifies which role failed
  *
  * DI: all LLM calls and prompt building injected via EngineDeps.
  * @module Deliberation Engine
@@ -17,13 +17,12 @@ import type {
   ConsensusMode,
   DeliberateInput,
   DeliberateOutput,
-  Production,
-  Review,
   Round,
   SharedContext,
-  Synthesis,
   TeamComposition,
   TeamMember,
+  TokenUsage,
+  WorkerResponse,
 } from "./types";
 import {
   createSharedContext,
@@ -31,7 +30,7 @@ import {
   totalLLMCalls,
   modelsUsed,
 } from "./shared-context";
-import { selectTopModel, PRODUCER_DIMS, LEADER_DIMS } from "./team-composer";
+import { selectTopModel, LEADER_DIMS } from "./team-composer";
 import type { CooldownManager } from "./cooldown";
 
 import type { RoundInfo } from "./prompts";
@@ -39,12 +38,20 @@ import type { RoundInfo } from "./prompts";
 // -- Public Interfaces --
 
 /**
+ * Result of a single LLM call, including token usage.
+ */
+export interface ChatResult {
+  readonly content: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
+/**
  * Error thrown by executeRound when a specific role's LLM call fails.
- * Identifies the role (producer/reviewer/leader) and model that caused the failure.
  */
 export class RoundExecutionError extends Error {
   constructor(
-    public readonly role: "producer" | "reviewer" | "leader",
+    public readonly role: "worker" | "leader",
     public readonly modelId: string,
     public override readonly cause: unknown,
   ) {
@@ -57,7 +64,6 @@ export class RoundExecutionError extends Error {
 
 /**
  * Optional retry dependencies for automatic team recomposition on failure.
- * When provided, deliberate() will attempt to replace failed models.
  */
 export interface RetryDeps {
   readonly cooldown: CooldownManager;
@@ -73,21 +79,17 @@ export interface EngineDeps {
   readonly chat: (
     model: string,
     messages: ChatMessage[],
-  ) => Promise<string>;
-  readonly buildProducerMessages: (
+  ) => Promise<ChatResult>;
+  readonly buildWorkerMessages: (
     ctx: SharedContext,
     instructions?: string,
-    roundInfo?: RoundInfo,
-  ) => ChatMessage[];
-  readonly buildReviewerMessages: (
-    ctx: SharedContext,
-    perspective: string,
     roundInfo?: RoundInfo,
   ) => ChatMessage[];
   readonly buildLeaderMessages: (
     ctx: SharedContext,
     instructions?: string,
     roundInfo?: RoundInfo,
+    consensus?: ConsensusMode,
   ) => ChatMessage[];
 }
 
@@ -96,12 +98,11 @@ export interface EngineDeps {
  */
 export interface EngineConfig {
   readonly maxRounds: number;
-  readonly consensus: ConsensusMode;
+  readonly consensus?: ConsensusMode;
 }
 
 const DEFAULT_CONFIG: EngineConfig = {
-  maxRounds: 3,
-  consensus: "leader_decides",
+  maxRounds: 1,
 };
 
 // -- Internal Helpers --
@@ -111,119 +112,45 @@ const DEFAULT_CONFIG: EngineConfig = {
  */
 function stripJsonWrapping(text: string): string {
   const trimmed = text.trim();
-  if (trimmed.startsWith("```json") && trimmed.endsWith("```")) {
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("```json") && lower.endsWith("```")) {
     return trimmed.slice(7, -3).trim();
   }
-  if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
+  if (lower.startsWith("```") && lower.endsWith("```")) {
     return trimmed.slice(3, -3).trim();
   }
   return text;
 }
 
-/**
- * Evaluate consensus based on the round's reviews and synthesis.
- */
-function checkConsensus(round: Round, mode: ConsensusMode): boolean {
-  if (!round.synthesis) return false;
-  const { decision } = round.synthesis;
-
-  switch (mode) {
-    case "leader_decides":
-      return decision === "approve";
-
-    case "all_approve":
-      return (
-        decision === "approve" && round.reviews.every((r) => r.approval)
-      );
-
-    case "majority": {
-      const approved = round.reviews.filter((r) => r.approval).length;
-      return decision === "approve" && approved > round.reviews.length / 2;
-    }
-  }
-}
-
 // -- Parsers --
 
 /**
- * Parse producer LLM response into Production.
- * Falls back to raw text as content on JSON parse failure.
- */
-export function parseProduction(model: string, response: string): Production {
-  const cleaned = stripJsonWrapping(response);
-  try {
-    const parsed = JSON.parse(cleaned);
-    return {
-      model,
-      content: parsed.content ?? "",
-      ...(parsed.revisionNotes != null
-        ? { revisionNotes: parsed.revisionNotes }
-        : {}),
-    };
-  } catch {
-    return { model, content: response };
-  }
-}
-
-/**
- * Parse reviewer LLM response into Review.
- * Falls back to { approval: false, reasoning: raw text } on failure.
- */
-export function parseReview(
-  model: string,
-  perspective: string,
-  response: string,
-): Review {
-  const cleaned = stripJsonWrapping(response);
-  try {
-    const parsed = JSON.parse(cleaned);
-    return {
-      model,
-      perspective,
-      issues: parsed.issues ?? [],
-      approval: parsed.approval ?? false,
-      reasoning: parsed.reasoning ?? "",
-    };
-  } catch {
-    return {
-      model,
-      perspective,
-      issues: [],
-      approval: false,
-      reasoning: response,
-    };
-  }
-}
-
-/**
  * Parse leader LLM response into Synthesis.
- * Falls back to { decision: "continue" } on failure or missing field.
+ * When consensus mode is enabled, attempts to extract a JSON decision field.
+ * Falls back to plain text content with no decision.
  */
-export function parseSynthesis(model: string, response: string): Synthesis {
+export function parseSynthesis(
+  model: string,
+  response: string,
+  consensus?: ConsensusMode,
+): { content: string; decision?: "continue" | "approve" } {
+  if (!consensus) {
+    return { content: response };
+  }
+
   const cleaned = stripJsonWrapping(response);
-  const VALID_DECISIONS = ["continue", "approve", "escalate"];
+  const VALID_DECISIONS = ["continue", "approve"];
   try {
     const parsed = JSON.parse(cleaned);
     const decision = VALID_DECISIONS.includes(parsed.decision)
-      ? parsed.decision
-      : "continue";
+      ? (parsed.decision as "continue" | "approve")
+      : undefined;
     return {
-      model,
-      consensusStatus: parsed.consensusStatus ?? "progressing",
-      keyAgreements: parsed.keyAgreements ?? [],
-      keyDisagreements: parsed.keyDisagreements ?? [],
-      actionItems: parsed.actionItems ?? [],
+      content: parsed.result ?? parsed.content ?? response,
       decision,
     };
   } catch {
-    return {
-      model,
-      consensusStatus: "progressing",
-      keyAgreements: [],
-      keyDisagreements: [],
-      actionItems: [],
-      decision: "continue",
-    };
+    return { content: response };
   }
 }
 
@@ -231,11 +158,10 @@ export function parseSynthesis(model: string, response: string): Synthesis {
 
 /**
  * Execute a single deliberation round:
- *   1. Producer generates content
- *   2. Reviewers evaluate in parallel (Promise.allSettled)
- *   3. Leader synthesises consensus
+ *   1. Workers respond independently in parallel (Promise.allSettled)
+ *   2. Leader synthesizes all worker responses
  *
- * Producer/Leader errors propagate. Reviewer errors produce fallback reviews.
+ * Worker errors produce fallback exclusion. Leader errors propagate.
  */
 export async function executeRound(
   ctx: SharedContext,
@@ -243,84 +169,90 @@ export async function executeRound(
   deps: EngineDeps,
   config: EngineConfig,
   input: DeliberateInput,
-): Promise<Round> {
+): Promise<{ round: Round; tokens: TokenUsage }> {
   const roundInfo: RoundInfo = { current: roundNumber, max: config.maxRounds };
+  let totalInput = 0;
+  let totalOutput = 0;
 
-  // 1. Producer
-  const producerMessages = deps.buildProducerMessages(
+  // 1. Workers — all parallel
+  const workerMessages = deps.buildWorkerMessages(
     ctx,
-    input.producerInstructions,
+    input.workerInstructions,
     roundInfo,
   );
-  let producerResponse: string;
-  try {
-    producerResponse = await deps.chat(
-      ctx.team.producer.model,
-      producerMessages,
-    );
-  } catch (error) {
-    throw new RoundExecutionError("producer", ctx.team.producer.model, error);
-  }
-  const production = parseProduction(ctx.team.producer.model, producerResponse);
 
-  // 2. Reviewers — parallel, partial failure tolerated
-  // Build a temporary ctx that includes the current production so reviewers can see it
-  const ctxForReviewers: SharedContext = {
-    ...ctx,
-    rounds: [
-      ...ctx.rounds,
-      { number: roundNumber, production, reviews: [] },
-    ],
-  };
-  const reviewerPromises = ctx.team.reviewers.map(async (reviewer) => {
-    const perspective = reviewer.perspective ?? "general";
-    const messages = deps.buildReviewerMessages(ctxForReviewers, perspective, roundInfo);
-    const response = await deps.chat(reviewer.model, messages);
-    return parseReview(reviewer.model, perspective, response);
+  const workerPromises = ctx.team.workers.map(async (worker) => {
+    const result = await deps.chat(worker.model, workerMessages);
+    totalInput += result.inputTokens;
+    totalOutput += result.outputTokens;
+    return { model: worker.model, content: result.content } as WorkerResponse;
   });
 
-  const settled = await Promise.allSettled(reviewerPromises);
+  const settled = await Promise.allSettled(workerPromises);
 
-  // If ALL reviewers failed, treat as a hard error (not a silent fallback)
-  if (ctx.team.reviewers.length > 0 && settled.every((r) => r.status === "rejected")) {
+  // If ALL workers failed, treat as a hard error
+  if (
+    ctx.team.workers.length > 0 &&
+    settled.every((r) => r.status === "rejected")
+  ) {
     const firstFailure = settled[0] as PromiseRejectedResult;
-    const failedModel = ctx.team.reviewers[0]!.model;
-    throw new RoundExecutionError("reviewer", failedModel, firstFailure.reason);
+    const failedModel = ctx.team.workers[0]!.model;
+    throw new RoundExecutionError("worker", failedModel, firstFailure.reason);
   }
 
-  const reviews: Review[] = settled.map((result, i) => {
-    if (result.status === "fulfilled") return result.value;
-    const reviewer = ctx.team.reviewers[i]!;
-    const perspective = reviewer.perspective ?? "general";
-    return {
-      model: reviewer.model,
-      perspective,
-      issues: [],
-      approval: false,
-      reasoning: `Review error: ${result.reason?.message ?? "unknown error"}`,
-    };
-  });
+  // Collect successful responses and track failures
+  const responses: WorkerResponse[] = [];
+  const failedWorkers: { model: string; error: string }[] = [];
+  for (let idx = 0; idx < settled.length; idx++) {
+    const result = settled[idx]!;
+    if (result.status === "fulfilled") {
+      responses.push(result.value);
+    } else {
+      const workerModel = ctx.team.workers[idx]!.model;
+      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      failedWorkers.push({ model: workerModel, error: reason });
+    }
+  }
 
-  // 3. Leader — sees current round's production + reviews
-  const partialRound: Round = { number: roundNumber, production, reviews };
+  // 2. Leader — sees current round's worker responses
+  const partialRound: Round = { number: roundNumber, responses };
   const ctxForLeader = addRound(ctx, partialRound);
   const leaderMessages = deps.buildLeaderMessages(
     ctxForLeader,
     input.leaderInstructions,
     roundInfo,
+    config.consensus,
   );
-  let leaderResponse: string;
+  let leaderResult: ChatResult;
   try {
-    leaderResponse = await deps.chat(
-      ctx.team.leader.model,
-      leaderMessages,
-    );
+    leaderResult = await deps.chat(ctx.team.leader.model, leaderMessages);
   } catch (error) {
     throw new RoundExecutionError("leader", ctx.team.leader.model, error);
   }
-  const synthesis = parseSynthesis(ctx.team.leader.model, leaderResponse);
+  totalInput += leaderResult.inputTokens;
+  totalOutput += leaderResult.outputTokens;
 
-  return { number: roundNumber, production, reviews, synthesis };
+  const { content, decision } = parseSynthesis(
+    ctx.team.leader.model,
+    leaderResult.content,
+    config.consensus,
+  );
+
+  const synthesis = {
+    model: ctx.team.leader.model,
+    content,
+    ...(decision ? { decision } : {}),
+  };
+
+  return {
+    round: {
+      number: roundNumber,
+      responses,
+      synthesis,
+      ...(failedWorkers.length > 0 ? { failedWorkers } : {}),
+    },
+    tokens: { input: totalInput, output: totalOutput },
+  };
 }
 
 // -- Main Entry Point --
@@ -328,10 +260,10 @@ export async function executeRound(
 /**
  * Run the full multi-round deliberation loop.
  *
- * @param team - Pre-composed team.
- * @param input - Task, perspectives, optional instructions.
+ * @param team - Pre-composed team (workers + leader).
+ * @param input - Task, optional instructions.
  * @param deps - Injected LLM chat + prompt builders.
- * @param config - Optional engine config (defaults: maxRounds=3, leader_decides).
+ * @param config - Optional engine config (defaults: maxRounds=1, no consensus).
  * @param retryDeps - Optional retry dependencies for automatic recomposition on failure.
  */
 export async function deliberate(
@@ -346,60 +278,50 @@ export async function deliberate(
   let currentTeam = team;
   let ctx = createSharedContext(input.task, currentTeam);
   let consensusReached = false;
+  let accTokens: TokenUsage = { input: 0, output: 0 };
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
-    let round: Round;
+    let roundResult: { round: Round; tokens: TokenUsage };
 
     try {
-      round = await executeRound(ctx, i, deps, cfg, input);
+      roundResult = await executeRound(ctx, i, deps, cfg, input);
     } catch (error) {
       if (retryDeps && error instanceof RoundExecutionError) {
         // Cooldown the failed model
         retryDeps.cooldown.add(error.modelId, error.message);
         const cooledIds = retryDeps.cooldown.getCooledDownIds();
 
-        // Also exclude current team members to avoid role overlap
         const teamMemberIds = new Set<string>([
           ...cooledIds,
-          currentTeam.producer.model,
-          ...currentTeam.reviewers.map((r) => r.model),
+          ...currentTeam.workers.map((w) => w.model),
           currentTeam.leader.model,
         ]);
 
         let retried = false;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
-          if (error.role === "producer") {
-            const replacement = selectTopModel(
-              retryDeps.getModels(),
-              PRODUCER_DIMS,
-              teamMemberIds,
-            );
-            if (!replacement) break;
-            currentTeam = {
-              ...currentTeam,
-              producer: { model: replacement.id, role: "producer" },
-            };
-          } else if (error.role === "reviewer") {
-            // Replace all reviewers with fresh models
-            const reviewerCount = currentTeam.reviewers.length;
-            const newReviewers: TeamMember[] = [];
-            const usedIds = new Set(teamMemberIds);
-            for (let ri = 0; ri < reviewerCount; ri++) {
+          if (error.role === "worker") {
+            // All workers failed (RoundExecutionError is only thrown on total worker failure).
+            // Cool down all current workers and replace the entire worker set.
+            for (const w of currentTeam.workers) {
+              retryDeps.cooldown.add(w.model, "worker-failure");
+            }
+            const usedIds = new Set([
+              ...retryDeps.cooldown.getCooledDownIds(),
+              currentTeam.leader.model,
+            ]);
+            const newWorkers: TeamMember[] = [];
+            for (let wi = 0; wi < currentTeam.workers.length; wi++) {
               const replacement = selectTopModel(
                 retryDeps.getModels(),
-                PRODUCER_DIMS,
+                LEADER_DIMS,
                 usedIds,
               );
               if (!replacement) break;
-              newReviewers.push({
-                model: replacement.id,
-                role: "reviewer" as const,
-                perspective: currentTeam.reviewers[ri]?.perspective,
-              });
+              newWorkers.push({ model: replacement.id, role: "worker" as const });
               usedIds.add(replacement.id);
             }
-            if (newReviewers.length < reviewerCount) break;
-            currentTeam = { ...currentTeam, reviewers: newReviewers };
+            if (newWorkers.length === 0) break;
+            currentTeam = { ...currentTeam, workers: newWorkers };
           } else {
             const replacement = selectTopModel(
               retryDeps.getModels(),
@@ -421,14 +343,13 @@ export async function deliberate(
           }
 
           try {
-            round = await executeRound(ctx, i, deps, cfg, input);
+            roundResult = await executeRound(ctx, i, deps, cfg, input);
             retried = true;
             break;
           } catch (retryError) {
             if (retryError instanceof RoundExecutionError) {
               retryDeps.cooldown.add(retryError.modelId, retryError.message);
             }
-            // Continue retry loop or fall through
           }
         }
 
@@ -438,18 +359,49 @@ export async function deliberate(
       }
     }
 
-    ctx = addRound(ctx, round!);
+    accTokens = {
+      input: accTokens.input + roundResult!.tokens.input,
+      output: accTokens.output + roundResult!.tokens.output,
+    };
+    ctx = addRound(ctx, roundResult!.round);
 
-    // Escalate — immediate stop, no consensus
-    if (round!.synthesis?.decision === "escalate") {
-      break;
+    // Proactive worker replacement: swap out workers that failed this round
+    // so the next round has a better chance of success (only for multi-round)
+    if (retryDeps && roundResult!.round.failedWorkers?.length && i < cfg.maxRounds) {
+      const failedIds = new Set(roundResult!.round.failedWorkers.map((f) => f.model));
+      for (const fid of failedIds) {
+        retryDeps.cooldown.add(fid, "partial-failure");
+      }
+      const usedIds = new Set([
+        ...retryDeps.cooldown.getCooledDownIds(),
+        ...currentTeam.workers.map((w) => w.model),
+        currentTeam.leader.model,
+      ]);
+      const newWorkers = currentTeam.workers.map((w) => {
+        if (!failedIds.has(w.model)) return w;
+        const replacement = selectTopModel(retryDeps.getModels(), LEADER_DIMS, usedIds);
+        if (!replacement) return w; // keep original if no replacement available
+        usedIds.add(replacement.id);
+        return { model: replacement.id, role: "worker" as const };
+      });
+      currentTeam = { ...currentTeam, workers: newWorkers };
+      const previousRounds = [...ctx.rounds];
+      ctx = createSharedContext(input.task, currentTeam);
+      for (const prevRound of previousRounds) {
+        ctx = addRound(ctx, prevRound);
+      }
     }
 
-    // Consensus check
-    if (checkConsensus(round!, cfg.consensus)) {
+    // Consensus check (only when consensus mode is enabled)
+    if (cfg.consensus && roundResult!.round.synthesis?.decision === "approve") {
       consensusReached = true;
       break;
     }
+  }
+
+  // If no consensus mode, completing all rounds counts as "reached"
+  if (!cfg.consensus) {
+    consensusReached = true;
   }
 
   // -- Assemble output --
@@ -458,24 +410,21 @@ export async function deliberate(
       ? ctx.rounds[ctx.rounds.length - 1]
       : undefined;
 
-  const result = lastRound?.production?.content ?? "";
+  const result = lastRound?.synthesis?.content ?? "";
 
-  const finalApprovals = lastRound
-    ? lastRound.reviews.map((r) => ({
-        model: r.model,
-        approved: r.approval,
-        remainingIssues: r.issues.map((issue) => issue.description),
-      }))
-    : [];
+  // Extract per-round synthesis summaries for diagnostics
+  const roundsSummary = ctx.rounds.map((r) => ({
+    number: r.number,
+    ...(r.synthesis ? { synthesis: r.synthesis.content } : {}),
+  }));
 
   return {
     result,
     roundsExecuted: ctx.rounds.length,
     consensusReached,
-    finalApprovals,
-    deliberationLog: ctx,
-    totalTokens: 0,
+    totalTokens: accTokens,
     totalLLMCalls: totalLLMCalls(ctx),
     modelsUsed: modelsUsed(ctx),
+    rounds: roundsSummary,
   };
 }

@@ -32,10 +32,16 @@ function makeModel(
 // -- PROVIDER_CACHING record --
 
 describe("PROVIDER_CACHING", () => {
-  it("should have entries for all three providers", () => {
+  it("should have entries for all providers", () => {
     expect(PROVIDER_CACHING.anthropic).toBeDefined();
     expect(PROVIDER_CACHING.google).toBeDefined();
     expect(PROVIDER_CACHING.openai).toBeDefined();
+    expect(PROVIDER_CACHING.deepseek).toBeDefined();
+    expect(PROVIDER_CACHING.xai).toBeDefined();
+    expect(PROVIDER_CACHING.mistral).toBeDefined();
+    expect(PROVIDER_CACHING.qwen).toBeDefined();
+    expect(PROVIDER_CACHING.groq).toBeDefined();
+    expect(PROVIDER_CACHING.local).toBeDefined();
   });
 
   it("should mark anthropic with 90% read discount and 25% write premium", () => {

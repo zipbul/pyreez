@@ -88,7 +88,7 @@ function makeMocks(planOverride?: EnsemblePlan): {
     deliberation: {
       deliberate: mock(async () => mockResult),
     },
-    chat: mock(async () => "chat response"),
+    chat: mock(async () => ({ content: "chat response", inputTokens: 10, outputTokens: 20 })),
   };
 }
 

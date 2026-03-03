@@ -2,13 +2,13 @@
  * Pyreez entry point.
  * Wires infrastructure modules and starts the MCP server over stdio.
  *
- * Architecture: pyreez = Infrastructure layer (7 MCP tools).
+ * Architecture: pyreez = Infrastructure layer (5 MCP tools).
  * Host (e.g., Copilot) = Orchestrator.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { loadConfigFromEnv } from "./config";
+import { loadConfigFromEnv, loadRoutingConfig } from "./config";
 import { createChatAdapter, createDeliberateFn } from "./deliberation/wire";
 import { FileDeliberationStore } from "./deliberation/file-store";
 import { ProviderRegistry } from "./llm/registry";
@@ -17,7 +17,8 @@ import { ClaudeCliProvider } from "./llm/providers/claude-cli";
 import { GoogleProvider } from "./llm/providers/google";
 import { OpenAIProvider } from "./llm/providers/openai";
 import { LocalProvider } from "./llm/providers/local";
-import type { LLMProvider } from "./llm/types";
+import { OpenAICompatibleProvider } from "./llm/providers/openai-compatible";
+import type { LLMProvider, ProviderName } from "./llm/types";
 import { PyreezMcpServer } from "./mcp/server";
 import { ModelRegistry } from "./model/registry";
 import { calibrate, extractRatingsMap, persistRatings } from "./model/calibration";
@@ -29,13 +30,14 @@ import {
   BtScoringSystem,
   DomainOverrideProfiler,
   TwoTrackCeSelector,
-  RoleBasedProtocol,
+  DivergeSynthProtocol,
 } from "./axis/wrappers";
 import type { ChatFn } from "./axis/types";
 import type { ChatMessage } from "./llm/types";
 
 async function main(): Promise<void> {
-  const config = loadConfigFromEnv();
+  const routing = await loadRoutingConfig();
+  const config = loadConfigFromEnv(routing);
   const registry = new ModelRegistry();
   const fileIO = new BunFileIO();
   const reporter = new FileReporter(".pyreez/reports", fileIO);
@@ -59,6 +61,28 @@ async function main(): Promise<void> {
     providers.push(new LocalProvider(config.providers.local));
   }
 
+  // OpenAI-compatible providers (DeepSeek, xAI, Mistral, Qwen, Groq)
+  const OPENAI_COMPAT_PROVIDERS = {
+    deepseek: "https://api.deepseek.com",
+    xai: "https://api.x.ai",
+    mistral: "https://api.mistral.ai",
+    qwen: "https://dashscope-intl.aliyuncs.com/compatible-mode",
+    groq: "https://api.groq.com/openai",
+  } as const;
+
+  for (const [name, baseUrl] of Object.entries(OPENAI_COMPAT_PROVIDERS)) {
+    const block = config.providers[name as keyof typeof OPENAI_COMPAT_PROVIDERS];
+    if (block) {
+      providers.push(
+        new OpenAICompatibleProvider({
+          name: name as ProviderName,
+          baseUrl,
+          apiKey: block.apiKey,
+        }),
+      );
+    }
+  }
+
   const providerRegistry = new ProviderRegistry(
     providers,
     registry.buildProviderMap(),
@@ -66,7 +90,7 @@ async function main(): Promise<void> {
 
   const chatAdapter = createChatAdapter((req) => providerRegistry.chat(req));
 
-  // Axis ChatFn adapter: bridge (modelId, string | ChatMessage[]) to chatAdapter
+  // Axis ChatFn adapter: bridge (modelId, string | ChatMessage[]) → ChatResult
   const axisChatFn: ChatFn = async (modelId, input) => {
     const messages: ChatMessage[] =
       typeof input === "string"
@@ -76,11 +100,20 @@ async function main(): Promise<void> {
   };
 
   // Build 3-stage pipeline directly (no factory)
-  const modelIds = registry.getAvailable().map((m) => m.id);
+  // Filter models to only those from configured providers
+  const configuredProviders = new Set(providers.map((p) => p.name));
+  const availableModels = registry.getAvailable().filter((m) => configuredProviders.has(m.provider));
+  if (availableModels.length === 0) {
+    console.error(
+      `Warning: No models match configured providers (${[...configuredProviders].join(", ")}). ` +
+      "Check scores/models.json provider names.",
+    );
+  }
+  const modelIds = availableModels.map((m) => m.id);
   const scoring = new BtScoringSystem();
   const profiler = new DomainOverrideProfiler();
-  const selector = new TwoTrackCeSelector(3); // ensemble size 3 for deliberation
-  const deliberation = new RoleBasedProtocol("leader_decides", 3);
+  const selector = new TwoTrackCeSelector(3, undefined, config.routing);
+  const deliberation = new DivergeSynthProtocol("leader_decides", 1);
 
   const engine = new PyreezEngine(
     scoring,
@@ -93,14 +126,13 @@ async function main(): Promise<void> {
 
   const deliberateFn = createDeliberateFn({
     registry,
-    chat: chatAdapter,
+    chat: (model, messages) => chatAdapter(model, messages),
     store: deliberationStore,
   });
 
   const mcpServer = new McpServer({ name: "pyreez", version: "1.0.0" });
   const server = new PyreezMcpServer({
     mcpServer,
-    chatFn: (req) => providerRegistry.chat(req),
     registry,
     reporter,
     summaryFn: () => reporter.summary(),

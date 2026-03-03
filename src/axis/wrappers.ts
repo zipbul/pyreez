@@ -12,8 +12,6 @@ import type { ClassifyResult, TaskDomain, TaskType } from "../classify/types";
 import { profileTask } from "../profile/profiler";
 import type { CapabilityRequirement } from "../profile/types";
 import type { TaskRequirement } from "../profile/types";
-import { selectModel } from "../router/selector";
-import type { BudgetConfig as RouterBudgetConfig } from "../router/types";
 import { ModelRegistry } from "../model/registry";
 import type { CapabilityDimension, ModelInfo } from "../model/types";
 import { SIGMA_BASE } from "../model/types";
@@ -30,11 +28,10 @@ import {
 import type { PairwiseOutcome } from "../evaluation/types";
 import type { ChatMessage } from "../llm/types";
 import { deliberate as defaultDeliberateFn } from "../deliberation/engine";
-import type { EngineDeps, EngineConfig } from "../deliberation/engine";
+import type { ChatResult, EngineDeps, EngineConfig, RetryDeps } from "../deliberation/engine";
 import type { DeliberateOutput } from "../deliberation/types";
 import {
-  buildProducerMessages,
-  buildReviewerMessages,
+  buildWorkerMessages,
   buildLeaderMessages,
 } from "../deliberation/prompts";
 import type {
@@ -46,8 +43,8 @@ import type {
 import {
   estimateStaticCost,
   estimateEffectiveCost,
-  estimateAmortizedCost,
 } from "../cost/effective-cost";
+import type { RoutingConfig } from "../config";
 
 import type {
   TaskClassification,
@@ -74,21 +71,20 @@ function getRegistry(): ModelRegistry {
   return _registry;
 }
 
-/** Compute overall composite score from all dimension mu values. */
+/** Operational dimensions excluded from overall quality score. */
+const OPERATIONAL_DIMS = new Set(["SPEED", "COST_EFFICIENCY"]);
+
+/** Compute overall composite score from capability dimension mu values (excludes operational metrics). */
 function computeOverall(dimensions: Record<string, { mu: number; sigma: number }>): number {
-  const entries = Object.values(dimensions);
+  const entries = Object.entries(dimensions)
+    .filter(([dim]) => !OPERATIONAL_DIMS.has(dim))
+    .map(([, v]) => v);
   if (entries.length === 0) return 0;
   return entries.reduce((sum, d) => sum + d.mu, 0) / entries.length;
 }
 
-/** Assign deliberation roles for N models. */
-function assignRoles(count: number): string[] {
-  if (count <= 1) return ["primary"];
-  if (count === 2) return ["producer", "leader"];
-  return Array.from({ length: count }, (_, i) =>
-    i === 0 ? "producer" : i === count - 1 ? "leader" : "reviewer",
-  );
-}
+// Role assignment removed — Selector only picks models.
+// DivergeSynthProtocol.buildAutoTeam() assigns leader based on JUDGMENT composite.
 
 // ============================================================
 // BtScoringSystem — Bradley-Terry 21-dimension scoring
@@ -182,7 +178,10 @@ export class DomainOverrideProfiler implements Profiler {
         requiresKorean: profile.requiresKorean,
         structuredOutput: profile.requiresStructuredOutput,
       },
-      budget: {},
+      budget: {
+        qualityWeight: input.qualityWeight,
+        costWeight: input.costWeight,
+      },
       domain: input.domain,
       taskType: input.taskType,
       criticality: profile.criticality,
@@ -198,10 +197,16 @@ export class DomainOverrideProfiler implements Profiler {
 
 export class TwoTrackCeSelector implements Selector {
   private readonly registry: ModelRegistry;
+  private readonly weights: RoutingConfig;
 
-  constructor(ensembleSize?: number, registry?: ModelRegistry);
-  constructor(private readonly ensembleSize: number = 1, registry?: ModelRegistry) {
+  constructor(ensembleSize?: number, registry?: ModelRegistry, weights?: RoutingConfig);
+  constructor(
+    private readonly ensembleSize: number = 1,
+    registry?: ModelRegistry,
+    weights?: RoutingConfig,
+  ) {
     this.registry = registry ?? getRegistry();
+    this.weights = weights ?? { qualityWeight: 0.7, costWeight: 0.3 };
   }
 
   async select(
@@ -211,131 +216,160 @@ export class TwoTrackCeSelector implements Selector {
   ): Promise<EnsemblePlan> {
     const registry = this.registry;
 
-    const models: ModelInfo[] = [];
-
-    for (const score of scores) {
-      const base = registry.getById(score.modelId);
-      if (!base) continue;
-
-      const patched: ModelInfo = { ...base };
-      const patchedCaps = { ...base.capabilities };
-      for (const [dim, { mu, sigma }] of Object.entries(score.dimensions)) {
-        const key = dim as CapabilityDimension;
-        if (patchedCaps[key]) {
-          patchedCaps[key] = { ...patchedCaps[key], mu, sigma };
-        }
-      }
-      patched.capabilities = patchedCaps as ModelInfo["capabilities"];
-      models.push(patched);
+    // Constraint-based pre-filtering
+    let filteredScores = scores.filter((s) => {
+      const info = registry.getById(s.modelId);
+      if (!info) return false;
+      if (req.constraints.minContextWindow && info.contextWindow < req.constraints.minContextWindow) return false;
+      if (req.constraints.requiresToolCalling && !info.supportsToolCalling) return false;
+      return true;
+    });
+    // Soft fallback: if constraints filter everything, use all scores with warning
+    if (filteredScores.length === 0) {
+      console.warn(
+        "TwoTrackCeSelector: all models filtered by constraints (contextWindow=%d, toolCalling=%s), falling back to unfiltered set",
+        req.constraints.minContextWindow ?? 0,
+        req.constraints.requiresToolCalling ?? false,
+      );
+      filteredScores = scores;
     }
 
-    const requiredCapabilities: CapabilityRequirement[] = Object.entries(
-      req.capabilities,
-    ).map(([dimension, weight]) => ({
-      dimension: dimension as CapabilityDimension,
-      weight,
-    }));
-
-    const taskReq: TaskRequirement = {
-      taskType: (req.taskType ?? "IMPLEMENT_FEATURE") as TaskType,
-      domain: (req.domain ?? "CODING") as TaskDomain,
-      requiredCapabilities,
-      estimatedInputTokens: req.estimatedInputTokens ?? 500,
-      estimatedOutputTokens: req.estimatedOutputTokens ?? 500,
-      requiresStructuredOutput: req.constraints.structuredOutput ?? false,
-      requiresKorean: req.constraints.requiresKorean ?? false,
-      requiresToolCalling: req.constraints.requiresToolCalling ?? false,
-      criticality: req.criticality as TaskRequirement["criticality"],
-    };
-
-    const routerBudget: RouterBudgetConfig = { perRequest: budget.perRequest };
-    const strategy =
-      req.criticality === "critical" || req.criticality === "high"
-        ? "quality-first"
-        : "cost-first";
-
-    if (this.ensembleSize <= 1) {
-      const result = selectModel(models, taskReq, routerBudget);
-      const estimatedCost =
-        "expectedCost" in result ? result.expectedCost : 0;
-
-      return {
-        models: [
-          {
-            modelId: result.model.id,
-            role: "primary",
-            weight: 1.0,
-          },
-        ],
-        strategy,
-        estimatedCost,
-        reason: result.reason,
-      };
-    }
+    // Use per-request overrides if provided, else fall back to config weights
+    const qw = req.budget.qualityWeight ?? this.weights.qualityWeight;
+    const cw = req.budget.costWeight ?? this.weights.costWeight;
 
     const inputTokens = req.estimatedInputTokens ?? 500;
     const outputTokens = req.estimatedOutputTokens ?? 500;
-    const rounds = this.ensembleSize;
-    type Ranked = { modelId: string; weighted: number; cost: number; info: ModelInfo };
-    const ranked: Ranked[] = [];
+    const take = Math.max(1, this.ensembleSize);
 
-    for (const ms of scores) {
+    type Ranked = {
+      modelId: string;
+      weighted: number;
+      cost: number;
+      avgSigma: number;
+      info: ModelInfo;
+    };
+    let ranked: Ranked[] = [];
+
+    for (const ms of filteredScores) {
       const info = registry.getById(ms.modelId);
       if (!info) continue;
+
       const cost = estimateStaticCost(info, inputTokens, outputTokens);
+
       let weighted = 0;
       const capEntries = Object.entries(req.capabilities);
       if (capEntries.length > 0) {
         for (const [dim, weight] of capEntries) {
-          weighted += (ms.dimensions[dim]?.mu ?? ms.overall) * weight;
+          const d = ms.dimensions[dim];
+          const mu = d?.mu ?? ms.overall;
+          // Sigma-based confidence with floor: uncalibrated models (sigma=SIGMA_BASE)
+          // get MIN_CONFIDENCE instead of 0, so they remain selectable but penalized.
+          // confidence = max(MIN_CONFIDENCE, 1 - sigma / SIGMA_BASE)
+          const MIN_CONFIDENCE = 0.15;
+          const confidence = d
+            ? Math.max(MIN_CONFIDENCE, 1 - d.sigma / SIGMA_BASE)
+            : MIN_CONFIDENCE;
+          weighted += mu * confidence * weight;
         }
       } else {
         weighted = ms.overall;
       }
-      ranked.push({ modelId: ms.modelId, weighted, cost, info });
+
+      // Average sigma for exploration
+      const sigmaValues = Object.values(ms.dimensions).map((d) => d.sigma);
+      const avgSigma = sigmaValues.length > 0
+        ? sigmaValues.reduce((a, b) => a + b, 0) / sigmaValues.length
+        : SIGMA_BASE;
+
+      ranked.push({ modelId: ms.modelId, weighted, cost, avgSigma, info });
     }
 
-    if (strategy === "quality-first") {
-      ranked.sort((a, b) => b.weighted - a.weighted);
-    } else {
-      const FLOOR = 1e-9;
-      ranked.sort((a, b) => {
-        const aCost = estimateAmortizedCost(a.info, inputTokens, outputTokens, rounds);
-        const bCost = estimateAmortizedCost(b.info, inputTokens, outputTokens, rounds);
-        return b.weighted / Math.max(bCost, FLOOR) - a.weighted / Math.max(aCost, FLOOR);
-      });
+    // Budget hard filter (if set)
+    if (budget.perRequest > 0) {
+      const filtered = ranked.filter((r) => r.cost <= budget.perRequest);
+      // Fallback: if budget filters everything, ignore budget constraint
+      if (filtered.length > 0) ranked = filtered;
     }
 
-    const topN = ranked.slice(0, Math.min(this.ensembleSize, ranked.length));
-    const roles = assignRoles(topN.length);
+    // Unified composite scoring: quality × qw + costEfficiency × cw
+    const maxWeighted = Math.max(...ranked.map((r) => r.weighted), 1);
+    ranked.sort((a, b) => {
+      const aQuality = a.weighted / maxWeighted;
+      const bQuality = b.weighted / maxWeighted;
+      const aCostEff = 1 / (1 + a.cost);
+      const bCostEff = 1 / (1 + b.cost);
+      const aComposite = qw * aQuality + cw * aCostEff;
+      const bComposite = qw * bQuality + cw * bCostEff;
+      return bComposite - aComposite;
+    });
+
+    const topN = ranked.slice(0, Math.min(take, ranked.length));
+
+    // Exploration: swap in an uncalibrated model when the pool has a mix
+    // of calibrated (tested) and uncalibrated (untested) models.
+    // Skip when ALL models are uncalibrated (initial state) — no signal to learn from.
+    if (topN.length >= 2) {
+      const topNHasCalibrated = topN.some((r) => r.avgSigma < SIGMA_BASE * 0.9);
+      if (topNHasCalibrated) {
+        const uncalibrated = ranked
+          .filter((r) => r.avgSigma >= SIGMA_BASE * 0.9 && !topN.includes(r));
+        if (uncalibrated.length > 0) {
+          uncalibrated.sort((a, b) => b.weighted - a.weighted);
+          topN[topN.length - 1] = uncalibrated[0]!;
+        }
+      }
+    }
+
+    // Single model: no ensemble, no effectiveCost
+    if (take <= 1) {
+      const best = topN[0];
+      if (!best) {
+        return {
+          models: [],
+          strategy: "composite",
+          estimatedCost: 0,
+          reason: "no models available",
+        };
+      }
+      return {
+        models: [{ modelId: best.modelId, role: "primary", weight: 1.0 }],
+        strategy: "composite",
+        estimatedCost: best.cost,
+        reason: `composite(q=${qw},c=${cw}) "${best.info.name}"`,
+      };
+    }
+
     const totalCost = topN.reduce((sum, r) => sum + r.cost, 0);
     const effCost = topN.reduce(
-      (sum, r) => sum + estimateEffectiveCost({ model: r.info, inputTokens, outputTokens, rounds }),
+      (sum, r) => sum + estimateEffectiveCost({ model: r.info, inputTokens, outputTokens, rounds: 1 }),
       0,
     );
 
     return {
-      models: topN.map((r, i) => ({ modelId: r.modelId, role: roles[i], weight: 1.0 })),
-      strategy,
+      models: topN.map((r) => ({ modelId: r.modelId, weight: 1.0 })),
+      strategy: "composite",
       estimatedCost: totalCost,
       effectiveCost: effCost,
-      reason: `2track-ce ensemble: top-${topN.length} by ${strategy}`,
+      reason: `composite(q=${qw},c=${cw}) top-${topN.length}`,
     };
   }
 }
 
 // ============================================================
-// RoleBasedProtocol — Producer → Reviewer → Leader deliberation
+// DivergeSynthProtocol — Workers (parallel) → Leader (synthesis)
 // ============================================================
 
-export class RoleBasedProtocol implements DeliberationProtocol {
-  private readonly consensus: ConsensusMode;
+export class DivergeSynthProtocol implements DeliberationProtocol {
+  private readonly consensus?: ConsensusMode;
   private readonly maxRounds: number;
+  private readonly retryDeps?: RetryDeps;
   private readonly runDeliberation: (
     team: TeamComposition,
     input: DeliberateInput,
     deps: EngineDeps,
-    config: EngineConfig,
+    config?: EngineConfig,
+    retryDeps?: RetryDeps,
   ) => Promise<DeliberateOutput>;
 
   constructor(
@@ -345,15 +379,15 @@ export class RoleBasedProtocol implements DeliberationProtocol {
       team: TeamComposition,
       input: DeliberateInput,
       deps: EngineDeps,
-      config: EngineConfig,
+      config?: EngineConfig,
+      retryDeps?: RetryDeps,
     ) => Promise<DeliberateOutput>,
+    retryDeps?: RetryDeps,
   ) {
-    const VALID: ConsensusMode[] = ["leader_decides", "all_approve", "majority"];
-    this.consensus = VALID.includes(consensus as ConsensusMode)
-      ? (consensus as ConsensusMode)
-      : "leader_decides";
-    this.maxRounds = maxRounds ?? 3;
+    this.consensus = consensus === "leader_decides" ? "leader_decides" : undefined;
+    this.maxRounds = maxRounds ?? 1;
     this.runDeliberation = deliberateFn ?? defaultDeliberateFn;
+    this.retryDeps = retryDeps;
   }
 
   async deliberate(
@@ -363,40 +397,24 @@ export class RoleBasedProtocol implements DeliberationProtocol {
     chat: ChatFn,
   ): Promise<DeliberationResult> {
     if (!plan.models.length) {
-      throw new Error("RoleBasedProtocol: plan.models must not be empty");
-    }
-
-    if (plan.models.length === 1) {
-      const modelId = plan.models[0]!.modelId;
-      const response = await chat(modelId, task);
-      return {
-        result: response,
-        roundsExecuted: 0,
-        consensusReached: true,
-        totalLLMCalls: 1,
-        modelsUsed: [modelId],
-        protocol: "role-based",
-      };
+      throw new Error("DivergeSynthProtocol: plan.models must not be empty");
     }
 
     const team = this.buildTeam(plan, scores);
 
-    const perspectives = team.reviewers.map(
-      (r) => r.perspective ?? `reviewer-${team.reviewers.indexOf(r) + 1}`,
-    );
+    const input: DeliberateInput = { task };
 
-    const input: DeliberateInput = {
-      task,
-      perspectives: perspectives.length > 0 ? perspectives : ["general"],
+    const engineChat = async (
+      model: string,
+      messages: ChatMessage[],
+    ): Promise<ChatResult> => {
+      const result = await chat(model, messages);
+      return result;
     };
-
-    const engineChat = (model: string, messages: ChatMessage[]): Promise<string> =>
-      chat(model, messages);
 
     const deps: EngineDeps = {
       chat: engineChat,
-      buildProducerMessages,
-      buildReviewerMessages,
+      buildWorkerMessages,
       buildLeaderMessages,
     };
 
@@ -405,7 +423,7 @@ export class RoleBasedProtocol implements DeliberationProtocol {
       consensus: this.consensus,
     };
 
-    const output = await this.runDeliberation(team, input, deps, config);
+    const output = await this.runDeliberation(team, input, deps, config, this.retryDeps);
 
     return {
       result: output.result,
@@ -413,7 +431,7 @@ export class RoleBasedProtocol implements DeliberationProtocol {
       consensusReached: output.consensusReached,
       totalLLMCalls: output.totalLLMCalls,
       modelsUsed: [...output.modelsUsed],
-      protocol: "role-based",
+      protocol: "diverge-synth",
     };
   }
 
@@ -424,29 +442,25 @@ export class RoleBasedProtocol implements DeliberationProtocol {
   }
 
   private buildExplicitTeam(plan: EnsemblePlan): TeamComposition {
-    let producer: TeamMember | undefined;
-    const reviewers: TeamMember[] = [];
+    const workers: TeamMember[] = [];
     let leader: TeamMember | undefined;
 
     for (const m of plan.models) {
-      const role = m.role ?? "reviewer";
-      if (role === "producer" && !producer) {
-        producer = { model: m.modelId, role: "producer" };
-      } else if (role === "leader" && !leader) {
+      if (m.role === "leader" && !leader) {
         leader = { model: m.modelId, role: "leader" };
       } else {
-        reviewers.push({
-          model: m.modelId,
-          role: "reviewer",
-          perspective: `reviewer-${reviewers.length + 1}`,
-        });
+        workers.push({ model: m.modelId, role: "worker" });
       }
     }
 
-    if (!producer) producer = { model: plan.models[0]!.modelId, role: "producer" };
     if (!leader) leader = { model: plan.models[plan.models.length - 1]!.modelId, role: "leader" };
+    // If the auto-assigned leader was already in workers, remove it
+    const finalWorkers = workers.filter((w) => w.model !== leader!.model);
+    if (finalWorkers.length === 0) {
+      finalWorkers.push({ model: plan.models[0]!.modelId, role: "worker" });
+    }
 
-    return { producer, reviewers, leader };
+    return { workers: finalWorkers, leader };
   }
 
   private buildAutoTeam(plan: EnsemblePlan, scores: ModelScore[]): TeamComposition {
@@ -462,6 +476,7 @@ export class RoleBasedProtocol implements DeliberationProtocol {
       return rating.mu * penalty;
     };
 
+    // Leader: best JUDGMENT composite
     let leaderId = modelIds[modelIds.length - 1]!;
     let bestJudgment = -Infinity;
     for (const id of modelIds) {
@@ -475,33 +490,21 @@ export class RoleBasedProtocol implements DeliberationProtocol {
       }
     }
 
-    const remaining = modelIds.filter((id) => id !== leaderId);
-    let producerId = remaining[0] ?? modelIds[0]!;
-    let bestProd = -Infinity;
-    for (const id of remaining) {
-      const score = getDimScore(id, "CODE_GENERATION") * 0.35
-        + getDimScore(id, "CREATIVITY") * 0.25
-        + getDimScore(id, "REASONING") * 0.2
-        + getDimScore(id, "INSTRUCTION_FOLLOWING") * 0.2;
-      if (score > bestProd) {
-        bestProd = score;
-        producerId = id;
-      }
-    }
+    // Workers: everyone else
+    const workerIds = modelIds.filter((id) => id !== leaderId);
+    if (workerIds.length === 0) workerIds.push(leaderId);
 
-    const reviewerIds = modelIds.filter((id) => id !== leaderId && id !== producerId);
-    if (reviewerIds.length === 0) reviewerIds.push(leaderId);
-
-    const reviewers: TeamMember[] = reviewerIds.map((id, i) => ({
+    const workers: TeamMember[] = workerIds.map((id) => ({
       model: id,
-      role: "reviewer" as const,
-      perspective: `reviewer-${i + 1}`,
+      role: "worker" as const,
     }));
 
     return {
-      producer: { model: producerId, role: "producer" },
-      reviewers,
+      workers,
       leader: { model: leaderId, role: "leader" },
     };
   }
 }
+
+// Backward compatibility alias
+export { DivergeSynthProtocol as RoleBasedProtocol };

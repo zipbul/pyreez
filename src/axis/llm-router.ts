@@ -42,7 +42,8 @@ export class LlmRouter {
         .replace("{{models}}", this.modelIds.join(", "))
         .replace("{{task}}", prompt);
 
-      const raw = await this.chatFn(this.routerModel, routerPrompt);
+      const result = await this.chatFn(this.routerModel, routerPrompt);
+      const raw = result.content;
 
       if (!raw || raw.trim().length === 0) {
         return null;

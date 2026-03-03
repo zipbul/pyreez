@@ -45,7 +45,7 @@ interface ModelsJsonSchema {
 }
 
 /** Default DimensionRating for missing entries. */
-const DEFAULT_RATING: DimensionRating = { mu: 0, sigma: SIGMA_BASE, comparisons: 0 };
+const DEFAULT_RATING: DimensionRating = { mu: 500, sigma: SIGMA_BASE, comparisons: 0 };
 
 /** Detect if entry is legacy v1 format (has 'score' key). */
 function isLegacy(entry: unknown): entry is LegacyScoreEntry {
@@ -135,19 +135,19 @@ export class ModelRegistry {
     return result;
   }
 
-  /** Filter models by minimum context window size. */
+  /** Filter available models by minimum context window size. */
   filterByContext(minContext: number): ModelInfo[] {
-    return this.getAll().filter((m) => m.contextWindow >= minContext);
+    return this.getAvailable().filter((m) => m.contextWindow >= minContext);
   }
 
-  /** Filter models that support tool/function calling. */
+  /** Filter available models that support tool/function calling. */
   filterByToolCalling(): ModelInfo[] {
-    return this.getAll().filter((m) => m.supportsToolCalling);
+    return this.getAvailable().filter((m) => m.supportsToolCalling);
   }
 
-  /** Filter models by minimum MULTILINGUAL mu score. */
+  /** Filter available models by minimum MULTILINGUAL mu score. */
   filterByMultilingual(minScore: number): ModelInfo[] {
-    return this.getAll().filter(
+    return this.getAvailable().filter(
       (m) => m.capabilities.MULTILINGUAL.mu >= minScore,
     );
   }

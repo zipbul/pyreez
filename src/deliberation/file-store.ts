@@ -59,11 +59,6 @@ export class FileDeliberationStore implements DeliberationStore {
     if (q.task != null) {
       results = results.filter((r) => r.task.includes(q.task!));
     }
-    if (q.perspective != null) {
-      results = results.filter((r) =>
-        r.perspectives.some((p) => p === q.perspective),
-      );
-    }
     if (q.model != null) {
       results = results.filter((r) =>
         r.modelsUsed.some((m) => m === q.model),

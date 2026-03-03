@@ -1,129 +1,60 @@
 /**
- * Deliberation prompt builders.
+ * Deliberation prompt builders — Diverge-Synth model.
  *
  * Exported functions:
- *   buildProducerMessages — build ChatMessage[] for the producer LLM
- *   buildReviewerMessages — build ChatMessage[] for a reviewer LLM
+ *   buildWorkerMessages — build ChatMessage[] for a worker LLM
  *   buildLeaderMessages — build ChatMessage[] for the leader LLM
  *
  * Pure functions: SharedContext in → ChatMessage[] out.
+ * Host provides instructions; pyreez uses minimal defaults when absent.
  * @module Deliberation Prompts
  */
 
 import type { ChatMessage } from "../llm/types";
-import type { Round, SharedContext } from "./types";
+import type { ConsensusMode, SharedContext } from "./types";
 
-// -- System Prompts --
+// -- Minimal Default Prompts --
 
 export interface RoundInfo {
   readonly current: number;
   readonly max: number;
 }
 
-const PRODUCER_SYSTEM = `You are a Producer in a multi-model deliberation team.
-Your role is to generate high-quality content that addresses the given task.
-If previous rounds exist, incorporate feedback from reviewers and the leader's action items.
+/**
+ * Minimal default for workers. Used only when host does not provide workerInstructions.
+ */
+const WORKER_DEFAULT = "Respond to the following task.";
 
-Respond in JSON format:
-{
-  "content": "<your produced content>",
-  "revisionNotes": "<optional: what you changed and why>"
-}`;
-
-function reviewerSystem(perspective: string): string {
-  return `You are a Reviewer in a multi-model deliberation team.
-Your review perspective is: ${perspective}
-Evaluate the producer's output strictly from your assigned perspective.
-Identify issues, provide reasoning, and decide whether to approve.
-If previous rounds exist, acknowledge improvements made since the last round before listing new issues.
-
-Respond in JSON format:
-{
-  "issues": [{"severity": "critical|major|minor|suggestion", "description": "<issue>", "location": "<optional>", "suggestion": "<optional>"}],
-  "approval": true|false,
-  "reasoning": "<your reasoning>"
-}`;
-}
-
-const LEADER_SYSTEM = `You are the Leader in a multi-model deliberation team.
-Your role is to synthesize all reviewer feedback, identify consensus, and decide the next step.
-Evaluate whether the team has reached agreement or needs another round.
-If only minor or suggestion-level issues remain and no critical/major issues exist, prefer deciding "approve".
-
-Respond in JSON format:
-{
-  "consensusStatus": "reached|progressing|stalled",
-  "keyAgreements": ["<agreed point>"],
-  "keyDisagreements": ["<disagreed point>"],
-  "actionItems": ["<action for next round>"],
-  "decision": "continue|approve|escalate"
-}`;
-
-// -- History Serialization --
-
-function serializeRound(round: Round): string {
-  const parts: string[] = [`### Round ${round.number}`];
-
-  if (round.production) {
-    parts.push(`**Production** (${round.production.model}):`);
-    parts.push(round.production.content);
-    if (round.production.revisionNotes) {
-      parts.push(`_Revision notes: ${round.production.revisionNotes}_`);
-    }
-  }
-
-  if (round.reviews.length > 0) {
-    parts.push("**Reviews:**");
-    for (const review of round.reviews) {
-      parts.push(`- [${review.perspective}] (${review.model}): ${review.approval ? "✅ Approved" : "❌ Not approved"}`);
-      parts.push(`  Reasoning: ${review.reasoning}`);
-      if (review.issues.length > 0) {
-        for (const issue of review.issues) {
-          parts.push(`  - [${issue.severity}] ${issue.description}`);
-        }
-      }
-    }
-  }
-
-  if (round.synthesis) {
-    parts.push(`**Synthesis** (${round.synthesis.model}):`);
-    parts.push(`Decision: ${round.synthesis.decision}`);
-    parts.push(`Status: ${round.synthesis.consensusStatus}`);
-    if (round.synthesis.keyAgreements.length > 0) {
-      parts.push(`Agreements: ${round.synthesis.keyAgreements.join(", ")}`);
-    }
-    if (round.synthesis.keyDisagreements.length > 0) {
-      parts.push(`Disagreements: ${round.synthesis.keyDisagreements.join(", ")}`);
-    }
-    if (round.synthesis.actionItems.length > 0) {
-      parts.push(`Action items: ${round.synthesis.actionItems.join(", ")}`);
-    }
-  }
-
-  return parts.join("\n");
-}
-
-function serializeHistory(rounds: readonly Round[]): string {
-  return rounds.map(serializeRound).join("\n\n");
-}
+/**
+ * Minimal default for leader. Used only when host does not provide leaderInstructions.
+ */
+const LEADER_DEFAULT =
+  "You are given multiple responses to a task. Compare, evaluate, and produce the best final answer.";
 
 // -- Exported Builders --
 
 /**
- * Build messages for the producer LLM.
+ * Build messages for a worker LLM.
  *
- * - system: role description + JSON output format
- * - user: task + (history if rounds > 0) + (instructions if provided)
+ * Context optimization: workers only see the previous round's synthesis,
+ * NOT full history. This keeps context O(1) per round.
+ *
+ * - system: host-provided instructions OR minimal default
+ * - user: task + (previous synthesis if rounds > 0) + (round budget)
  */
-export function buildProducerMessages(
+export function buildWorkerMessages(
   ctx: SharedContext,
   instructions?: string,
   roundInfo?: RoundInfo,
 ): ChatMessage[] {
   const userParts: string[] = [`## Task\n${ctx.task}`];
 
+  // Only pass the previous round's synthesis (not full history)
   if (ctx.rounds.length > 0) {
-    userParts.push(`## Previous Rounds\n${serializeHistory(ctx.rounds)}`);
+    const lastRound = ctx.rounds[ctx.rounds.length - 1];
+    if (lastRound?.synthesis) {
+      userParts.push(`## Previous Round Result\n${lastRound.synthesis.content}`);
+    }
   }
 
   if (roundInfo) {
@@ -135,49 +66,8 @@ export function buildProducerMessages(
     );
   }
 
-  if (instructions) {
-    userParts.push(`## Instructions\n${instructions}`);
-  }
-
   return [
-    { role: "system", content: PRODUCER_SYSTEM },
-    { role: "user", content: userParts.join("\n\n") },
-  ];
-}
-
-/**
- * Build messages for a reviewer LLM.
- *
- * - system: role description + perspective + JSON output format
- * - user: task + full history (all rounds including current production) + perspective
- *
- * NOTE: ctx should include the current round's production (partial round with reviews=[])
- * so the reviewer can see what to review.
- */
-export function buildReviewerMessages(
-  ctx: SharedContext,
-  perspective: string,
-  roundInfo?: RoundInfo,
-): ChatMessage[] {
-  const userParts: string[] = [`## Task\n${ctx.task}`];
-
-  if (ctx.rounds.length > 0) {
-    userParts.push(`## Deliberation History\n${serializeHistory(ctx.rounds)}`);
-  }
-
-  userParts.push(`## Your Perspective\nReview from the perspective of: **${perspective}**`);
-
-  if (roundInfo) {
-    const budget = `## Round Budget\nRound ${roundInfo.current} of ${roundInfo.max}`;
-    userParts.push(
-      roundInfo.current === roundInfo.max
-        ? `${budget}\n⚠️ This is the FINAL round.`
-        : budget,
-    );
-  }
-
-  return [
-    { role: "system", content: reviewerSystem(perspective) },
+    { role: "system", content: instructions || WORKER_DEFAULT },
     { role: "user", content: userParts.join("\n\n") },
   ];
 }
@@ -185,21 +75,27 @@ export function buildReviewerMessages(
 /**
  * Build messages for the leader LLM.
  *
- * - system: role description + JSON output format
- * - user: task + full history (all rounds) + (instructions if provided)
+ * Context optimization: leader sees current round's worker responses only,
+ * NOT full history. This keeps context O(workers) per round.
  *
- * NOTE: ctx should include the current round (with production + reviews)
- * so the leader can synthesize the current state.
+ * - system: host-provided instructions OR minimal default
+ * - user: task + current round's worker responses + (round budget)
  */
 export function buildLeaderMessages(
   ctx: SharedContext,
   instructions?: string,
   roundInfo?: RoundInfo,
+  consensus?: ConsensusMode,
 ): ChatMessage[] {
   const userParts: string[] = [`## Task\n${ctx.task}`];
 
-  if (ctx.rounds.length > 0) {
-    userParts.push(`## Deliberation History\n${serializeHistory(ctx.rounds)}`);
+  // Current round's worker responses
+  const currentRound = ctx.rounds[ctx.rounds.length - 1];
+  if (currentRound && currentRound.responses.length > 0) {
+    const responses = currentRound.responses
+      .map((r, i) => `### Response ${i + 1} (${r.model})\n${r.content}`)
+      .join("\n\n");
+    userParts.push(`## Worker Responses\n${responses}`);
   }
 
   if (roundInfo) {
@@ -211,12 +107,14 @@ export function buildLeaderMessages(
     );
   }
 
-  if (instructions) {
-    userParts.push(`## Instructions\n${instructions}`);
+  let systemContent = instructions || LEADER_DEFAULT;
+  // Inject JSON output format only when consensus is active AND host hasn't already specified format
+  if (consensus === "leader_decides" && !(instructions && /\bjson\b/i.test(instructions) && /\bdecision\b/i.test(instructions))) {
+    systemContent += '\n\nIMPORTANT: You MUST respond with a JSON object containing "result" (your synthesis) and "decision" ("approve" if consensus reached, "continue" if more rounds needed). Example: {"result": "...", "decision": "approve"}';
   }
 
   return [
-    { role: "system", content: LEADER_SYSTEM },
+    { role: "system", content: systemContent },
     { role: "user", content: userParts.join("\n\n") },
   ];
 }

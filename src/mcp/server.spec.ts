@@ -3,7 +3,6 @@ import { PyreezMcpServer } from "./server";
 import type { PyreezMcpServerConfig } from "./server";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { ChatCompletionRequest, ChatCompletionResponse } from "../llm/types";
 import type { ModelRegistry } from "../model/registry";
 import type { Reporter } from "../report/types";
 import type { ModelInfo } from "../model/types";
@@ -21,29 +20,6 @@ function stubMcpServer(overrides: Partial<McpServer> = {}): McpServer {
     close: mock(() => Promise.resolve()),
     ...overrides,
   } as unknown as McpServer;
-}
-
-type ChatFnType = (request: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
-
-const DEFAULT_CHAT_RESPONSE: ChatCompletionResponse = {
-  id: "test-id",
-  object: "chat.completion",
-  created: Date.now(),
-  model: "test-model",
-  choices: [
-    {
-      index: 0,
-      message: { role: "assistant" as const, content: "test response" },
-      finish_reason: "stop" as const,
-    },
-  ],
-  usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-};
-
-function stubChatFn(
-  impl?: (request: ChatCompletionRequest) => Promise<ChatCompletionResponse>,
-): ChatFnType {
-  return mock(impl ?? (() => Promise.resolve(DEFAULT_CHAT_RESPONSE)));
 }
 
 function stubRegistry(
@@ -152,7 +128,6 @@ function validConfig(
 ): PyreezMcpServerConfig {
   return {
     mcpServer: stubMcpServer(),
-    chatFn: stubChatFn(),
     registry: stubRegistry(),
     reporter: stubReporter(),
     engine: stubEngine(),
@@ -166,18 +141,16 @@ describe("PyreezMcpServer", () => {
   // === Constructor ===
 
   describe("constructor", () => {
-    it("should create instance and register 7 tools when config is valid", () => {
+    it("should create instance and register 5 tools when config is valid", () => {
       const mcp = stubMcpServer();
       const server = new PyreezMcpServer(validConfig({ mcpServer: mcp }));
 
       expect(server).toBeInstanceOf(PyreezMcpServer);
-      expect(mcp.registerTool).toHaveBeenCalledTimes(7);
+      expect(mcp.registerTool).toHaveBeenCalledTimes(5);
 
       const calls = (mcp.registerTool as ReturnType<typeof mock>).mock.calls;
       const toolNames = calls.map((c: unknown[]) => c[0]);
       expect(toolNames).toContain("pyreez_route");
-      expect(toolNames).toContain("pyreez_ask");
-      expect(toolNames).toContain("pyreez_ask_many");
       expect(toolNames).toContain("pyreez_scores");
       expect(toolNames).toContain("pyreez_report");
       expect(toolNames).toContain("pyreez_deliberate");
@@ -192,16 +165,6 @@ describe("PyreezMcpServer", () => {
             mcpServer: undefined as unknown as McpServer,
           }),
       ).toThrow("mcpServer is required");
-    });
-
-    it("should throw when chatFn is missing", () => {
-      expect(
-        () =>
-          new PyreezMcpServer({
-            ...validConfig(),
-            chatFn: undefined as unknown as ChatFnType,
-          }),
-      ).toThrow("chatFn is required");
     });
 
     it('should throw "registry is required" when registry is missing', () => {
@@ -369,397 +332,6 @@ describe("PyreezMcpServer", () => {
         { perRequest: 1.0 },
         { domain: "TESTING", taskType: "EDGE_CASE_DISCOVERY", complexity: "complex" },
       );
-    });
-  });
-
-  // === pyreez_ask ===
-
-  describe("pyreez_ask", () => {
-    it("should return response text when model and messages are valid", async () => {
-      const chatFn = stubChatFn();
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      const result = await server.handleAsk({
-        model: "openai/gpt-4.1",
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      expect(result.isError).toBeUndefined();
-      expect((result.content[0] as { text: string }).text).toBe(
-        "test response",
-      );
-    });
-
-    it("should forward temperature and max_tokens to LLM client", async () => {
-      const chatFn = stubChatFn();
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      await server.handleAsk({
-        model: "openai/gpt-4.1",
-        messages: [{ role: "user", content: "hello" }],
-        temperature: 0.7,
-        max_tokens: 500,
-      });
-
-      const chatCall = (chatFn as ReturnType<typeof mock>).mock
-        .calls[0]![0];
-      expect(chatCall.model).toBe("openai/gpt-4.1");
-      expect(chatCall.temperature).toBe(0.7);
-      expect(chatCall.max_tokens).toBe(500);
-    });
-
-    it("should return error when model is empty", async () => {
-      const server = new PyreezMcpServer(validConfig());
-
-      const result = await server.handleAsk({
-        model: "",
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain("model");
-    });
-
-    it("should return error when messages array is empty", async () => {
-      const server = new PyreezMcpServer(validConfig());
-
-      const result = await server.handleAsk({
-        model: "openai/gpt-4.1",
-        messages: [],
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain(
-        "messages",
-      );
-    });
-
-    it("should return error when chat() throws", async () => {
-      const chatFn = stubChatFn(() => Promise.reject(new Error("API rate limit")));
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      const result = await server.handleAsk({
-        model: "openai/gpt-4.1",
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain(
-        "API rate limit",
-      );
-    });
-
-    it("should return error when response has no content", async () => {
-      const chatFn = stubChatFn(() =>
-          Promise.resolve({
-            id: "test",
-            object: "chat.completion",
-            created: Date.now(),
-            model: "test",
-            choices: [],
-            usage: {
-              prompt_tokens: 10,
-              completion_tokens: 0,
-              total_tokens: 10,
-            },
-          }),
-        );
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      const result = await server.handleAsk({
-        model: "openai/gpt-4.1",
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain(
-        "empty",
-      );
-    });
-
-    it("should strip think tags from response content", async () => {
-      const chatFn = stubChatFn(() =>
-          Promise.resolve({
-            id: "test",
-            object: "chat.completion",
-            created: Date.now(),
-            model: "test",
-            choices: [
-              {
-                index: 0,
-                message: {
-                  role: "assistant",
-                  content:
-                    "<think>internal reasoning</think>actual answer",
-                },
-                finish_reason: "stop",
-              },
-            ],
-            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-          }),
-        );
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      const result = await server.handleAsk({
-        model: "deepseek/deepseek-r1",
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      expect(result.isError).toBeUndefined();
-      expect((result.content[0] as { text: string }).text).toBe(
-        "actual answer",
-      );
-    });
-
-    it("should return empty text when response contains only think tags", async () => {
-      const chatFn = stubChatFn(() =>
-          Promise.resolve({
-            id: "test",
-            object: "chat.completion",
-            created: Date.now(),
-            model: "test",
-            choices: [
-              {
-                index: 0,
-                message: {
-                  role: "assistant",
-                  content: "<think>only reasoning here</think>",
-                },
-                finish_reason: "stop",
-              },
-            ],
-            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-          }),
-        );
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      const result = await server.handleAsk({
-        model: "deepseek/deepseek-r1",
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      expect(result.isError).toBeUndefined();
-      expect((result.content[0] as { text: string }).text).toBe("");
-    });
-  });
-
-  // === pyreez_ask_many ===
-
-  describe("pyreez_ask_many", () => {
-    it("should return result per model when all succeed", async () => {
-      const chatFn = stubChatFn((req: { model: string }) =>
-          Promise.resolve({
-            id: "test",
-            object: "chat.completion",
-            created: Date.now(),
-            model: req.model,
-            choices: [
-              {
-                index: 0,
-                message: {
-                  role: "assistant",
-                  content: `response from ${req.model}`,
-                },
-                finish_reason: "stop",
-              },
-            ],
-          }),
-        );
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      const result = await server.handleAskMany({
-        models: ["openai/gpt-4.1", "openai/gpt-4.1-mini"],
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(2);
-      expect(parsed[0].model).toBe("openai/gpt-4.1");
-      expect(parsed[0].content).toContain("openai/gpt-4.1");
-      expect(parsed[1].model).toBe("openai/gpt-4.1-mini");
-    });
-
-    it("should return error when models array is empty", async () => {
-      const server = new PyreezMcpServer(validConfig());
-
-      const result = await server.handleAskMany({
-        models: [],
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain("models");
-    });
-
-    it("should return error when messages is empty for ask_many", async () => {
-      const server = new PyreezMcpServer(validConfig());
-
-      const result = await server.handleAskMany({
-        models: ["openai/gpt-4.1"],
-        messages: [],
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain(
-        "messages",
-      );
-    });
-
-    it("should include error entries when some models fail", async () => {
-      let callIndex = 0;
-      const chatFn = stubChatFn(() => {
-          callIndex++;
-          if (callIndex === 1) {
-            return Promise.resolve({
-              id: "test",
-              object: "chat.completion",
-              created: Date.now(),
-              model: "openai/gpt-4.1",
-              choices: [
-                {
-                  index: 0,
-                  message: { role: "assistant", content: "success content" },
-                  finish_reason: "stop",
-                },
-              ],
-            });
-          }
-          return Promise.reject(new Error("model unavailable"));
-        });
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      const result = await server.handleAskMany({
-        models: ["openai/gpt-4.1", "openai/gpt-4.1-mini"],
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(2);
-
-      const success = parsed.find(
-        (r: { content: string }) => r.content === "success content",
-      );
-      const failure = parsed.find((r: { error: string }) => r.error);
-      expect(success).toBeDefined();
-      expect(success.content).toBe("success content");
-      expect(failure).toBeDefined();
-      expect(failure.error).toContain("model unavailable");
-    });
-
-    it("should return all errors when every model fails", async () => {
-      const chatFn = stubChatFn(() =>
-          Promise.reject(new Error("all models down")),
-        );
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      const result = await server.handleAskMany({
-        models: ["openai/gpt-4.1", "openai/gpt-4.1-mini"],
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(2);
-      expect(parsed[0].error).toContain("all models down");
-      expect(parsed[1].error).toContain("all models down");
-    });
-
-    it("should strip think tags from each model response", async () => {
-      const chatFn = stubChatFn((req: { model: string }) =>
-          Promise.resolve({
-            id: "test",
-            object: "chat.completion",
-            created: Date.now(),
-            model: req.model,
-            choices: [
-              {
-                index: 0,
-                message: {
-                  role: "assistant",
-                  content: `<think>reasoning for ${req.model}</think>answer from ${req.model}`,
-                },
-                finish_reason: "stop",
-              },
-            ],
-          }),
-        );
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      const result = await server.handleAskMany({
-        models: ["deepseek/deepseek-r1", "openai/gpt-4.1"],
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed[0].content).toBe("answer from deepseek/deepseek-r1");
-      expect(parsed[1].content).toBe("answer from openai/gpt-4.1");
-    });
-
-    it("should strip think tags only from models that have them", async () => {
-      let callIndex = 0;
-      const chatFn = stubChatFn(() => {
-          callIndex++;
-          const content =
-            callIndex === 1
-              ? "<think>deep thought</think>stripped answer"
-              : "clean answer";
-          return Promise.resolve({
-            id: "test",
-            object: "chat.completion",
-            created: Date.now(),
-            model: callIndex === 1 ? "deepseek/deepseek-r1" : "openai/gpt-4.1",
-            choices: [
-              {
-                index: 0,
-                message: { role: "assistant", content },
-                finish_reason: "stop",
-              },
-            ],
-          });
-        });
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      const result = await server.handleAskMany({
-        models: ["deepseek/deepseek-r1", "openai/gpt-4.1"],
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed[0].content).toBe("stripped answer");
-      expect(parsed[1].content).toBe("clean answer");
-    });
-
-    it("should return empty content for model with only think tags", async () => {
-      const chatFn = stubChatFn(() =>
-          Promise.resolve({
-            id: "test",
-            object: "chat.completion",
-            created: Date.now(),
-            model: "deepseek/deepseek-r1",
-            choices: [
-              {
-                index: 0,
-                message: {
-                  role: "assistant",
-                  content: "<think>only internal reasoning</think>",
-                },
-                finish_reason: "stop",
-              },
-            ],
-          }),
-        );
-      const server = new PyreezMcpServer(validConfig({ chatFn }));
-
-      const result = await server.handleAskMany({
-        models: ["deepseek/deepseek-r1"],
-        messages: [{ role: "user", content: "hello" }],
-      });
-
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed[0].content).toBe("");
     });
   });
 
@@ -1242,7 +814,6 @@ describe("PyreezMcpServer", () => {
           id: "d1",
           task: "Write tests",
           timestamp: 1700000000000,
-          perspectives: ["보안"],
           consensusReached: true,
           roundsExecuted: 2,
           result: "code here",
@@ -1288,7 +859,6 @@ describe("PyreezMcpServer", () => {
           id: "d1",
           task: "A",
           timestamp: 1,
-          perspectives: [],
           consensusReached: true,
           roundsExecuted: 1,
           result: "r",
@@ -1299,7 +869,6 @@ describe("PyreezMcpServer", () => {
           id: "d2",
           task: "B",
           timestamp: 2,
-          perspectives: [],
           consensusReached: false,
           roundsExecuted: 1,
           result: "r",
@@ -1323,7 +892,7 @@ describe("PyreezMcpServer", () => {
       expect(result.isError).toBeUndefined();
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed).toHaveLength(2);
-      // Verify query was called with empty filters (no task/perspective/model)
+      // Verify query was called with empty filters (no task/model)
       const queryArg = (store.query as ReturnType<typeof mock>).mock.calls[0]![0];
       expect(queryArg.task).toBeUndefined();
     });
@@ -1332,17 +901,13 @@ describe("PyreezMcpServer", () => {
   // === pyreez_deliberate ===
 
   describe("pyreez_deliberate", () => {
-    const DELIBERATE_OUTPUT = {
+    const DELIBERATE_OUTPUT: DeliberateOutput = {
       result: "function add(a, b) { return a + b; }",
       roundsExecuted: 2,
       consensusReached: true,
-      finalApprovals: [
-        { model: "reviewer/a", approved: true, remainingIssues: [] },
-      ],
-      deliberationLog: { task: "task", team: {}, rounds: [] },
-      totalTokens: 0,
+      totalTokens: { input: 100, output: 200 },
       totalLLMCalls: 8,
-      modelsUsed: ["producer/m", "reviewer/a", "leader/m"],
+      modelsUsed: ["worker/a", "worker/b", "leader/m"],
     };
 
     function stubDeliberateFn(
@@ -1355,13 +920,12 @@ describe("PyreezMcpServer", () => {
       return mock(() => Promise.resolve(result ?? DELIBERATE_OUTPUT)) as any;
     }
 
-    it("should return DeliberateOutput JSON when task and perspectives valid", async () => {
+    it("should return DeliberateOutput JSON when task is valid", async () => {
       const deliberateFn = stubDeliberateFn();
       const server = new PyreezMcpServer(validConfig({ deliberateFn }));
 
       const result = await server.handleDeliberate({
         task: "Write a sort function",
-        perspectives: ["코드 품질", "보안"],
       });
 
       expect(result.isError).toBeUndefined();
@@ -1373,18 +937,17 @@ describe("PyreezMcpServer", () => {
       expect(parsed.totalLLMCalls).toBe(8);
     });
 
-    it("should forward producer_instructions as producerInstructions to deliberateFn", async () => {
+    it("should forward worker_instructions as workerInstructions to deliberateFn", async () => {
       const deliberateFn = stubDeliberateFn();
       const server = new PyreezMcpServer(validConfig({ deliberateFn }));
 
       await server.handleDeliberate({
         task: "task",
-        perspectives: ["p"],
-        producer_instructions: "Use TypeScript",
+        worker_instructions: "Use TypeScript",
       });
 
       const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
-      expect(callArg.producerInstructions).toBe("Use TypeScript");
+      expect(callArg.workerInstructions).toBe("Use TypeScript");
     });
 
     it("should forward leader_instructions as leaderInstructions to deliberateFn", async () => {
@@ -1393,7 +956,6 @@ describe("PyreezMcpServer", () => {
 
       await server.handleDeliberate({
         task: "task",
-        perspectives: ["p"],
         leader_instructions: "Be strict",
       });
 
@@ -1407,14 +969,13 @@ describe("PyreezMcpServer", () => {
 
       await server.handleDeliberate({
         task: "task",
-        perspectives: ["p"],
         max_rounds: 5,
-        consensus: "all_approve",
+        consensus: "leader_decides",
       });
 
       const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
       expect(callArg.maxRounds).toBe(5);
-      expect(callArg.consensus).toBe("all_approve");
+      expect(callArg.consensus).toBe("leader_decides");
     });
 
     it("should return isError undefined on success", async () => {
@@ -1423,7 +984,6 @@ describe("PyreezMcpServer", () => {
 
       const result = await server.handleDeliberate({
         task: "task",
-        perspectives: ["p"],
       });
 
       expect(result.isError).toBeUndefined();
@@ -1435,24 +995,10 @@ describe("PyreezMcpServer", () => {
 
       const result = await server.handleDeliberate({
         task: "",
-        perspectives: ["p"],
       });
 
       expect(result.isError).toBe(true);
       expect((result.content[0] as { text: string }).text).toContain("task");
-    });
-
-    it("should return error when perspectives is empty array and auto_route is false", async () => {
-      const deliberateFn = stubDeliberateFn();
-      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
-
-      const result = await server.handleDeliberate({
-        task: "task",
-        perspectives: [],
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain("perspectives");
     });
 
     it("should return error when deliberateFn is not configured", async () => {
@@ -1460,7 +1006,6 @@ describe("PyreezMcpServer", () => {
 
       const result = await server.handleDeliberate({
         task: "task",
-        perspectives: ["p"],
       });
 
       expect(result.isError).toBe(true);
@@ -1473,7 +1018,6 @@ describe("PyreezMcpServer", () => {
 
       const result = await server.handleDeliberate({
         task: "task",
-        perspectives: ["p"],
       });
 
       expect(result.isError).toBe(true);
@@ -1486,53 +1030,28 @@ describe("PyreezMcpServer", () => {
 
       const result = await server.handleDeliberate({
         task: "task",
-        perspectives: ["p"],
       });
 
       expect(result.isError).toBe(true);
       expect((result.content[0] as { text: string }).text).toContain("raw failure string");
     });
 
-    it("should work with single perspective", async () => {
-      const deliberateFn = stubDeliberateFn();
-      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
-
-      const result = await server.handleDeliberate({
-        task: "task",
-        perspectives: ["코드 품질"],
-      });
-
-      expect(result.isError).toBeUndefined();
-      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
-      expect(callArg.perspectives).toEqual(["코드 품질"]);
-    });
-
-    it("should check task before perspectives before deliberateFn availability", async () => {
+    it("should check task before deliberateFn availability", async () => {
       // No deliberateFn configured, but task is empty -> task error first
       const server = new PyreezMcpServer(validConfig());
 
       const result1 = await server.handleDeliberate({
         task: "",
-        perspectives: [],
       });
       expect(result1.isError).toBe(true);
       expect((result1.content[0] as { text: string }).text).toContain("task");
 
-      // Task valid, perspectives empty, no deliberateFn -> perspectives error
+      // Task valid, no deliberateFn -> deliberation not available
       const result2 = await server.handleDeliberate({
         task: "task",
-        perspectives: [],
       });
       expect(result2.isError).toBe(true);
-      expect((result2.content[0] as { text: string }).text).toContain("perspectives");
-
-      // Task valid, perspectives valid, no deliberateFn -> deliberation not available
-      const result3 = await server.handleDeliberate({
-        task: "task",
-        perspectives: ["p"],
-      });
-      expect(result3.isError).toBe(true);
-      expect((result3.content[0] as { text: string }).text).toContain("deliberation not available");
+      expect((result2.content[0] as { text: string }).text).toContain("deliberation not available");
     });
 
     // -- auto_route tests --
@@ -1604,6 +1123,62 @@ describe("PyreezMcpServer", () => {
       expect(result.isError).toBe(true);
       expect((result.content[0] as { text: string }).text).toContain(
         "domain, task_type, and complexity are required",
+      );
+    });
+
+    it("should forward budget to engine.run when auto_route=true with budget specified", async () => {
+      const engine = stubEngine();
+      const server = new PyreezMcpServer(validConfig({ engine }));
+
+      await server.handleDeliberate({
+        task: "Sort an array",
+        auto_route: true,
+        domain: "CODING",
+        task_type: "IMPLEMENT_ALGORITHM",
+        complexity: "simple",
+        budget: 0.25,
+      });
+
+      expect(engine.run).toHaveBeenCalledWith(
+        "Sort an array",
+        { perRequest: 0.25 },
+        { domain: "CODING", taskType: "IMPLEMENT_ALGORITHM", complexity: "simple" },
+      );
+    });
+
+    it("should forward quality_weight and cost_weight to deliberateFn in manual deliberation", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      await server.handleDeliberate({
+        task: "Review code",
+        quality_weight: 0.9,
+        cost_weight: 0.1,
+      });
+
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(callArg.qualityWeight).toBe(0.9);
+      expect(callArg.costWeight).toBe(0.1);
+    });
+
+    it("should forward quality_weight and cost_weight to engine.run via classification in auto_route mode", async () => {
+      const engine = stubEngine();
+      const server = new PyreezMcpServer(validConfig({ engine }));
+
+      await server.handleDeliberate({
+        task: "Optimize query",
+        auto_route: true,
+        domain: "CODING",
+        task_type: "OPTIMIZE",
+        complexity: "moderate",
+        quality_weight: 0.8,
+        cost_weight: 0.2,
+      });
+
+      expect(engine.run).toHaveBeenCalledWith(
+        "Optimize query",
+        { perRequest: 1.0 },
+        { domain: "CODING", taskType: "OPTIMIZE", complexity: "moderate", qualityWeight: 0.8, costWeight: 0.2 },
       );
     });
 
@@ -1705,22 +1280,26 @@ describe("PyreezMcpServer", () => {
         log: mock(() => Promise.resolve()),
         query: mock(() => Promise.resolve([])),
       };
-      const chatFn = stubChatFn(() => Promise.reject(new Error("API error")));
+      const engine = stubEngine({
+        traceOnly: mock(() => Promise.reject(new Error("engine error"))),
+      } as unknown as Partial<PyreezEngine>);
       const server = new PyreezMcpServer(
-        validConfig({ runLogger, chatFn }),
+        validConfig({ runLogger, engine }),
       );
 
-      await server.handleAsk({
-        model: "openai/gpt-4.1",
-        messages: [{ role: "user", content: "hello" }],
+      await server.handleRoute({
+        task: "test task",
+        domain: "CODING",
+        task_type: "IMPLEMENT_FEATURE",
+        complexity: "moderate",
       });
 
       expect(runLogger.log).toHaveBeenCalledTimes(1);
       const logged = (runLogger.log as ReturnType<typeof mock>).mock
         .calls[0]![0];
-      expect(logged.tool).toBe("ask");
+      expect(logged.tool).toBe("route");
       expect(logged.success).toBe(false);
-      expect(logged.error).toContain("API error");
+      expect(logged.error).toContain("engine error");
     });
 
     it("should not fail when runLogger is not configured", async () => {
@@ -1763,21 +1342,25 @@ describe("PyreezMcpServer", () => {
         log: mock(() => Promise.reject(new Error("log write failed"))),
         query: mock(() => Promise.resolve([])),
       };
-      const chatFn = stubChatFn(() => Promise.reject(new Error("LLM API down")));
+      const engine = stubEngine({
+        traceOnly: mock(() => Promise.reject(new Error("engine down"))),
+      } as unknown as Partial<PyreezEngine>);
       const server = new PyreezMcpServer(
-        validConfig({ runLogger, chatFn }),
+        validConfig({ runLogger, engine }),
       );
 
-      // Act — handleAsk will throw from chat, logRun catches logger failure
-      const result = await server.handleAsk({
-        model: "openai/gpt-4.1",
-        messages: [{ role: "user", content: "hello" }],
+      // Act — handleRoute will get error from engine, logRun catches logger failure
+      const result = await server.handleRoute({
+        task: "test task",
+        domain: "CODING",
+        task_type: "IMPLEMENT_FEATURE",
+        complexity: "moderate",
       });
 
       // Assert — error should be from the handler, not from runLogger
       expect(result.isError).toBe(true);
       const text = (result.content[0] as { text: string }).text;
-      expect(text).toContain("LLM API down");
+      expect(text).toContain("engine down");
       expect(text).not.toContain("log write failed");
     });
   });

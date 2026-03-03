@@ -29,7 +29,6 @@ function makeRecord(overrides: Partial<DeliberationRecord> = {}): DeliberationRe
     id: "rec-001",
     task: "Write unit tests",
     timestamp: 1700000000000,
-    perspectives: ["보안", "성능"],
     consensusReached: true,
     roundsExecuted: 2,
     result: "Generated code here",
@@ -115,21 +114,6 @@ describe("FileDeliberationStore", () => {
 
       // Act
       const results = await store.query({ task: "unit" });
-
-      // Assert
-      expect(results).toHaveLength(1);
-      expect(results[0]!.id).toBe("r1");
-    });
-
-    it("should filter by perspective", async () => {
-      // Arrange
-      const r1 = makeRecord({ id: "r1", perspectives: ["보안", "성능"] });
-      const r2 = makeRecord({ id: "r2", perspectives: ["코드 품질"] });
-      const io = ioWithRecords([r1, r2]);
-      const store = new FileDeliberationStore("/data", io);
-
-      // Act
-      const results = await store.query({ perspective: "보안" });
 
       // Assert
       expect(results).toHaveLength(1);

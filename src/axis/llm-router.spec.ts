@@ -3,7 +3,11 @@ import { LlmRouter } from "./llm-router";
 import type { ChatFn } from "./types";
 
 function makeMockChat(response: string): ChatFn {
-  return mock(async (_model: string, _input: string | any[]) => response) as any;
+  return mock(async (_model: string, _input: string | any[]) => ({
+    content: response,
+    inputTokens: 10,
+    outputTokens: 20,
+  })) as any;
 }
 
 const TEST_MODELS = ["claude-sonnet", "gpt-4.1", "gemini-2.5-pro"];

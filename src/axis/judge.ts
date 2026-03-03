@@ -44,7 +44,8 @@ export class LlmJudge {
         .replace("{{task}}", task)
         .replace("{{response}}", response);
 
-      const raw = await this.chatFn(this.judgeModel, prompt);
+      const result = await this.chatFn(this.judgeModel, prompt);
+      const raw = result.content;
 
       if (!raw || raw.trim().length === 0) {
         return DEFAULT_SCORE;

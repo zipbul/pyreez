@@ -2,7 +2,7 @@
  * SharedContext factory and query utilities.
  *
  * All mutations are immutable — return new objects.
- * SharedContext is the Blackboard (MAS pattern) for deliberation.
+ * Diverge-Synth model: Workers + Leader (no producer/reviewer distinction).
  */
 
 import type {
@@ -16,7 +16,7 @@ import type {
  * Create a new empty SharedContext.
  *
  * @param task - Task description (non-empty string required).
- * @param team - Team composition (must have producer, ≥1 reviewer, leader).
+ * @param team - Team composition (must have ≥1 worker + leader).
  * @throws {Error} If task is empty or team is invalid.
  */
 export function createSharedContext(
@@ -26,11 +26,8 @@ export function createSharedContext(
   if (!task || task.trim().length === 0) {
     throw new Error("Task description must be a non-empty string");
   }
-  if (!team.producer) {
-    throw new Error("Team must have a producer");
-  }
-  if (!team.reviewers || team.reviewers.length === 0) {
-    throw new Error("Team must have at least one reviewer");
+  if (!team.workers || team.workers.length === 0) {
+    throw new Error("Team must have at least one worker");
   }
   if (!team.leader) {
     throw new Error("Team must have a leader");
@@ -74,10 +71,7 @@ export function latestRound(ctx: SharedContext): Round | undefined {
  */
 export function isConsensusReached(ctx: SharedContext): boolean {
   const latest = latestRound(ctx);
-  if (!latest) {
-    return false;
-  }
-  if (!latest.synthesis) {
+  if (!latest?.synthesis) {
     return false;
   }
   return latest.synthesis.decision === "approve";
@@ -85,15 +79,12 @@ export function isConsensusReached(ctx: SharedContext): boolean {
 
 /**
  * Count total LLM calls across all rounds.
- * Each round: 1 production + N reviews + 1 synthesis = 2 + N calls.
+ * Each round: N worker responses + 1 synthesis = N + 1 calls.
  */
 export function totalLLMCalls(ctx: SharedContext): number {
   let count = 0;
   for (const round of ctx.rounds) {
-    if (round.production) {
-      count += 1;
-    }
-    count += round.reviews.length;
+    count += round.responses.length;
     if (round.synthesis) {
       count += 1;
     }
@@ -107,11 +98,8 @@ export function totalLLMCalls(ctx: SharedContext): number {
 export function modelsUsed(ctx: SharedContext): string[] {
   const models = new Set<string>();
   for (const round of ctx.rounds) {
-    if (round.production) {
-      models.add(round.production.model);
-    }
-    for (const review of round.reviews) {
-      models.add(review.model);
+    for (const response of round.responses) {
+      models.add(response.model);
     }
     if (round.synthesis) {
       models.add(round.synthesis.model);

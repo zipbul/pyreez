@@ -1,25 +1,34 @@
 /**
- * Unit tests for prompts.ts — Deliberation prompt builders.
+ * Unit tests for prompts.ts — Diverge-Synth deliberation prompt builders.
+ *
+ * SUT: buildWorkerMessages, buildLeaderMessages
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  buildProducerMessages,
-  buildReviewerMessages,
-  buildLeaderMessages,
-} from "./prompts";
-import type { SharedContext, Round, TeamComposition } from "./types";
+import { buildWorkerMessages, buildLeaderMessages } from "./prompts";
+import type {
+  SharedContext,
+  Round,
+  TeamComposition,
+  TeamMember,
+  WorkerResponse,
+  Synthesis,
+} from "./types";
 
 // -- Fixtures --
 
+function makeWorker(model: string): TeamMember {
+  return { model, role: "worker" };
+}
+
+function makeLeader(model: string): TeamMember {
+  return { model, role: "leader" };
+}
+
 function makeTeam(): TeamComposition {
   return {
-    producer: { model: "producer/model", role: "producer" },
-    reviewers: [
-      { model: "reviewer/a", role: "reviewer", perspective: "코드 품질" },
-      { model: "reviewer/b", role: "reviewer", perspective: "보안" },
-    ],
-    leader: { model: "leader/model", role: "leader" },
+    workers: [makeWorker("worker/a"), makeWorker("worker/b")],
+    leader: makeLeader("leader/model"),
   };
 }
 
@@ -27,212 +36,191 @@ function makeCtx(rounds: readonly Round[] = []): SharedContext {
   return { task: "Write a sorting function", team: makeTeam(), rounds };
 }
 
-function makeRound(number: number, overrides?: Partial<Round>): Round {
+function makeResponse(model: string, content: string): WorkerResponse {
+  return { model, content };
+}
+
+function makeSynthesis(
+  decision?: "continue" | "approve",
+  content = "Synthesis content",
+): Synthesis {
+  return { model: "leader/model", content, decision };
+}
+
+function makeRound(
+  number: number,
+  options?: {
+    responses?: WorkerResponse[];
+    synthesis?: Synthesis;
+  },
+): Round {
   return {
     number,
-    production: {
-      model: "producer/model",
-      content: `Production content round ${number}`,
-      revisionNotes: number > 1 ? "Revised based on feedback" : undefined,
-    },
-    reviews: [
-      {
-        model: "reviewer/a",
-        perspective: "코드 품질",
-        issues: [{ severity: "minor", description: "Use const instead of let" }],
-        approval: number > 1,
-        reasoning: "Code quality review",
-      },
-      {
-        model: "reviewer/b",
-        perspective: "보안",
-        issues: [],
-        approval: true,
-        reasoning: "No security issues found",
-      },
+    responses: options?.responses ?? [
+      makeResponse("worker/a", `Response A round ${number}`),
+      makeResponse("worker/b", `Response B round ${number}`),
     ],
-    synthesis: {
-      model: "leader/model",
-      consensusStatus: number > 1 ? "reached" : "progressing",
-      keyAgreements: ["Basic structure is correct"],
-      keyDisagreements: number === 1 ? ["Naming conventions"] : [],
-      actionItems: number === 1 ? ["Rename variables"] : [],
-      decision: number > 1 ? "approve" : "continue",
-    },
-    ...overrides,
+    synthesis: options?.synthesis,
   };
 }
 
 // ================================================================
-// buildProducerMessages
+// buildWorkerMessages
 // ================================================================
 
-describe("buildProducerMessages", () => {
-  it("should return system + user messages for initial round (no history, no instructions)", () => {
+describe("buildWorkerMessages", () => {
+  it("should return system + user for initial round with no history and no instructions", () => {
+    // Arrange
     const ctx = makeCtx();
-    const messages = buildProducerMessages(ctx);
 
+    // Act
+    const messages = buildWorkerMessages(ctx);
+
+    // Assert
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe("system");
+    expect(messages[0]!.content).toBe("Respond to the following task.");
     expect(messages[1]!.role).toBe("user");
     expect(messages[1]!.content).toContain("Write a sorting function");
   });
 
-  it("should include instructions in user message when provided", () => {
+  it("should use host-provided instructions as system message when given", () => {
+    // Arrange
     const ctx = makeCtx();
-    const messages = buildProducerMessages(ctx, "Use TypeScript strict mode");
 
-    expect(messages[1]!.content).toContain("Use TypeScript strict mode");
+    // Act
+    const messages = buildWorkerMessages(ctx, "Use TypeScript strict mode");
+
+    // Assert
+    expect(messages[0]!.content).toBe("Use TypeScript strict mode");
   });
 
-  it("should include prior round history when ctx has rounds", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildProducerMessages(ctx);
+  it("should include previous round synthesis in user message when rounds exist", () => {
+    // Arrange
+    const round = makeRound(1, {
+      synthesis: makeSynthesis("continue", "The best approach uses quicksort"),
+    });
+    const ctx = makeCtx([round]);
 
-    expect(messages[1]!.content).toContain("Production content round 1");
-    expect(messages[1]!.content).toContain("Use const instead of let");
-  });
+    // Act
+    const messages = buildWorkerMessages(ctx);
 
-  it("should include synthesis actionItems in history context", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildProducerMessages(ctx);
-
-    expect(messages[1]!.content).toContain("Rename variables");
+    // Assert
+    expect(messages[1]!.content).toContain("The best approach uses quicksort");
+    expect(messages[1]!.content).toContain("Previous Round Result");
   });
 
   it("should omit instructions section when instructions is undefined", () => {
+    // Arrange
     const ctx = makeCtx();
-    const messages = buildProducerMessages(ctx, undefined);
-    const userContent = messages[1]!.content!;
 
-    // Should NOT contain an instructions header/section
-    expect(userContent).not.toContain("Instructions");
+    // Act
+    const messages = buildWorkerMessages(ctx, undefined);
+
+    // Assert — system should fall back to default, NOT contain "Instructions" header
+    expect(messages[0]!.content).toBe("Respond to the following task.");
+    expect(messages[1]!.content).not.toContain("Instructions");
   });
 
   it("should omit instructions section when instructions is empty string", () => {
+    // Arrange
     const ctx = makeCtx();
-    const messages = buildProducerMessages(ctx, "");
-    const userContent = messages[1]!.content!;
 
-    expect(userContent).not.toContain("Instructions");
+    // Act
+    const messages = buildWorkerMessages(ctx, "");
+
+    // Assert — empty string is falsy, so default is used
+    expect(messages[0]!.content).toBe("Respond to the following task.");
+    expect(messages[1]!.content).not.toContain("Instructions");
   });
 
-  it("should produce valid messages when ctx has 0 rounds", () => {
-    const ctx = makeCtx([]);
-    const messages = buildProducerMessages(ctx);
+  it("should include round budget when roundInfo is provided", () => {
+    // Arrange
+    const ctx = makeCtx();
 
-    expect(messages).toHaveLength(2);
-    expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toContain("task");
-    expect(messages[1]!.role).toBe("user");
-    expect(messages[1]!.content).toContain(ctx.task);
+    // Act
+    const messages = buildWorkerMessages(ctx, undefined, {
+      current: 2,
+      max: 3,
+    });
+    const user = messages[1]!.content!;
+
+    // Assert
+    expect(user).toContain("Round 2");
+    expect(user).toContain("3");
   });
 
-  it("should serialize multiple rounds of history", () => {
-    const ctx = makeCtx([makeRound(1), makeRound(2)]);
-    const messages = buildProducerMessages(ctx);
-    const userContent = messages[1]!.content!;
+  it("should include FINAL marker when current equals max", () => {
+    // Arrange
+    const ctx = makeCtx();
 
-    expect(userContent).toContain("Production content round 1");
-    expect(userContent).toContain("Production content round 2");
+    // Act
+    const messages = buildWorkerMessages(ctx, undefined, {
+      current: 1,
+      max: 1,
+    });
+    const user = messages[1]!.content!;
+
+    // Assert
+    expect(user).toMatch(/final/i);
   });
 
-  it("should place system message first and user message second", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildProducerMessages(ctx, "instructions");
+  it("should NOT include FINAL marker when current less than max", () => {
+    // Arrange
+    const ctx = makeCtx();
 
-    expect(messages[0]!.role).toBe("system");
-    expect(messages[1]!.role).toBe("user");
-  });
-});
+    // Act
+    const messages = buildWorkerMessages(ctx, undefined, {
+      current: 1,
+      max: 3,
+    });
+    const user = messages[1]!.content!;
 
-// ================================================================
-// buildReviewerMessages
-// ================================================================
-
-describe("buildReviewerMessages", () => {
-  it("should return system + user messages with perspective in system", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildReviewerMessages(ctx, "코드 품질");
-
-    expect(messages).toHaveLength(2);
-    expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toContain("코드 품질");
+    // Assert
+    expect(user).not.toMatch(/final/i);
   });
 
-  it("should include current production in user message", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildReviewerMessages(ctx, "보안");
-
-    expect(messages[1]!.content).toContain("Production content round 1");
-  });
-
-  it("should include prior round history when ctx has rounds", () => {
-    const round1 = makeRound(1);
-    const round2: Round = {
-      number: 2,
-      production: {
-        model: "producer/model",
-        content: "Revised production",
-      },
-      reviews: [],
-    };
+  it("should only see the PREVIOUS round synthesis, not full history (O(1) context)", () => {
+    // Arrange — 2 rounds with different synthesis content
+    const round1 = makeRound(1, {
+      synthesis: makeSynthesis("continue", "Round 1 synthesis"),
+    });
+    const round2 = makeRound(2, {
+      synthesis: makeSynthesis("continue", "Round 2 synthesis"),
+    });
     const ctx = makeCtx([round1, round2]);
-    const messages = buildReviewerMessages(ctx, "코드 품질");
 
-    // Should see round 1 history
-    expect(messages[1]!.content).toContain("Production content round 1");
-    // Should see current (round 2) production
-    expect(messages[1]!.content).toContain("Revised production");
+    // Act
+    const messages = buildWorkerMessages(ctx);
+    const user = messages[1]!.content!;
+
+    // Assert — should see round 2 synthesis (last), NOT round 1
+    expect(user).toContain("Round 2 synthesis");
+    expect(user).not.toContain("Round 1 synthesis");
   });
 
-  it("should include other reviewers' feedback in context (cross-review)", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildReviewerMessages(ctx, "보안");
-    const userContent = messages[1]!.content!;
+  it("should not include synthesis section when previous round has no synthesis", () => {
+    // Arrange — round with no synthesis
+    const round = makeRound(1);
+    const ctx = makeCtx([round]);
 
-    // Reviewer B (보안) should see Reviewer A's (코드 품질) feedback
-    expect(userContent).toContain("코드 품질");
-    expect(userContent).toContain("Use const instead of let");
+    // Act
+    const messages = buildWorkerMessages(ctx);
+    const user = messages[1]!.content!;
+
+    // Assert
+    expect(user).not.toContain("Previous Round Result");
   });
 
-  it("should produce valid messages when ctx has 0 rounds (no production yet)", () => {
-    const ctx = makeCtx([]);
-    const messages = buildReviewerMessages(ctx, "코드 품질");
+  it("should start user message with task section", () => {
+    // Arrange
+    const ctx = makeCtx();
 
-    expect(messages).toHaveLength(2);
-    expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toContain("코드 품질");
-    expect(messages[1]!.role).toBe("user");
-    expect(messages[1]!.content).toContain(ctx.task);
-  });
+    // Act
+    const messages = buildWorkerMessages(ctx);
 
-  it("should handle single reviewer perspective", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildReviewerMessages(ctx, "성능");
-
-    expect(messages[0]!.content).toContain("성능");
-    expect(messages).toHaveLength(2);
-  });
-
-  it("should serialize reviews from multiple prior rounds", () => {
-    const ctx = makeCtx([makeRound(1), makeRound(2)]);
-    const messages = buildReviewerMessages(ctx, "코드 품질");
-    const userContent = messages[1]!.content!;
-
-    // Should see both rounds' production
-    expect(userContent).toContain("Production content round 1");
-    expect(userContent).toContain("Production content round 2");
-  });
-
-  it("should list rounds in chronological order in history", () => {
-    const ctx = makeCtx([makeRound(1), makeRound(2)]);
-    const messages = buildReviewerMessages(ctx, "코드 품질");
-    const userContent = messages[1]!.content!;
-
-    const round1Pos = userContent.indexOf("Production content round 1");
-    const round2Pos = userContent.indexOf("Production content round 2");
-    expect(round1Pos).toBeLessThan(round2Pos);
+    // Assert
+    expect(messages[1]!.content).toMatch(/^## Task\n/);
   });
 });
 
@@ -241,76 +229,230 @@ describe("buildReviewerMessages", () => {
 // ================================================================
 
 describe("buildLeaderMessages", () => {
-  it("should return system + user messages for initial round", () => {
-    const ctx = makeCtx([makeRound(1)]);
+  it("should return system + user for initial round with no worker responses", () => {
+    // Arrange
+    const ctx = makeCtx();
+
+    // Act
     const messages = buildLeaderMessages(ctx);
 
+    // Assert
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe("system");
+    expect(messages[0]!.content).toBe(
+      "You are given multiple responses to a task. Compare, evaluate, and produce the best final answer.",
+    );
     expect(messages[1]!.role).toBe("user");
+    expect(messages[1]!.content).toContain("Write a sorting function");
   });
 
-  it("should include current round's production + reviews in context", () => {
-    const ctx = makeCtx([makeRound(1)]);
+  it("should include current round worker responses in user message", () => {
+    // Arrange
+    const round = makeRound(1, {
+      responses: [
+        makeResponse("worker/a", "Quicksort approach"),
+        makeResponse("worker/b", "Merge sort approach"),
+      ],
+    });
+    const ctx = makeCtx([round]);
+
+    // Act
     const messages = buildLeaderMessages(ctx);
-    const userContent = messages[1]!.content!;
+    const user = messages[1]!.content!;
 
-    expect(userContent).toContain("Production content round 1");
-    expect(userContent).toContain("Use const instead of let");
-    expect(userContent).toContain("No security issues found");
+    // Assert
+    expect(user).toContain("Quicksort approach");
+    expect(user).toContain("Merge sort approach");
+    expect(user).toContain("worker/a");
+    expect(user).toContain("worker/b");
+    expect(user).toContain("Worker Responses");
   });
 
-  it("should include instructions when provided", () => {
+  it("should use host-provided instructions as system message when given", () => {
+    // Arrange
     const ctx = makeCtx([makeRound(1)]);
+
+    // Act
     const messages = buildLeaderMessages(ctx, "Be strict on security");
 
-    expect(messages[1]!.content).toContain("Be strict on security");
+    // Assert
+    expect(messages[0]!.content).toBe("Be strict on security");
   });
 
-  it("should include prior round history", () => {
-    const ctx = makeCtx([makeRound(1), makeRound(2)]);
-    const messages = buildLeaderMessages(ctx);
-    const userContent = messages[1]!.content!;
-
-    expect(userContent).toContain("Production content round 1");
-    expect(userContent).toContain("Production content round 2");
-  });
-
-  it("should omit instructions section when undefined", () => {
+  it("should omit instructions section when instructions is undefined", () => {
+    // Arrange
     const ctx = makeCtx([makeRound(1)]);
+
+    // Act
     const messages = buildLeaderMessages(ctx, undefined);
 
+    // Assert
+    expect(messages[0]!.content).toBe(
+      "You are given multiple responses to a task. Compare, evaluate, and produce the best final answer.",
+    );
     expect(messages[1]!.content).not.toContain("Instructions");
   });
 
-  it("should omit instructions section when empty string", () => {
+  it("should omit instructions section when instructions is empty string", () => {
+    // Arrange
     const ctx = makeCtx([makeRound(1)]);
+
+    // Act
     const messages = buildLeaderMessages(ctx, "");
 
+    // Assert
+    expect(messages[0]!.content).toBe(
+      "You are given multiple responses to a task. Compare, evaluate, and produce the best final answer.",
+    );
     expect(messages[1]!.content).not.toContain("Instructions");
   });
 
-  it("should produce valid messages for first round with minimal context", () => {
-    const round: Round = {
-      number: 1,
-      production: { model: "p/m", content: "Hello" },
-      reviews: [],
-    };
-    const ctx = makeCtx([round]);
-    const messages = buildLeaderMessages(ctx);
+  it("should include round budget when roundInfo is provided", () => {
+    // Arrange
+    const ctx = makeCtx([makeRound(1)]);
 
-    expect(messages).toHaveLength(2);
-    expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toContain("Leader");
-    expect(messages[1]!.content).toContain("Hello");
+    // Act
+    const messages = buildLeaderMessages(ctx, undefined, {
+      current: 2,
+      max: 3,
+    });
+    const user = messages[1]!.content!;
+
+    // Assert
+    expect(user).toContain("Round 2");
+    expect(user).toContain("3");
   });
 
-  it("should place system message first and user message second", () => {
+  it("should include FINAL marker when current equals max", () => {
+    // Arrange
     const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx, "instructions");
 
-    expect(messages[0]!.role).toBe("system");
-    expect(messages[1]!.role).toBe("user");
+    // Act
+    const messages = buildLeaderMessages(ctx, undefined, {
+      current: 3,
+      max: 3,
+    });
+    const user = messages[1]!.content!;
+
+    // Assert
+    expect(user).toMatch(/final/i);
+  });
+
+  it("should NOT include FINAL marker when current less than max", () => {
+    // Arrange
+    const ctx = makeCtx([makeRound(1)]);
+
+    // Act
+    const messages = buildLeaderMessages(ctx, undefined, {
+      current: 1,
+      max: 3,
+    });
+    const user = messages[1]!.content!;
+
+    // Assert
+    expect(user).not.toMatch(/final/i);
+  });
+
+  it("should include both roundInfo and instructions when both provided", () => {
+    // Arrange
+    const ctx = makeCtx([makeRound(1)]);
+
+    // Act
+    const messages = buildLeaderMessages(ctx, "Be strict", {
+      current: 2,
+      max: 3,
+    });
+    const user = messages[1]!.content!;
+
+    // Assert — instructions in system, round budget in user
+    expect(messages[0]!.content).toBe("Be strict");
+    expect(user).toContain("Round 2");
+  });
+
+  it("should show worker responses from the CURRENT (latest) round only", () => {
+    // Arrange — 2 rounds, each with different responses
+    const round1 = makeRound(1, {
+      responses: [makeResponse("worker/a", "Round 1 answer")],
+      synthesis: makeSynthesis("continue", "Round 1 synth"),
+    });
+    const round2 = makeRound(2, {
+      responses: [makeResponse("worker/b", "Round 2 answer")],
+    });
+    const ctx = makeCtx([round1, round2]);
+
+    // Act
+    const messages = buildLeaderMessages(ctx);
+    const user = messages[1]!.content!;
+
+    // Assert — only round 2 responses visible
+    expect(user).toContain("Round 2 answer");
+    expect(user).not.toContain("Round 1 answer");
+  });
+
+  it("should start user message with task section", () => {
+    // Arrange
+    const ctx = makeCtx([makeRound(1)]);
+
+    // Act
+    const messages = buildLeaderMessages(ctx);
+
+    // Assert
+    expect(messages[1]!.content).toMatch(/^## Task\n/);
+  });
+
+  it("should inject JSON output format instruction when consensus is leader_decides", () => {
+    const ctx: SharedContext = {
+      task: "Test task",
+      team: {
+        workers: [{ model: "w1", role: "worker" }],
+        leader: { model: "l1", role: "leader" },
+      },
+      rounds: [{
+        number: 1,
+        responses: [{ model: "w1", content: "response 1" }],
+      }],
+    };
+    const messages = buildLeaderMessages(ctx, undefined, undefined, "leader_decides");
+    const systemContent = messages.find(m => m.role === "system")!.content;
+    expect(systemContent).toContain("JSON");
+    expect(systemContent).toContain("decision");
+    expect(systemContent).toContain("approve");
+  });
+
+  it("should NOT inject JSON format when consensus is undefined", () => {
+    const ctx: SharedContext = {
+      task: "Test task",
+      team: {
+        workers: [{ model: "w1", role: "worker" }],
+        leader: { model: "l1", role: "leader" },
+      },
+      rounds: [{
+        number: 1,
+        responses: [{ model: "w1", content: "response 1" }],
+      }],
+    };
+    const messages = buildLeaderMessages(ctx, undefined, undefined);
+    const systemContent = messages.find(m => m.role === "system")!.content;
+    expect(systemContent).not.toContain("approve");
+  });
+
+  it("should skip JSON injection when host instructions already contain json+decision", () => {
+    const ctx: SharedContext = {
+      task: "Test task",
+      team: {
+        workers: [{ model: "w1", role: "worker" }],
+        leader: { model: "l1", role: "leader" },
+      },
+      rounds: [{
+        number: 1,
+        responses: [{ model: "w1", content: "response 1" }],
+      }],
+    };
+    const hostInstructions = 'Output a JSON object with "decision" field: approve or continue.';
+    const messages = buildLeaderMessages(ctx, hostInstructions, undefined, "leader_decides");
+    const systemContent = messages.find(m => m.role === "system")!.content;
+    // Host already specified JSON+decision → should NOT double-inject
+    expect(systemContent).toBe(hostInstructions);
   });
 });
 
@@ -319,236 +461,81 @@ describe("buildLeaderMessages", () => {
 // ================================================================
 
 describe("cross-function", () => {
-  it("should specify JSON output format in all system messages", () => {
-    const ctx = makeCtx([makeRound(1)]);
-
-    const producer = buildProducerMessages(ctx);
-    const reviewer = buildReviewerMessages(ctx, "코드 품질");
-    const leader = buildLeaderMessages(ctx);
-
-    expect(producer[0]!.content).toContain("JSON");
-    expect(reviewer[0]!.content).toContain("JSON");
-    expect(leader[0]!.content).toContain("JSON");
-  });
-
-  it("should return identical messages for identical inputs for all 3 functions", () => {
-    const ctx = makeCtx([makeRound(1)]);
-
-    const p1 = buildProducerMessages(ctx, "inst");
-    const p2 = buildProducerMessages(ctx, "inst");
-    expect(p1).toEqual(p2);
-
-    const r1 = buildReviewerMessages(ctx, "코드 품질");
-    const r2 = buildReviewerMessages(ctx, "코드 품질");
-    expect(r1).toEqual(r2);
-
-    const l1 = buildLeaderMessages(ctx, "inst");
-    const l2 = buildLeaderMessages(ctx, "inst");
-    expect(l1).toEqual(l2);
-  });
-
-  it("should always return exactly 2 messages (system + user) for each function", () => {
+  it("should always return exactly 2 messages (system + user) for both functions", () => {
+    // Arrange
     const ctx0 = makeCtx();
     const ctx1 = makeCtx([makeRound(1)]);
-    const ctx2 = makeCtx([makeRound(1), makeRound(2)]);
+    const ctx2 = makeCtx([
+      makeRound(1, { synthesis: makeSynthesis("continue") }),
+      makeRound(2),
+    ]);
 
+    // Act & Assert
     for (const ctx of [ctx0, ctx1, ctx2]) {
-      const producer = buildProducerMessages(ctx);
-      const reviewer = buildReviewerMessages(ctx, "p");
+      const worker = buildWorkerMessages(ctx);
       const leader = buildLeaderMessages(ctx);
-      expect(producer).toHaveLength(2);
-      expect(producer[0]!.role).toBe("system");
-      expect(producer[1]!.role).toBe("user");
-      expect(reviewer).toHaveLength(2);
-      expect(reviewer[0]!.role).toBe("system");
-      expect(reviewer[1]!.role).toBe("user");
+
+      expect(worker).toHaveLength(2);
+      expect(worker[0]!.role).toBe("system");
+      expect(worker[1]!.role).toBe("user");
+
       expect(leader).toHaveLength(2);
       expect(leader[0]!.role).toBe("system");
       expect(leader[1]!.role).toBe("user");
     }
   });
 
-  it("should handle round with no synthesis (partial round in context)", () => {
-    const partialRound: Round = {
-      number: 1,
-      production: { model: "p/m", content: "partial content" },
-      reviews: [
-        {
-          model: "r/m",
-          perspective: "p",
-          issues: [],
-          approval: true,
-          reasoning: "ok",
-        },
-      ],
-      // no synthesis
-    };
-    const ctx = makeCtx([partialRound]);
+  it("should return identical messages for identical inputs (idempotent)", () => {
+    // Arrange
+    const ctx = makeCtx([makeRound(1)]);
 
-    // All 3 functions should handle it without throwing
-    const producer = buildProducerMessages(ctx);
-    const reviewer = buildReviewerMessages(ctx, "코드 품질");
+    // Act
+    const w1 = buildWorkerMessages(ctx, "inst");
+    const w2 = buildWorkerMessages(ctx, "inst");
+
+    const l1 = buildLeaderMessages(ctx, "inst");
+    const l2 = buildLeaderMessages(ctx, "inst");
+
+    // Assert
+    expect(w1).toEqual(w2);
+    expect(l1).toEqual(l2);
+  });
+
+  it("should handle round with no synthesis gracefully in both functions", () => {
+    // Arrange — round without synthesis
+    const round: Round = {
+      number: 1,
+      responses: [makeResponse("worker/a", "partial content")],
+    };
+    const ctx = makeCtx([round]);
+
+    // Act
+    const worker = buildWorkerMessages(ctx);
     const leader = buildLeaderMessages(ctx);
 
-    expect(producer).toHaveLength(2);
-    expect(reviewer).toHaveLength(2);
+    // Assert — no throw, correct length
+    expect(worker).toHaveLength(2);
     expect(leader).toHaveLength(2);
 
-    // partial content should be present in history
-    expect(producer[1]!.content).toContain("partial content");
-    expect(reviewer[1]!.content).toContain("partial content");
+    // Worker should NOT see synthesis (there is none)
+    expect(worker[1]!.content).not.toContain("Previous Round Result");
+
+    // Leader should see worker responses
     expect(leader[1]!.content).toContain("partial content");
   });
 
-  // -- ED: production undefined in round --
-
-  it("should skip production section when round has no production", () => {
-    // Arrange — round with production omitted (undefined)
-    const roundNoProduction: Round = {
-      number: 1,
-      reviews: [
-        {
-          model: "reviewer/a",
-          perspective: "코드 품질",
-          issues: [],
-          approval: true,
-          reasoning: "ok",
-        },
-      ],
-      synthesis: {
-        model: "leader/model",
-        consensusStatus: "progressing",
-        keyAgreements: [],
-        keyDisagreements: [],
-        actionItems: [],
-        decision: "continue",
-      },
-    };
-    const ctx = makeCtx([roundNoProduction]);
+  it("should handle empty responses array in a round", () => {
+    // Arrange
+    const round: Round = { number: 1, responses: [] };
+    const ctx = makeCtx([round]);
 
     // Act
-    const messages = buildProducerMessages(ctx);
+    const worker = buildWorkerMessages(ctx);
+    const leader = buildLeaderMessages(ctx);
 
-    // Assert — no Production heading in serialized round
-    expect(messages[1]!.content).toContain("Round 1");
-    expect(messages[1]!.content).not.toContain("**Production**");
-  });
-});
-
-// ================================================================
-// P2: Round budget & convergence guidance
-// ================================================================
-
-describe("buildProducerMessages (roundInfo)", () => {
-  it("should include round budget when roundInfo provided", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildProducerMessages(ctx, undefined, { current: 2, max: 3 });
-    const user = messages[1]!.content!;
-
-    expect(user).toContain("Round 2");
-    expect(user).toContain("3");
-  });
-
-  it("should include FINAL marker when current equals max with single-round budget", () => {
-    const ctx = makeCtx();
-    const messages = buildProducerMessages(ctx, undefined, { current: 1, max: 1 });
-    const user = messages[1]!.content!;
-
-    expect(user).toContain("Round 1");
-    expect(user).toContain("1");
-    expect(user).toMatch(/final/i);
-  });
-
-  it("should place budget after history before instructions", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildProducerMessages(ctx, "Do extra work", { current: 2, max: 3 });
-    const user = messages[1]!.content!;
-
-    const historyPos = user.indexOf("Production content round 1");
-    const budgetPos = user.indexOf("Round 2");
-    const instructionsPos = user.indexOf("Do extra work");
-    expect(historyPos).toBeLessThan(budgetPos);
-    expect(budgetPos).toBeLessThan(instructionsPos);
-  });
-});
-
-describe("buildReviewerMessages (roundInfo)", () => {
-  it("should include round budget when roundInfo provided", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildReviewerMessages(ctx, "코드 품질", { current: 2, max: 3 });
-    const user = messages[1]!.content!;
-
-    expect(user).toContain("Round 2");
-    expect(user).toContain("3");
-  });
-});
-
-describe("buildLeaderMessages (roundInfo)", () => {
-  it("should include round budget when roundInfo provided", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx, undefined, { current: 2, max: 3 });
-    const user = messages[1]!.content!;
-
-    expect(user).toContain("Round 2");
-    expect(user).toContain("3");
-  });
-
-  it("should include FINAL round marker when current equals max", () => {
-    const ctx = makeCtx([makeRound(1), makeRound(2)]);
-    const messages = buildLeaderMessages(ctx, undefined, { current: 3, max: 3 });
-    const user = messages[1]!.content!;
-
-    expect(user).toMatch(/final/i);
-  });
-
-  it("should not include FINAL marker when current less than max", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx, undefined, { current: 1, max: 3 });
-    const user = messages[1]!.content!;
-
-    expect(user).not.toMatch(/final/i);
-  });
-
-  it("should include both roundInfo and instructions when both provided", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx, "Be strict", { current: 2, max: 3 });
-    const user = messages[1]!.content!;
-
-    expect(user).toContain("Round 2");
-    expect(user).toContain("Be strict");
-  });
-
-  it("should place budget after history before instructions", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx, "Focus on security", { current: 2, max: 3 });
-    const user = messages[1]!.content!;
-
-    const historyPos = user.indexOf("Production content round 1");
-    const budgetPos = user.indexOf("Round 2");
-    const instructionsPos = user.indexOf("Focus on security");
-    expect(historyPos).toBeLessThan(budgetPos);
-    expect(budgetPos).toBeLessThan(instructionsPos);
-  });
-});
-
-describe("LEADER_SYSTEM convergence", () => {
-  it("should contain convergence guidance about minor issues", () => {
-    // LEADER_SYSTEM is used as system message; check via buildLeaderMessages
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx);
-    const system = messages[0]!.content!;
-
-    expect(system).toMatch(/minor|suggestion/i);
-    expect(system).toMatch(/approve/i);
-  });
-});
-
-describe("reviewerSystem improvement acknowledgment", () => {
-  it("should contain improvement acknowledgment instruction", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildReviewerMessages(ctx, "코드 품질");
-    const system = messages[0]!.content!;
-
-    expect(system).toMatch(/improv|acknowledge|이전|개선/i);
+    // Assert
+    expect(worker).toHaveLength(2);
+    expect(leader).toHaveLength(2);
+    expect(leader[1]!.content).not.toContain("Worker Responses");
   });
 });

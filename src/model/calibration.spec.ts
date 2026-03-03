@@ -52,6 +52,41 @@ describe("taskToDimensions", () => {
     expect(taskToDimensions("UNKNOWN_TASK")).toEqual(["REASONING"]);
   });
 
+  it("should map all 62 task types to dimensions", () => {
+    const allTaskTypes = [
+      // IDEATION
+      "BRAINSTORM", "ANALOGY", "CONSTRAINT_DISCOVERY", "OPTION_GENERATION", "FEASIBILITY_QUICK",
+      // PLANNING
+      "GOAL_DEFINITION", "SCOPE_DEFINITION", "PRIORITIZATION", "MILESTONE_PLANNING", "RISK_ASSESSMENT", "RESOURCE_ESTIMATION", "TRADEOFF_ANALYSIS",
+      // REQUIREMENTS
+      "REQUIREMENT_EXTRACTION", "REQUIREMENT_STRUCTURING", "AMBIGUITY_DETECTION", "COMPLETENESS_CHECK", "CONFLICT_DETECTION", "ACCEPTANCE_CRITERIA",
+      // ARCHITECTURE
+      "SYSTEM_DESIGN", "MODULE_DESIGN", "INTERFACE_DESIGN", "DATA_MODELING", "PATTERN_SELECTION", "DEPENDENCY_ANALYSIS", "MIGRATION_STRATEGY", "PERFORMANCE_DESIGN",
+      // CODING
+      "CODE_PLAN", "SCAFFOLD", "IMPLEMENT_FEATURE", "IMPLEMENT_ALGORITHM", "REFACTOR", "OPTIMIZE", "TYPE_DEFINITION", "ERROR_HANDLING", "INTEGRATION", "CONFIGURATION",
+      // TESTING
+      "TEST_STRATEGY", "TEST_CASE_DESIGN", "UNIT_TEST_WRITE", "INTEGRATION_TEST_WRITE", "EDGE_CASE_DISCOVERY", "TEST_DATA_GENERATION", "COVERAGE_ANALYSIS",
+      // REVIEW
+      "CODE_REVIEW", "DESIGN_REVIEW", "SECURITY_REVIEW", "PERFORMANCE_REVIEW", "CRITIQUE", "COMPARISON", "STANDARDS_COMPLIANCE",
+      // DOCUMENTATION
+      "API_DOC", "TUTORIAL", "COMMENT_WRITE", "CHANGELOG", "DECISION_RECORD", "DIAGRAM",
+      // DEBUGGING
+      "ERROR_DIAGNOSIS", "LOG_ANALYSIS", "REPRODUCTION", "ROOT_CAUSE", "FIX_PROPOSAL", "FIX_IMPLEMENT", "REGRESSION_CHECK",
+      // OPERATIONS
+      "DEPLOY_PLAN", "CI_CD_CONFIG", "ENVIRONMENT_SETUP", "MONITORING_SETUP", "INCIDENT_RESPONSE",
+      // RESEARCH
+      "TECH_RESEARCH", "BENCHMARK", "COMPATIBILITY_CHECK", "BEST_PRACTICE", "TREND_ANALYSIS",
+      // COMMUNICATION
+      "SUMMARIZE", "EXPLAIN", "REPORT", "TRANSLATE", "QUESTION_ANSWER",
+    ];
+    for (const taskType of allTaskTypes) {
+      const dims = taskToDimensions(taskType);
+      expect(dims.length).toBeGreaterThan(0);
+      // Should NOT be the fallback ["REASONING"]
+      expect(dims).not.toEqual(["REASONING"]);
+    }
+  });
+
   it("should map TRANSLATE to MULTILINGUAL + INSTRUCTION_FOLLOWING", () => {
     const dims = taskToDimensions("TRANSLATE");
     expect(dims).toContain("MULTILINGUAL");
@@ -465,7 +500,54 @@ describe("persistRatings", () => {
     expect(parsed.models["m1"].scores["CODE_GENERATION"].mu).toBe(500);
   });
 
-  it("should skip model not present in json.models", async () => {
+  it("should use atomic write via tmp+rename when io.rename is available", async () => {
+    const model = makeModelInfo("m1", 500);
+    const jsonStr = makeModelsJson([model]);
+    const io = {
+      readFile: mock(() => Promise.resolve(jsonStr)),
+      writeFile: mock(() => Promise.resolve()),
+      rename: mock(() => Promise.resolve()),
+    };
+    const ratings: RatingsMap = new Map();
+    setRating(ratings, "m1", "REASONING", { mu: 600, sigma: 200, comparisons: 10 });
+
+    await persistRatings("scores/models.json", ratings, io);
+
+    // writeFile should write to .tmp, then rename to target
+    expect(io.writeFile).toHaveBeenCalledTimes(1);
+    const [tmpPath] = (io.writeFile as ReturnType<typeof mock>).mock.calls[0]!;
+    expect(tmpPath).toBe("scores/models.json.tmp");
+    expect(io.rename).toHaveBeenCalledWith("scores/models.json.tmp", "scores/models.json");
+  });
+
+  it("should create new dimension entries for existing model", async () => {
+    // JSON has m1 with REASONING only
+    const jsonStr = JSON.stringify({
+      version: 2,
+      models: {
+        m1: {
+          scores: {
+            REASONING: { mu: 500, sigma: 350, comparisons: 0 },
+          },
+        },
+      },
+    });
+    const io = {
+      readFile: mock(() => Promise.resolve(jsonStr)),
+      writeFile: mock(() => Promise.resolve()),
+    };
+    const ratings: RatingsMap = new Map();
+    setRating(ratings, "m1", "CODE_GENERATION", { mu: 700, sigma: 100, comparisons: 50 });
+
+    await persistRatings("scores/models.json", ratings, io);
+
+    const [, writtenData] = (io.writeFile as ReturnType<typeof mock>).mock.calls[0]!;
+    const parsed = JSON.parse(writtenData as string);
+    expect(parsed.models["m1"].scores["CODE_GENERATION"].mu).toBe(700);
+    expect(parsed.models["m1"].scores["REASONING"].mu).toBe(500); // unchanged
+  });
+
+  it("should create new model entry when model not present in json.models", async () => {
     // Arrange — json has "m1", ratings has "ghost-model"
     const model = makeModelInfo("m1", 500);
     const jsonStr = makeModelsJson([model]);
@@ -479,10 +561,23 @@ describe("persistRatings", () => {
     // Act
     await persistRatings("scores/models.json", ratings, io);
 
-    // Assert — write called, but m1 unchanged, ghost-model not added
+    // Assert — write called, ghost-model created with its ratings, m1 unchanged
     const [, writtenData] = (io.writeFile as ReturnType<typeof mock>).mock.calls[0]!;
     const parsed = JSON.parse(writtenData as string);
-    expect(parsed.models["ghost-model"]).toBeUndefined();
+    expect(parsed.models["ghost-model"]).toBeDefined();
+    expect(parsed.models["ghost-model"].scores["REASONING"].mu).toBe(999);
     expect(parsed.models["m1"].scores["REASONING"].mu).toBe(500);
+  });
+
+  it("should throw when json has no version field", async () => {
+    const jsonStr = JSON.stringify({ models: {} });
+    const io = {
+      readFile: mock(() => Promise.resolve(jsonStr)),
+      writeFile: mock(() => Promise.resolve()),
+    };
+    const ratings: RatingsMap = new Map();
+    setRating(ratings, "m1", "REASONING", { mu: 600, sigma: 200, comparisons: 10 });
+
+    await expect(persistRatings("scores/models.json", ratings, io)).rejects.toThrow("version");
   });
 });

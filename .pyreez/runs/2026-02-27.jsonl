@@ -1,0 +1,17 @@
+{"id":"02cad80c-39a4-4d07-9c1a-2bcf1c084959","timestamp":1772125787134,"tool":"scores","durationMs":0,"success":true}
+{"id":"eeaa9bb0-ed5c-497a-85f4-91e0c17cc1d4","timestamp":1772125804531,"tool":"scores","durationMs":0,"success":true}
+{"id":"bd868b7c-d33c-4dbf-96a5-0d85cfb95cc8","timestamp":1772125805530,"tool":"route","durationMs":2,"success":true}
+{"id":"745a5090-34e3-4612-a1bf-88c170c4aaa4","timestamp":1772125807531,"tool":"calibrate","durationMs":3,"success":true}
+{"id":"cf218e9e-913c-4354-b5dd-f9fc36636ddf","timestamp":1772125822855,"tool":"scores","durationMs":0,"success":true}
+{"id":"ca14b523-36b6-49d7-a906-773712ba02f5","timestamp":1772125823854,"tool":"route","durationMs":2,"success":true}
+{"id":"6e2b57ec-14b7-4c59-bb4e-df4b1aaeeadb","timestamp":1772125825855,"tool":"calibrate","durationMs":3,"success":true}
+{"id":"94e58a3a-561e-4cae-8062-4e4c8edc801e","timestamp":1772125863873,"tool":"report","durationMs":1,"success":true}
+{"id":"46e55f66-e9d9-4714-9727-dbf2c12877ac","timestamp":1772125864874,"tool":"report","durationMs":2,"success":true}
+{"id":"228afe9c-7d54-4ad9-be70-7cf26ecf652c","timestamp":1772125878000,"tool":"ask","durationMs":0,"success":false,"error":"Error: Unknown model: local/ai/smollm2"}
+{"id":"51f86453-79e4-476c-ba14-7e96769f1468","timestamp":1772125903422,"tool":"ask","durationMs":5429,"success":true}
+{"id":"1167d24c-e199-438d-92ac-fd67a61d023b","timestamp":1772125931770,"tool":"ask_many","durationMs":5788,"success":true}
+{"id":"f06bd530-da1b-4197-9567-58fa9b5bd3f6","timestamp":1772125972340,"tool":"ask","durationMs":1,"success":false,"error":"Error: Unknown model: fake/nonexistent-model"}
+{"id":"51937b2b-0c72-4476-abe0-3aa8e100dc53","timestamp":1772125973340,"tool":"ask","durationMs":713,"success":true}
+{"id":"ac1f3468-6519-4b3c-87a7-5e2d39d847ff","timestamp":1772125981032,"tool":"ask","durationMs":1125,"success":true}
+{"id":"52bff45a-3a1b-4af0-89f0-93e04ae40a2a","timestamp":1772126006660,"tool":"deliberate","durationMs":29250,"success":false,"error":"Error: leader (local/ai/qwen3-coder) failed: Local LLM error: unable to load runner: model too big\n"}
+{"id":"b6edc6e6-4a14-4a58-b361-ba23d13f8cf2","timestamp":1772126156675,"tool":"deliberate","durationMs":121506,"success":false,"error":"Error: reviewer (google/gemini-3.1-pro-preview) failed: {\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https:/[path] To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-3.1-pro\\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_…"}

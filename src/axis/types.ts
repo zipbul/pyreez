@@ -18,6 +18,10 @@ export interface TaskClassification {
   complexity: "simple" | "moderate" | "complex";
   criticality?: "low" | "medium" | "high" | "critical";
   language?: string;
+  /** Per-request quality weight override from host. */
+  qualityWeight?: number;
+  /** Per-request cost weight override from host. */
+  costWeight?: number;
 }
 
 // -- Stage 1 output: AxisTaskRequirement --
@@ -37,7 +41,10 @@ export interface AxisTaskRequirement {
   };
   budget: {
     maxPerRequest?: number;
-    strategy?: string;
+    /** Per-request quality weight override (from MCP host). */
+    qualityWeight?: number;
+    /** Per-request cost weight override (from MCP host). */
+    costWeight?: number;
   };
   /** Domain carried through from TaskClassification for Selector's domain-specific scoring. */
   domain?: string;
@@ -106,17 +113,28 @@ export interface BudgetConfig {
 }
 
 /**
+ * Result of a single LLM call, including token usage.
+ */
+export interface ChatResult {
+  content: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/**
  * Chat function injected into the engine — allows any LLM backend.
  *
  * Accepts either a plain string (user prompt) or a ChatMessage[] array
  * (multi-turn conversation). Implementations must handle both forms:
  * - string → wrap as [{ role: "user", content: input }]
  * - ChatMessage[] → pass directly to the LLM API
+ *
+ * Returns ChatResult with content + token usage for cost tracking.
  */
 export type ChatFn = (
   modelId: string,
   input: string | import("../llm/types").ChatMessage[],
-) => Promise<string>;
+) => Promise<ChatResult>;
 
 /**
  * Pairwise comparison result for BT rating update.

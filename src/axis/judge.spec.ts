@@ -4,7 +4,11 @@ import { LlmJudge } from "./judge";
 import type { ChatFn } from "./types";
 
 function makeMockChat(response: string): ChatFn {
-  return mock(async (_model: string, _input: string | any[]) => response) as any;
+  return mock(async (_model: string, _input: string | any[]) => ({
+    content: response,
+    inputTokens: 10,
+    outputTokens: 20,
+  })) as any;
 }
 
 describe("LlmJudge", () => {

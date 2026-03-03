@@ -15,6 +15,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
+import * as fsp from "node:fs/promises";
 import { join } from "node:path";
 import type { FileIO } from "./types";
 
@@ -55,6 +56,10 @@ export class BunFileIO implements FileIO {
       .filter((e) => e.endsWith(suffix))
       .map((e) => (dir === "." && sep < 0 ? e : join(dir, e)))
       .sort();
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    await fsp.rename(from, to);
   }
 
   async removeGlob(pattern: string): Promise<void> {
