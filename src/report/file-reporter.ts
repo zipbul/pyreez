@@ -123,6 +123,18 @@ export class FileReporter implements Reporter {
     return { totalRecords: all.length, models };
   }
 
+  /** Return average latency per model from summary data. */
+  async getLatencyMap(): Promise<Map<string, number>> {
+    const s = await this.summary();
+    const map = new Map<string, number>();
+    for (const [modelId, info] of Object.entries(s.models)) {
+      if (info.avgLatencyMs > 0) {
+        map.set(modelId, info.avgLatencyMs);
+      }
+    }
+    return map;
+  }
+
   /** Remove all report files. */
   async clear(): Promise<void> {
     await this.io.removeGlob(`${this.baseDir}/*.jsonl`);

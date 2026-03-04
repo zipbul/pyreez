@@ -22,6 +22,7 @@ export interface DeliberationRecord {
   readonly workerInstructions?: string;
   readonly leaderInstructions?: string;
   readonly consensus?: string;
+  readonly protocol?: "diverge-synth" | "debate";
   /** Full round-by-round log (worker responses + synthesis). */
   readonly rounds?: readonly Round[];
   /** Lightweight round summaries (number + synthesis text only). */

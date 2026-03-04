@@ -149,6 +149,7 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
       syncInterval: 100,
       judge,
       mfLearner,
+      modelIds: ["a", "b"],
     });
 
     await layer.record(
@@ -171,6 +172,7 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
       scoring,
       io,
       mfLearner,
+      modelIds: ["a", "b"],
     });
 
     const scores = [makeScore("a", 500), makeScore("b", 500)];
@@ -245,6 +247,7 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
       judge,
       moeLearner,
       mfLearner,
+      modelIds: ["a", "b"],
     });
 
     await layer.record(
@@ -272,6 +275,7 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
       judge,
       moeLearner,
       mfLearner,
+      modelIds: ["a", "b"],
     });
 
     await layer.record(
@@ -321,6 +325,7 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
       syncInterval: 100,
       judge,
       mfLearner,
+      modelIds: ["a", "b"],
     });
 
     const classified = makeClassified();

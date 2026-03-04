@@ -144,7 +144,11 @@ describe("PyreezEngine", () => {
 
       const result = await engine.run("write a function", budget, mockClassification);
 
-      expect(result).toBe(mockResult);
+      expect(result.result).toBe(mockResult.result);
+      expect(result.roundsExecuted).toBe(mockResult.roundsExecuted);
+      expect(result.consensusReached).toBe(mockResult.consensusReached);
+      expect(result.protocol).toBe(mockResult.protocol);
+      expect(result.sessionId).toBeDefined();
     });
 
     it("skips deliberation and returns single-model result when plan has 1 model", async () => {
@@ -210,11 +214,13 @@ describe("PyreezEngine", () => {
 
       await engine.run("task", budget, mockClassification);
 
-      expect(learner.record).toHaveBeenCalledWith(
-        mockClassification,
-        mockPlanMulti,
-        mockResult,
-      );
+      expect(learner.record).toHaveBeenCalledTimes(1);
+      const call = (learner.record as ReturnType<typeof mock>).mock.calls[0]!;
+      expect(call[0]).toBe(mockClassification);
+      expect(call[1]).toBe(mockPlanMulti);
+      // Result now includes sessionId added by engine
+      expect(call[2].result).toBe(mockResult.result);
+      expect(call[2].sessionId).toBeDefined();
     });
 
     it("does not throw when learner is not provided", async () => {
@@ -311,7 +317,8 @@ describe("PyreezEngine", () => {
       expect(trace.classified).toBe(mockClassification);
       expect(trace.requirement).toBe(mockReq);
       expect(trace.plan).toBe(mockPlanMulti);
-      expect(trace.result).toBe(mockResult);
+      expect(trace.result.result).toBe(mockResult.result);
+      expect(trace.result.sessionId).toBeDefined();
     });
 
     it("should use single-model shortcut when plan has 1 model", async () => {
@@ -345,7 +352,8 @@ describe("PyreezEngine", () => {
       );
 
       const result = await engine.run("task", budget, mockClassification);
-      expect(result).toBe(mockResult);
+      expect(result.result).toBe(mockResult.result);
+      expect(result.sessionId).toBeDefined();
     });
   });
 });

@@ -9,6 +9,12 @@ export interface RoutingConfig {
   qualityWeight: number;
   /** Weight for cost efficiency (default: 0.3). */
   costWeight: number;
+  /** Selector variant. Default: "bt-ce". */
+  selector?: "bt-ce" | "knn" | "cascade";
+  /** Exploration strategy. Default: "thompson". */
+  exploration?: "greedy" | "thompson";
+  /** Weight for latency efficiency (default: 0, disabled). */
+  latencyWeight?: number;
 }
 
 export const DEFAULT_ROUTING_CONFIG: RoutingConfig = {
@@ -62,6 +68,11 @@ export async function loadRoutingConfig(path = ".pyreez/config.jsonc"): Promise<
     const text = await file.text();
     const parsed = Bun.JSONC.parse(text) as { routing?: Partial<RoutingConfig> };
     if (!parsed?.routing) return { ...DEFAULT_ROUTING_CONFIG };
+    const VALID_SELECTORS = ["bt-ce", "knn", "cascade"];
+    const VALID_EXPLORATIONS = ["greedy", "thompson"];
+    const raw = parsed.routing as Record<string, unknown>;
+    const selectorRaw = raw.selector;
+    const explorationRaw = raw.exploration;
     return {
       qualityWeight: typeof parsed.routing.qualityWeight === "number"
         ? Math.max(0, parsed.routing.qualityWeight)
@@ -69,6 +80,15 @@ export async function loadRoutingConfig(path = ".pyreez/config.jsonc"): Promise<
       costWeight: typeof parsed.routing.costWeight === "number"
         ? Math.max(0, parsed.routing.costWeight)
         : DEFAULT_ROUTING_CONFIG.costWeight,
+      selector: typeof selectorRaw === "string" && VALID_SELECTORS.includes(selectorRaw)
+        ? (selectorRaw as RoutingConfig["selector"])
+        : undefined,
+      exploration: typeof explorationRaw === "string" && VALID_EXPLORATIONS.includes(explorationRaw)
+        ? (explorationRaw as RoutingConfig["exploration"])
+        : undefined,
+      latencyWeight: typeof raw.latencyWeight === "number"
+        ? Math.max(0, raw.latencyWeight)
+        : undefined,
     };
   } catch {
     return { ...DEFAULT_ROUTING_CONFIG };

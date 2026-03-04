@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { buildWorkerMessages, buildLeaderMessages } from "./prompts";
+import { buildWorkerMessages, buildLeaderMessages, buildDebateWorkerMessages } from "./prompts";
 import type {
   SharedContext,
   Round,
@@ -436,6 +436,46 @@ describe("buildLeaderMessages", () => {
     expect(systemContent).not.toContain("approve");
   });
 
+  it("should use moderator prompt for intermediate debate rounds", () => {
+    const ctx: SharedContext = {
+      task: "Test task",
+      team: {
+        workers: [{ model: "w1", role: "worker" }],
+        leader: { model: "l1", role: "leader" },
+      },
+      rounds: [{
+        number: 1,
+        responses: [{ model: "w1", content: "response 1" }],
+      }],
+    };
+    // Round 1 of 3 → intermediate round with debate protocol + consensus
+    const messages = buildLeaderMessages(ctx, undefined, { current: 1, max: 3 }, "leader_decides", "debate");
+    const systemContent = messages.find(m => m.role === "system")!.content;
+    expect(systemContent).toContain("moderator");
+    expect(systemContent).toContain("AGREEMENT");
+    expect(systemContent).toContain("DISAGREEMENT");
+    expect(systemContent).toContain("continue");
+  });
+
+  it("should use final synthesis prompt on the last round", () => {
+    const ctx: SharedContext = {
+      task: "Test task",
+      team: {
+        workers: [{ model: "w1", role: "worker" }],
+        leader: { model: "l1", role: "leader" },
+      },
+      rounds: [{
+        number: 1,
+        responses: [{ model: "w1", content: "response 1" }],
+      }],
+    };
+    // Round 3 of 3 → final round (even with debate protocol, final uses synthesis prompt)
+    const messages = buildLeaderMessages(ctx, undefined, { current: 3, max: 3 }, "leader_decides", "debate");
+    const systemContent = messages.find(m => m.role === "system")!.content;
+    expect(systemContent).toContain("approve");
+    expect(systemContent).not.toContain("moderator");
+  });
+
   it("should skip JSON injection when host instructions already contain json+decision", () => {
     const ctx: SharedContext = {
       task: "Test task",
@@ -453,6 +493,77 @@ describe("buildLeaderMessages", () => {
     const systemContent = messages.find(m => m.role === "system")!.content;
     // Host already specified JSON+decision → should NOT double-inject
     expect(systemContent).toBe(hostInstructions);
+  });
+});
+
+// ================================================================
+// buildDebateWorkerMessages
+// ================================================================
+
+describe("buildDebateWorkerMessages", () => {
+  it("should include only leader synthesis from previous round (not raw responses)", () => {
+    const round1 = makeRound(1, {
+      responses: [
+        makeResponse("worker/a", "Round 1 answer A"),
+        makeResponse("worker/b", "Round 1 answer B"),
+      ],
+      synthesis: makeSynthesis("continue", "Leader summary of disagreements"),
+    });
+    const ctx = makeCtx([round1]);
+
+    const messages = buildDebateWorkerMessages(ctx);
+    const user = messages[1]!.content!;
+
+    // Should see leader synthesis (compressed context)
+    expect(user).toContain("Leader summary of disagreements");
+    expect(user).toContain("Previous Round Summary");
+    // Should NOT see raw worker responses
+    expect(user).not.toContain("Round 1 answer A");
+    expect(user).not.toContain("Round 1 answer B");
+  });
+
+  it("should only see LAST round synthesis when multiple rounds exist (O(1) context)", () => {
+    const r1 = makeRound(1, {
+      synthesis: makeSynthesis("continue", "Synth-1: disagreement on X"),
+    });
+    const r2 = makeRound(2, {
+      synthesis: makeSynthesis("continue", "Synth-2: converging on Y"),
+    });
+    const ctx = makeCtx([r1, r2]);
+
+    const messages = buildDebateWorkerMessages(ctx);
+    const user = messages[1]!.content!;
+
+    // Should see ONLY last round synthesis
+    expect(user).toContain("Synth-2: converging on Y");
+    expect(user).not.toContain("Synth-1: disagreement on X");
+  });
+
+  it("should include debate context in system message", () => {
+    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
+    const messages = buildDebateWorkerMessages(ctx);
+    expect(messages[0]!.content).toContain("debate");
+  });
+
+  it("should include final round instruction on last round", () => {
+    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
+    const messages = buildDebateWorkerMessages(ctx, undefined, { current: 3, max: 3 });
+    const user = messages[1]!.content!;
+    expect(user).toMatch(/final/i);
+  });
+
+  it("should use host instructions combined with debate context", () => {
+    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
+    const messages = buildDebateWorkerMessages(ctx, "Focus on performance");
+    expect(messages[0]!.content).toContain("Focus on performance");
+    expect(messages[0]!.content).toContain("debate");
+  });
+
+  it("should instruct workers to rebut and refine positions", () => {
+    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis("continue", "Disagreement: A vs B") })]);
+    const messages = buildDebateWorkerMessages(ctx);
+    const user = messages[1]!.content!;
+    expect(user).toMatch(/rebut|refine|concede/i);
   });
 });
 

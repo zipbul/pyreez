@@ -55,7 +55,7 @@ function makeDeps(overrides?: Partial<EngineDeps>): EngineDeps {
 }
 
 function makeConfig(overrides?: Partial<EngineConfig>): EngineConfig {
-  return { maxRounds: 1, ...overrides };
+  return { maxRounds: 1, leaderContributes: false, ...overrides };
 }
 
 function dim(mu = 1500): { mu: number; sigma: number; comparisons: number } {
@@ -708,6 +708,354 @@ describe("deliberate", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(RoundExecutionError);
     }
+  });
+});
+
+// =============================================================================
+// failedWorkers propagation
+// =============================================================================
+
+describe("failedWorkers propagation in deliberate output", () => {
+  it("should include failedWorkers in rounds when a worker fails partially", async () => {
+    const team = makeTeam(3);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") {
+          throw new Error("o3 rate limit");
+        }
+        if (model.startsWith("worker/")) {
+          return chatResult("ok", 10, 20);
+        }
+        return chatResult("synthesis", 15, 25);
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    // Verify the output includes failedWorkers info
+    expect(output.rounds).toBeDefined();
+    expect(output.rounds).toHaveLength(1);
+    expect(output.rounds![0]!.failedWorkers).toBeDefined();
+    expect(output.rounds![0]!.failedWorkers).toHaveLength(1);
+    expect(output.rounds![0]!.failedWorkers![0]!.model).toBe("worker/model-0");
+    expect(output.rounds![0]!.failedWorkers![0]!.error).toContain("o3 rate limit");
+
+    // modelsUsed should NOT include the failed worker
+    expect(output.modelsUsed).not.toContain("worker/model-0");
+    expect(output.modelsUsed).toContain("worker/model-1");
+    expect(output.modelsUsed).toContain("worker/model-2");
+  });
+
+  it("should omit failedWorkers from rounds when all workers succeed", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+    const deps = makeDeps({
+      chat: mock(async () => chatResult("ok", 10, 20)),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    expect(output.rounds).toBeDefined();
+    expect(output.rounds![0]!.failedWorkers).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// leaderContributes — leader participates in diverge phase
+// =============================================================================
+
+describe("leaderContributes", () => {
+  it("should include leader's independent response in worker phase when enabled", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig({ leaderContributes: true });
+
+    const calledModels: string[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        calledModels.push(model);
+        if (model === "leader/model" && calledModels.filter((m) => m === "leader/model").length === 1) {
+          // First call: leader as worker
+          return chatResult("leader-independent-opinion", 12, 18);
+        }
+        if (model === "leader/model") {
+          // Second call: leader as synthesizer
+          return chatResult("leader-synthesis", 15, 25);
+        }
+        return chatResult(`${model}-response`, 10, 20);
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    // Leader called twice: once as worker, once as synthesizer
+    expect(calledModels.filter((m) => m === "leader/model")).toHaveLength(2);
+    // Total participants in diverge: 2 workers + 1 leader = 3
+    // Plus 1 leader synthesis = 4 total LLM calls
+    expect(output.totalLLMCalls).toBe(4);
+    // Leader appears in modelsUsed (from its worker response)
+    expect(output.modelsUsed).toContain("leader/model");
+  });
+
+  it("should have leader see its own response during synthesis", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({ leaderContributes: true });
+
+    let synthesisMsgCount = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "leader/model") {
+          return chatResult("leader-opinion", 10, 20);
+        }
+        return chatResult("worker-response", 10, 20);
+      }),
+      buildLeaderMessages: mock((ctx) => {
+        // Leader should see responses from both worker AND itself
+        const lastRound = ctx.rounds[ctx.rounds.length - 1];
+        if (lastRound) {
+          synthesisMsgCount = lastRound.responses.length;
+        }
+        return [{ role: "user" as const, content: "synthesize" }];
+      }),
+    });
+
+    await deliberate(team, input, deps, config);
+
+    // 1 worker + 1 leader (as worker) = 2 responses visible to leader during synthesis
+    expect(synthesisMsgCount).toBe(2);
+  });
+
+  it("should NOT include leader in diverge phase when leaderContributes is false", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig({ leaderContributes: false });
+
+    const calledModels: string[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        calledModels.push(model);
+        return chatResult("response", 10, 20);
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    // Leader called only once (synthesis)
+    expect(calledModels.filter((m) => m === "leader/model")).toHaveLength(1);
+    // 2 workers + 1 leader synthesis = 3 total
+    expect(output.totalLLMCalls).toBe(3);
+  });
+
+  it("should default to leaderContributes=true when config is undefined", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    // No config — uses DEFAULT_CONFIG which has leaderContributes: true
+
+    const calledModels: string[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        calledModels.push(model);
+        return chatResult("response", 10, 20);
+      }),
+    });
+
+    await deliberate(team, input, deps);
+
+    // Leader should be called twice (worker + synthesis)
+    expect(calledModels.filter((m) => m === "leader/model")).toHaveLength(2);
+  });
+
+  it("should track leader failure in failedWorkers when it fails during diverge", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig({ leaderContributes: true });
+
+    let leaderCallCount = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "leader/model") {
+          leaderCallCount++;
+          if (leaderCallCount === 1) {
+            // Leader fails as worker
+            throw new Error("leader worker phase timeout");
+          }
+          // Leader succeeds as synthesizer
+          return chatResult("synthesis", 15, 25);
+        }
+        return chatResult("worker-ok", 10, 20);
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    // Leader failed in worker phase should appear in failedWorkers
+    expect(output.rounds![0]!.failedWorkers).toHaveLength(1);
+    expect(output.rounds![0]!.failedWorkers![0]!.model).toBe("leader/model");
+    expect(output.rounds![0]!.failedWorkers![0]!.error).toContain("leader worker phase timeout");
+    // But synthesis still succeeded
+    expect(output.result).toBe("synthesis");
+  });
+});
+
+// =============================================================================
+// Debate Protocol Convergence (Risk 3)
+// =============================================================================
+
+describe("debate protocol", () => {
+  it("should use buildDebateWorkerMessages for round > 1 when protocol is debate", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+
+    let debateBuilderCalls = 0;
+    let normalBuilderCalls = 0;
+
+    const deps = makeDeps({
+      chat: mock(async (_model: string) => chatResult("response")),
+      buildWorkerMessages: mock((_ctx, _instructions?, _roundInfo?) => {
+        normalBuilderCalls++;
+        return [{ role: "user" as const, content: "work" }];
+      }),
+      buildDebateWorkerMessages: mock((_ctx, _instructions?, _roundInfo?) => {
+        debateBuilderCalls++;
+        return [{ role: "user" as const, content: "debate" }];
+      }),
+    });
+
+    await deliberate(team, input, deps, config);
+
+    // Round 1: normal builder, Round 2: debate builder
+    expect(normalBuilderCalls).toBe(1);
+    expect(debateBuilderCalls).toBe(1);
+  });
+
+  it("should stop early when leader approves in debate consensus mode", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({
+      maxRounds: 5,
+      protocol: "debate",
+      consensus: "leader_decides",
+    });
+
+    let roundCount = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult("worker-debate", 5, 10);
+        }
+        roundCount++;
+        if (roundCount === 2) {
+          return chatResult(
+            JSON.stringify({ result: "debate-approved", decision: "approve" }),
+            8, 12,
+          );
+        }
+        return chatResult(
+          JSON.stringify({ result: "debating...", decision: "continue" }),
+          8, 12,
+        );
+      }),
+      buildDebateWorkerMessages: mock((_ctx, _instructions?, _roundInfo?) => [
+        { role: "user" as const, content: "debate round" },
+      ]),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    expect(output.roundsExecuted).toBe(2);
+    expect(output.consensusReached).toBe(true);
+    expect(output.result).toBe("debate-approved");
+  });
+
+  it("should accumulate previous responses in debate context across rounds", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig({ maxRounds: 3, protocol: "debate" });
+
+    const debateContexts: string[] = [];
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(`response-from-${model}`, 10, 20);
+        }
+        return chatResult("synthesis", 15, 25);
+      }),
+      buildDebateWorkerMessages: mock((ctx, _instructions?, _roundInfo?) => {
+        // Capture the number of previous rounds visible to debate builder
+        debateContexts.push(`rounds=${ctx.rounds.length}`);
+        return [{ role: "user" as const, content: "debate" }];
+      }),
+    });
+
+    await deliberate(team, input, deps, config);
+
+    // Round 1: normal builder (no debate call)
+    // Round 2: debate builder sees 1 previous round
+    // Round 3: debate builder sees 2 previous rounds
+    expect(debateContexts).toEqual(["rounds=1", "rounds=2"]);
+  });
+
+  it("should force continue on round 1 of multi-round debate (no premature consensus)", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({
+      maxRounds: 3,
+      protocol: "debate",
+      consensus: "leader_decides",
+    });
+
+    let leaderCalls = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult("worker-opinion", 5, 10);
+        }
+        leaderCalls++;
+        // Leader tries to "approve" on every round
+        return chatResult(
+          JSON.stringify({ result: `synth-${leaderCalls}`, decision: "approve" }),
+          8, 12,
+        );
+      }),
+      buildDebateWorkerMessages: mock((_ctx, _instructions?, _roundInfo?) => [
+        { role: "user" as const, content: "debate round" },
+      ]),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    // Round 1 "approve" forced to "continue", Round 2 "approve" is accepted
+    expect(output.roundsExecuted).toBe(2);
+    expect(output.consensusReached).toBe(true);
+    expect(output.result).toBe("synth-2");
+  });
+
+  it("should fall back to normal builder when buildDebateWorkerMessages is not provided", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+
+    let normalCalls = 0;
+    const deps = makeDeps({
+      chat: mock(async () => chatResult("response")),
+      buildWorkerMessages: mock(() => {
+        normalCalls++;
+        return [{ role: "user" as const, content: "normal" }];
+      }),
+      // No buildDebateWorkerMessages
+    });
+
+    await deliberate(team, input, deps, config);
+
+    // Both rounds should use normal builder as fallback
+    expect(normalCalls).toBe(2);
   });
 });
 

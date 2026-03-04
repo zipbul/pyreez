@@ -28,6 +28,7 @@ import {
 import type { LlmJudge } from "./judge";
 import type { MoeLearner } from "./moe-learner";
 import type { MfLearner } from "./mf-learner";
+import { buildTaskTypeIndex, buildModelIndex } from "./mf-index";
 
 /** Serialized preference data for JSON persistence. */
 interface PreferenceData {
@@ -38,6 +39,7 @@ interface PreferenceData {
       wins: number;
       losses: number;
       ties: number;
+      lastUpdated?: number;
     };
   };
 }
@@ -57,6 +59,8 @@ export interface LearningLayerOptions {
   moeLearner?: MoeLearner;
   /** Phase 6: Matrix Factorization learner (L4) */
   mfLearner?: MfLearner;
+  /** Model IDs for MF index building. Required when mfLearner is set. */
+  modelIds?: string[];
 }
 
 const DEFAULT_BASE_PATH = ".pyreez/learning";
@@ -78,6 +82,8 @@ export class LocalLearningLayer implements LearningLayer {
   private readonly judge?: LlmJudge;
   private readonly moeLearner?: MoeLearner;
   private readonly mfLearner?: MfLearner;
+  private readonly taskTypeIndex?: Map<string, number>;
+  private readonly modelIndex?: Map<string, number>;
 
   private recordCount = 0;
   private dirty = false;
@@ -96,6 +102,22 @@ export class LocalLearningLayer implements LearningLayer {
     this.judge = opts.judge;
     this.moeLearner = opts.moeLearner;
     this.mfLearner = opts.mfLearner;
+    if (this.mfLearner && opts.modelIds) {
+      this.taskTypeIndex = buildTaskTypeIndex();
+      this.modelIndex = buildModelIndex(opts.modelIds);
+    }
+  }
+
+  /** Public accessor for the preference table (shared with KNN Selector). */
+  get table(): PreferenceTable {
+    return this.preferenceTable;
+  }
+
+  /** Flush dirty preferences to disk. Call on graceful shutdown. */
+  async flush(): Promise<void> {
+    if (this.dirty) {
+      await this.syncPreferences();
+    }
   }
 
   /** Load preferences from disk. Call once after construction. */
@@ -127,6 +149,15 @@ export class LocalLearningLayer implements LearningLayer {
 
     if (pairwise.length > 0) {
       this.dirty = true;
+
+      // Online BT: immediate per-pairwise update (Chatbot Arena online variant).
+      // Each pairwise result updates BT ratings incrementally (O(1) per pair).
+      // Batch calibrate at threshold is kept as dual safety net.
+      try {
+        await this.scoring.update(pairwise);
+      } catch {
+        // Swallow — online BT update is best-effort
+      }
     }
 
     // Sync preferences periodically
@@ -142,14 +173,9 @@ export class LocalLearningLayer implements LearningLayer {
       }
     }
 
-    // Auto-calibrate at threshold
+    // Auto-calibrate marker at threshold (online BT already handles updates)
     if (this.recordCount >= this.autoCalibThreshold && !this.calibrated) {
-      try {
-        await this.scoring.update(this.pendingPairwise);
-        this.calibrated = true;
-      } catch {
-        // Swallow — calibration is best-effort
-      }
+      this.calibrated = true;
     }
 
     // Phase 6: T3 LLM-as-Judge → L3/L4 learning
@@ -168,10 +194,17 @@ export class LocalLearningLayer implements LearningLayer {
           this.moeLearner.update(0, reward);
         }
 
-        // L4: Train MF factors
-        if (this.mfLearner) {
-          // Simplified context/model indexing (0-based by order)
-          this.mfLearner.train(0, 0, quality / 10);
+        // L4: Train MF factors with proper indices
+        if (this.mfLearner && this.taskTypeIndex && this.modelIndex) {
+          const ctxIdx = this.taskTypeIndex.get(classified.taskType);
+          if (ctxIdx != null) {
+            for (const modelId of result.modelsUsed) {
+              const modIdx = this.modelIndex.get(modelId);
+              if (modIdx != null) {
+                this.mfLearner.train(ctxIdx, modIdx, quality / 10);
+              }
+            }
+          }
         }
       } catch {
         // Swallow — judge/learning failures are best-effort
@@ -185,7 +218,7 @@ export class LocalLearningLayer implements LearningLayer {
   ): Promise<ModelScore[]> {
     if (scores.length === 0) return [];
 
-    return scores.map((s, idx) => {
+    return scores.map((s) => {
       let overall = s.overall;
 
       // L2: Preference-based adjustment
@@ -195,11 +228,15 @@ export class LocalLearningLayer implements LearningLayer {
         overall *= 1 + PREFERENCE_BOOST_FACTOR * (wr - 0.5);
       }
 
-      // L4: MF prediction-based adjustment
-      if (this.mfLearner) {
-        const pred = this.mfLearner.predict(0, idx);
-        // Small additive boost based on MF prediction
-        overall *= 1 + pred * 0.05;
+      // L4: MF prediction-based adjustment with proper indices
+      if (this.mfLearner && this.taskTypeIndex && this.modelIndex) {
+        const ctxIdx = this.taskTypeIndex.get(classified.taskType);
+        const modIdx = this.modelIndex.get(s.modelId);
+        if (ctxIdx != null && modIdx != null) {
+          const pred = this.mfLearner.predict(ctxIdx, modIdx);
+          // Small additive boost based on MF prediction
+          overall *= 1 + pred * 0.05;
+        }
       }
 
       return { ...s, overall };
@@ -242,6 +279,7 @@ export class LocalLearningLayer implements LearningLayer {
           wins: entry.wins,
           losses: entry.losses,
           ties: entry.ties,
+          ...(entry.lastUpdated != null ? { lastUpdated: entry.lastUpdated } : {}),
         };
       }
     }
@@ -251,26 +289,14 @@ export class LocalLearningLayer implements LearningLayer {
   private deserializePreferences(data: PreferenceData): void {
     for (const [taskType, models] of Object.entries(data)) {
       for (const [_modelId, entry] of Object.entries(models)) {
-        // Record wins as A>B against a dummy opponent to populate the table
-        // This is a simplification — full restore would need internal table access
-        for (let i = 0; i < entry.wins; i++) {
-          this.preferenceTable.record(
-            { modelA: entry.modelId, modelB: "__restore__", outcome: "A>B" },
-            taskType,
-          );
-        }
-        for (let i = 0; i < entry.losses; i++) {
-          this.preferenceTable.record(
-            { modelA: entry.modelId, modelB: "__restore__", outcome: "B>A" },
-            taskType,
-          );
-        }
-        for (let i = 0; i < entry.ties; i++) {
-          this.preferenceTable.record(
-            { modelA: entry.modelId, modelB: "__restore__", outcome: "A=B" },
-            taskType,
-          );
-        }
+        this.preferenceTable.loadEntry(
+          taskType,
+          entry.modelId,
+          entry.wins,
+          entry.losses,
+          entry.ties,
+          entry.lastUpdated,
+        );
       }
     }
   }
@@ -279,13 +305,21 @@ export class LocalLearningLayer implements LearningLayer {
    * Extract pairwise results from deliberation.
    * Heuristic: first model in modelsUsed is "winner" (synthesizer output returned).
    * All other models are "losers" in pairwise comparison.
-   * T3 LLM-as-Judge (Phase 6) will provide proper quality-based scoring.
+   *
+   * Uses "A>B" (weak confidence) instead of "A>>B" (strong confidence).
+   * Deliberation results are an indirect signal — explicit feedback (Phase 4) provides
+   * the strong signal via "A>>B".
+   *
+   * Single-model protocol produces no pairwise results (no comparison possible).
    */
   private extractPairwiseResults(
     classified: TaskClassification,
     _plan: EnsemblePlan,
     result: DeliberationResult,
   ): PairwiseResult[] {
+    // Single-model runs produce no meaningful pairwise comparison
+    if (result.protocol === "single") return [];
+
     const models = result.modelsUsed;
     if (models.length < 2) return [];
 
@@ -296,8 +330,8 @@ export class LocalLearningLayer implements LearningLayer {
       pairs.push({
         modelAId: winner,
         modelBId: models[i]!,
-        outcome: "A>B",
-        dimension: "JUDGMENT", // default dimension
+        outcome: "A>B", // weak confidence — deliberation is indirect signal
+        dimension: "JUDGMENT",
         taskType: classified.taskType,
       });
     }

@@ -18,6 +18,7 @@ import { GoogleProvider } from "./llm/providers/google";
 import { OpenAIProvider } from "./llm/providers/openai";
 import { LocalProvider } from "./llm/providers/local";
 import { OpenAICompatibleProvider } from "./llm/providers/openai-compatible";
+import { XaiProvider } from "./llm/providers/xai";
 import type { LLMProvider, ProviderName } from "./llm/types";
 import { PyreezMcpServer } from "./mcp/server";
 import { ModelRegistry } from "./model/registry";
@@ -25,6 +26,7 @@ import { calibrate, extractRatingsMap, persistRatings } from "./model/calibratio
 import { BunFileIO } from "./report/bun-file-io";
 import { FileReporter } from "./report/file-reporter";
 import { FileRunLogger } from "./report/run-logger";
+import { FileFeedbackStore } from "./report/feedback-store";
 import { PyreezEngine } from "./axis/engine";
 import {
   BtScoringSystem,
@@ -32,6 +34,12 @@ import {
   TwoTrackCeSelector,
   DivergeSynthProtocol,
 } from "./axis/wrappers";
+import { LocalLearningLayer } from "./axis/learning";
+import { MfLearner } from "./axis/mf-learner";
+import { NUM_TASK_TYPES } from "./axis/mf-index";
+import { KnnSelector } from "./router/knn-selector";
+import { CascadeSelector } from "./router/cascade-selector";
+import type { Selector } from "./axis/interfaces";
 import type { ChatFn } from "./axis/types";
 import type { ChatMessage } from "./llm/types";
 
@@ -63,6 +71,7 @@ async function main(): Promise<void> {
   const reporter = new FileReporter(".pyreez/reports", fileIO);
   const deliberationStore = new FileDeliberationStore(".pyreez/deliberations", fileIO);
   const runLogger = new FileRunLogger(".pyreez/runs", fileIO);
+  const feedbackStore = new FileFeedbackStore(".pyreez/feedback", fileIO);
 
   // Build providers from config
   const providers: LLMProvider[] = [];
@@ -81,10 +90,14 @@ async function main(): Promise<void> {
     providers.push(new LocalProvider(config.providers.local));
   }
 
-  // OpenAI-compatible providers (DeepSeek, xAI, Mistral, Qwen, Groq)
+  // xAI provider (Vercel AI SDK)
+  if (config.providers.xai) {
+    providers.push(new XaiProvider(config.providers.xai));
+  }
+
+  // OpenAI-compatible providers (DeepSeek, Mistral, Qwen, Groq)
   const OPENAI_COMPAT_PROVIDERS = {
     deepseek: "https://api.deepseek.com",
-    xai: "https://api.x.ai",
     mistral: "https://api.mistral.ai",
     qwen: "https://dashscope-intl.aliyuncs.com/compatible-mode",
     groq: "https://api.groq.com/openai",
@@ -124,8 +137,42 @@ async function main(): Promise<void> {
 
   const scoring = new BtScoringSystem();
   const profiler = new DomainOverrideProfiler();
-  const selector = new TwoTrackCeSelector(3, undefined, config.routing);
   const deliberation = new DivergeSynthProtocol("leader_decides", 1);
+
+  // MF Learner: matrix factorization for task-type × model affinity
+  const mfLearner = new MfLearner({
+    numContexts: NUM_TASK_TYPES,
+    numModels: modelIds.length,
+    io: fileIO,
+  });
+  await mfLearner.load();
+
+  // Learning Layer: preference tracking + online BT + MF + persistence
+  const learningLayer = new LocalLearningLayer({
+    scoring,
+    io: fileIO,
+    mfLearner,
+    modelIds,
+  });
+  await learningLayer.init();
+
+  // Selector variant from config
+  let selector: Selector;
+  switch (config.routing.selector) {
+    case "knn":
+      selector = new KnnSelector({
+        preferenceTable: learningLayer.table,
+        registry,
+        ensembleSize: 3,
+        routing: config.routing,
+      });
+      break;
+    case "cascade":
+      selector = new CascadeSelector({ registry, routing: config.routing });
+      break;
+    default:
+      selector = new TwoTrackCeSelector(3, undefined, config.routing);
+  }
 
   const engine = new PyreezEngine(
     scoring,
@@ -134,6 +181,7 @@ async function main(): Promise<void> {
     deliberation,
     axisChatFn,
     modelIds,
+    learningLayer,
   );
 
   const deliberateFn = createDeliberateFn({
@@ -152,6 +200,7 @@ async function main(): Promise<void> {
     deliberationStore,
     runLogger,
     engine,
+    feedbackStore,
     calibrateFn: async () => {
       const records = await reporter.getAll();
       const models = registry.getAll();
@@ -164,7 +213,21 @@ async function main(): Promise<void> {
 
   const transport = new StdioServerTransport();
 
+  // Load latency data if latencyWeight is configured
+  if (config.routing.latencyWeight && config.routing.latencyWeight > 0 && selector instanceof TwoTrackCeSelector) {
+    try {
+      const latencyMap = await reporter.getLatencyMap();
+      if (latencyMap.size > 0) {
+        selector.setLatencyMap(latencyMap);
+      }
+    } catch {
+      // Latency data is optional — skip on error
+    }
+  }
+
   const shutdown = async () => {
+    await learningLayer.flush();
+    await mfLearner.flush();
     await server.close();
     process.exit(0);
   };

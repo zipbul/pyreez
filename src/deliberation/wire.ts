@@ -22,6 +22,7 @@ import { createCooldownManager } from "./cooldown";
 import {
   buildWorkerMessages,
   buildLeaderMessages,
+  buildDebateWorkerMessages,
 } from "./prompts";
 
 // -- Public types --
@@ -192,34 +193,56 @@ export function createDeliberateFn(
   deps: WireDeps,
 ): (input: DeliberateInput) => Promise<DeliberateOutput> {
   return async (input) => {
-    // 1. Determine model IDs from available models
-    const available = deps.registry.getAvailable();
-    const modelIds = available.map((m) => m.id);
+    let team: import("./types").TeamComposition;
 
-    // 2. Compose team
-    const team = composeTeam(
-      { task: input.task, modelIds },
-      {
-        getModels: () => available,
-        getById: (id) => deps.registry.getById(id),
-      },
-    );
+    if (input.models && input.models.length >= 2) {
+      // Validate all model IDs exist in registry
+      const invalid = input.models.filter((id) => !deps.registry.getById(id));
+      if (invalid.length > 0) {
+        throw new Error(`Unknown model(s): ${invalid.join(", ")}. Check scores/models.json.`);
+      }
+      // All specified models participate. Leader auto-selected by JUDGMENT score.
+      const specifiedModels = input.models
+        .map((id) => deps.registry.getById(id)!)
+        .filter(Boolean);
+      team = composeTeam(
+        { task: input.task, modelIds: [...input.models] },
+        {
+          getModels: () => specifiedModels,
+          getById: (id) => deps.registry.getById(id),
+        },
+      );
+    } else {
+      // Auto compose from available models
+      const available = deps.registry.getAvailable();
+      const modelIds = available.map((m) => m.id);
+      team = composeTeam(
+        { task: input.task, modelIds },
+        {
+          getModels: () => available,
+          getById: (id) => deps.registry.getById(id),
+        },
+      );
+    }
 
     // 3. Assemble engine deps — deps.chat already returns ChatResult
     const engineDeps: EngineDeps = {
       chat: deps.chat,
       buildWorkerMessages,
       buildLeaderMessages,
+      buildDebateWorkerMessages,
     };
 
     // 4. Build engine config
-    const config: EngineConfig | undefined =
-      input.maxRounds != null || input.consensus != null
-        ? {
-            maxRounds: input.maxRounds ?? 1,
-            consensus: input.consensus,
-          }
-        : undefined;
+    const hasConfig = input.maxRounds != null || input.consensus != null || input.leaderContributes != null || input.protocol != null;
+    const config: EngineConfig | undefined = hasConfig
+      ? {
+          maxRounds: input.maxRounds ?? 1,
+          consensus: input.consensus,
+          leaderContributes: input.leaderContributes,
+          protocol: input.protocol,
+        }
+      : undefined;
 
     // 5. Build retryDeps for automatic team recomposition on failure
     const retryDeps: RetryDeps = {
@@ -246,6 +269,7 @@ export function createDeliberateFn(
           workerInstructions: input.workerInstructions,
           leaderInstructions: input.leaderInstructions,
           consensus: input.consensus,
+          protocol: input.protocol,
           ...(result.rounds ? { roundsSummary: result.rounds } : {}),
         });
       } catch {

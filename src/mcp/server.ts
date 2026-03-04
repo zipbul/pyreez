@@ -1,10 +1,10 @@
 /**
- * PyreezMcpServer — MCP server exposing 5 infrastructure tools.
+ * PyreezMcpServer — MCP server exposing 6 infrastructure tools.
  *
- * Tools: pyreez_route, pyreez_scores, pyreez_report, pyreez_deliberate, pyreez_calibrate
+ * Tools: pyreez_route, pyreez_scores, pyreez_report, pyreez_deliberate, pyreez_calibrate, pyreez_feedback
  * Architecture: pyreez = Infrastructure layer, Host = Orchestrator.
  *
- * Classification is provided by the host agent (domain, task_type, complexity are required params).
+ * Classification: host provides domain (required), task_type and complexity are auto-inferred if omitted.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -21,6 +21,30 @@ import type { DeliberationStore } from "../deliberation/store-types";
 import type { CalibrationResult } from "../model/calibration";
 import type { PyreezEngine } from "../axis/engine";
 import type { TaskClassification } from "../axis/types";
+import type { FileFeedbackStore } from "../report/feedback-store";
+
+/** Domain → default task_type mapping. Used when host omits task_type. */
+const DOMAIN_DEFAULTS: Record<string, string> = {
+  CODING: "IMPLEMENT_FEATURE",
+  DEBUGGING: "FIX_IMPLEMENT",
+  TESTING: "UNIT_TEST_WRITE",
+  REVIEW: "CODE_REVIEW",
+  DOCUMENTATION: "API_DOC",
+  ARCHITECTURE: "SYSTEM_DESIGN",
+  PLANNING: "SCOPE_DEFINITION",
+  REQUIREMENTS: "REQUIREMENT_EXTRACTION",
+  IDEATION: "BRAINSTORM",
+  OPERATIONS: "ENVIRONMENT_SETUP",
+  RESEARCH: "TECH_RESEARCH",
+  COMMUNICATION: "QUESTION_ANSWER",
+};
+
+/** Infer complexity from task description length when host omits it. */
+function inferComplexity(task: string): "simple" | "moderate" | "complex" {
+  if (task.length < 200) return "simple";
+  if (task.length < 1000) return "moderate";
+  return "complex";
+}
 
 export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
@@ -32,6 +56,7 @@ export interface PyreezMcpServerConfig {
   runLogger?: RunLogger;
   engine: PyreezEngine;
   calibrateFn?: () => Promise<CalibrationResult>;
+  feedbackStore?: FileFeedbackStore;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -61,6 +86,7 @@ export class PyreezMcpServer {
   private readonly runLogger?: RunLogger;
   private readonly engine: PyreezEngine;
   private readonly calibrateFn?: () => Promise<CalibrationResult>;
+  private readonly feedbackStore?: FileFeedbackStore;
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -85,6 +111,7 @@ export class PyreezMcpServer {
     this.runLogger = config.runLogger;
     this.engine = config.engine;
     this.calibrateFn = config.calibrateFn;
+    this.feedbackStore = config.feedbackStore;
 
     this.registerTools();
   }
@@ -95,7 +122,7 @@ export class PyreezMcpServer {
       {
         title: "Pyreez Route",
         description:
-          "Route a task through PROFILE → SCORE → SELECT pipeline to find the optimal model. Host agent must provide classification.",
+          "Route a task through PROFILE → SCORE → SELECT pipeline to find the optimal model. Domain required, task_type and complexity auto-inferred if omitted.",
         inputSchema: z.object({
           task: z.string().max(100_000).describe("Task description to route"),
           budget: z
@@ -109,7 +136,7 @@ export class PyreezMcpServer {
               "DEBUGGING", "OPERATIONS", "RESEARCH", "COMMUNICATION",
             ])
             .describe(
-              "Task domain. IDEATION=brainstorm/idea, PLANNING=goal/scope/priority, REQUIREMENTS=spec/acceptance, ARCHITECTURE=system design/data model, CODING=implement/refactor/optimize, TESTING=test write/strategy, REVIEW=code review/comparison/security, DOCUMENTATION=api doc/tutorial/diagram, DEBUGGING=error diagnosis/fix, OPERATIONS=deploy/ci-cd/setup, RESEARCH=tech research/benchmark, COMMUNICATION=explain/summarize/translate",
+              "Task domain. Pick the closest: CODING=write/modify code, DEBUGGING=fix errors/bugs, TESTING=write/run tests, REVIEW=review/compare code, ARCHITECTURE=system design, DOCUMENTATION=docs/comments, PLANNING=scope/prioritize, REQUIREMENTS=specs/acceptance, IDEATION=brainstorm, OPERATIONS=deploy/CI/infra, RESEARCH=investigate/benchmark, COMMUNICATION=explain/summarize/translate",
             ),
           task_type: z
             .enum([
@@ -126,14 +153,25 @@ export class PyreezMcpServer {
               "TECH_RESEARCH", "BENCHMARK", "COMPATIBILITY_CHECK", "BEST_PRACTICE", "TREND_ANALYSIS",
               "SUMMARIZE", "EXPLAIN", "REPORT", "TRANSLATE", "QUESTION_ANSWER",
             ])
+            .optional()
             .describe(
-              "Specific task type within the domain.",
+              "Optional. Specific task type — omit if unsure, Pyreez will use a sensible default. Common: IMPLEMENT_FEATURE, FIX_IMPLEMENT, REFACTOR, UNIT_TEST_WRITE, CODE_REVIEW, EXPLAIN, SUMMARIZE, SYSTEM_DESIGN, ERROR_DIAGNOSIS",
             ),
           complexity: z
             .enum(["simple", "moderate", "complex"])
+            .optional()
             .describe(
-              "Task complexity. simple=single focused task, moderate=multi-step or requires domain knowledge, complex=cross-cutting/architectural/multi-system",
+              "Optional. simple=single focused task, moderate=multi-step or domain knowledge, complex=cross-cutting/architectural. Defaults to moderate.",
             ),
+          context: z
+            .object({
+              language: z.string().optional()
+                .describe("Programming language if applicable (e.g. typescript, python)"),
+              framework: z.string().optional()
+                .describe("Framework if applicable (e.g. react, express, django)"),
+            })
+            .optional()
+            .describe("Optional coding context the host already knows"),
           quality_weight: z
             .number()
             .optional()
@@ -311,6 +349,14 @@ export class PyreezMcpServer {
             .enum(["leader_decides"])
             .optional()
             .describe("Consensus mode (default: fixed rounds)"),
+          leader_contributes: z
+            .boolean()
+            .optional()
+            .describe("When true (default), the leader also responds independently in the diverge phase before synthesizing. Ensures the strongest model's unanchored opinion is captured."),
+          protocol: z
+            .enum(["diverge-synth", "debate"])
+            .optional()
+            .describe("Deliberation protocol. 'debate' enables multi-round debate where workers see each other's responses."),
           quality_weight: z
             .number()
             .optional()
@@ -333,6 +379,37 @@ export class PyreezMcpServer {
         inputSchema: z.object({}),
       },
       async () => this.handleCalibrate(),
+    );
+
+    this.mcpServer.registerTool(
+      "pyreez_feedback",
+      {
+        title: "Pyreez Feedback",
+        description:
+          "Record feedback for a routing/deliberation session. Supports boolean, float, comment, and demonstration feedback types.",
+        inputSchema: z.object({
+          session_id: z
+            .string()
+            .optional()
+            .describe("Session ID from pyreez_route or pyreez_deliberate response"),
+          model: z
+            .string()
+            .max(200)
+            .optional()
+            .describe("Model ID to provide feedback for"),
+          task_type: z
+            .string()
+            .optional()
+            .describe("Task type for this feedback"),
+          type: z
+            .enum(["boolean", "float", "comment", "demonstration"])
+            .describe("Feedback type: boolean (thumbs up/down), float (0.0-1.0 rating), comment (text), demonstration (corrected output)"),
+          value: z
+            .union([z.boolean(), z.number(), z.string()])
+            .describe("Feedback value: boolean for thumbs, number for rating, string for comment/demonstration"),
+        }),
+      },
+      async (args) => this.handleFeedback(args),
     );
   }
 
@@ -386,8 +463,9 @@ export class PyreezMcpServer {
     task: string;
     budget?: number;
     domain: string;
-    task_type: string;
-    complexity: string;
+    task_type?: string;
+    complexity?: string;
+    context?: { language?: string; framework?: string };
     quality_weight?: number;
     cost_weight?: number;
   }): Promise<CallToolResult> {
@@ -400,17 +478,27 @@ export class PyreezMcpServer {
       const budget: BudgetConfig = {
         perRequest: args.budget ?? DEFAULT_BUDGET.perRequest,
       };
+      const taskType = args.task_type ?? DOMAIN_DEFAULTS[args.domain] ?? "QUESTION_ANSWER";
+      const complexity = (args.complexity ?? inferComplexity(args.task)) as TaskClassification["complexity"];
+      const method = args.task_type ? "host" : "default";
+
+      // R-2: Derive criticality from complexity when not explicitly set
+      const criticality = complexity === "complex" ? "high"
+        : complexity === "simple" ? "low"
+        : "medium";
       const classification: TaskClassification = {
         domain: args.domain,
-        taskType: args.task_type,
-        complexity: args.complexity as TaskClassification["complexity"],
+        taskType,
+        complexity,
+        criticality,
+        language: args.context?.language,
         qualityWeight: args.quality_weight,
         costWeight: args.cost_weight,
       };
       const result = await this.engine.traceOnly(args.task, budget, classification);
 
       return this.textResult(JSON.stringify({
-        classification,
+        classification: { ...classification, method },
         requirement: result.requirement,
         selection: {
           models: result.plan.models,
@@ -463,10 +551,18 @@ export class PyreezMcpServer {
           confidence: conf,
         };
       });
+      // S-2: Warn when all models score 0 for the dimension (likely invalid dimension name)
+      const allZero = scored.every((s) => s.score === 0 && s.confidence === 0);
       if (args.top != null) {
         scored = scored
           .sort((a, b) => b.score - a.score)
           .slice(0, Math.max(0, args.top));
+      }
+      if (allZero && models.length > 0) {
+        return this.textResult(JSON.stringify({
+          warning: `Dimension "${dim}" not found in any model. Valid dimensions include: REASONING, CODE_GENERATION, DEBUGGING, ANALYSIS, CREATIVITY, SYSTEM_THINKING, JUDGMENT, INSTRUCTION_FOLLOWING, etc.`,
+          models: scored,
+        }, null, 2));
       }
       return this.textResult(JSON.stringify(scored, null, 2));
     }
@@ -543,10 +639,12 @@ export class PyreezMcpServer {
     }
 
     try {
+      // P-1: Clamp quality to [0, 10] range
+      const clampedQuality = Math.max(0, Math.min(10, args.quality));
       const record: CallRecord = {
         model: args.model,
         taskType: args.task_type,
-        quality: args.quality,
+        quality: clampedQuality,
         latencyMs: args.latency_ms ?? 0,
         tokens: args.tokens ?? { input: 0, output: 0 },
         context: args.context
@@ -580,6 +678,8 @@ export class PyreezMcpServer {
     leader_instructions?: string;
     max_rounds?: number;
     consensus?: string;
+    leader_contributes?: boolean;
+    protocol?: string;
     quality_weight?: number;
     cost_weight?: number;
   }): Promise<CallToolResult> {
@@ -590,21 +690,29 @@ export class PyreezMcpServer {
 
     // auto_route: use the 3-stage pipeline
     if (args.auto_route) {
-      if (!args.domain || !args.task_type || !args.complexity) {
+      if (!args.domain) {
         return this.errorResult(
-          "Error: domain, task_type, and complexity are required when auto_route=true",
+          "Error: domain is required when auto_route=true",
         );
       }
       try {
         const budget = { perRequest: args.budget ?? 1.0 };
+        const taskType = args.task_type ?? DOMAIN_DEFAULTS[args.domain] ?? "QUESTION_ANSWER";
+        const complexity = (args.complexity ?? inferComplexity(args.task)) as TaskClassification["complexity"];
+        const criticality = complexity === "complex" ? "high"
+          : complexity === "simple" ? "low"
+          : "medium";
         const classification: TaskClassification = {
           domain: args.domain,
-          taskType: args.task_type,
-          complexity: args.complexity as TaskClassification["complexity"],
+          taskType,
+          complexity,
+          criticality,
           qualityWeight: args.quality_weight,
           costWeight: args.cost_weight,
         };
-        const result = await this.engine.run(args.task, budget, classification);
+        // D-2: Use runWithTrace to include routing info in response
+        const traceResult = await this.engine.runWithTrace(args.task, budget, classification);
+        const result = traceResult.result;
 
         // Auto-save deliberation result to store (best-effort)
         if (this.deliberationStore) {
@@ -624,7 +732,16 @@ export class PyreezMcpServer {
           }
         }
 
-        return this.textResult(JSON.stringify(result, null, 2));
+        // Include routing trace so caller sees which models were selected and why
+        const response = {
+          ...result,
+          routing: {
+            models: traceResult.plan.models,
+            strategy: traceResult.plan.strategy,
+            reason: traceResult.plan.reason,
+          },
+        };
+        return this.textResult(JSON.stringify(response, null, 2));
       } catch (error) {
         return this.errorResult(
           `Error: ${sanitizeError(error)}`,
@@ -638,12 +755,15 @@ export class PyreezMcpServer {
     }
 
     try {
+      const validProtocol = args.protocol === "debate" ? "debate" : args.protocol === "diverge-synth" ? "diverge-synth" : undefined;
       const input: DeliberateInput = {
         task: args.task,
         workerInstructions: args.worker_instructions,
         leaderInstructions: args.leader_instructions,
         maxRounds: args.max_rounds,
         consensus: args.consensus === "leader_decides" ? "leader_decides" : undefined,
+        leaderContributes: args.leader_contributes,
+        protocol: validProtocol,
         qualityWeight: args.quality_weight,
         costWeight: args.cost_weight,
       };
@@ -664,11 +784,73 @@ export class PyreezMcpServer {
       }
       try {
         const result = await this.calibrateFn();
-        return this.textResult(JSON.stringify(result, null, 2));
+        // Summarize stale/converged arrays to reduce response size (C-1)
+        const summary = {
+          comparisonsProcessed: result.comparisonsProcessed,
+          anomalies: result.anomalies,
+          convergedCount: result.converged.length,
+          convergedSample: result.converged.slice(0, 5),
+          staleCount: result.stale.length,
+          staleSample: result.stale.slice(0, 5),
+        };
+        return this.textResult(JSON.stringify(summary, null, 2));
       } catch (error) {
         return this.errorResult(
           `Error: ${sanitizeError(error)}`,
         );
+      }
+    });
+  }
+
+  async handleFeedback(args: {
+    session_id?: string;
+    model?: string;
+    task_type?: string;
+    type: string;
+    value: boolean | number | string;
+  }): Promise<CallToolResult> {
+    return this.logRun("feedback", async () => {
+      if (!this.feedbackStore) {
+        return this.errorResult("Error: feedback store not available");
+      }
+
+      try {
+        const feedbackId = crypto.randomUUID();
+        const record = {
+          id: feedbackId,
+          timestamp: Date.now(),
+          sessionId: args.session_id,
+          modelId: args.model,
+          taskType: args.task_type,
+          type: args.type as "boolean" | "float" | "comment" | "demonstration",
+          value: args.value,
+        };
+
+        await this.feedbackStore.record(record);
+
+        // Convert boolean/float feedback to quality signal for BT calibration
+        if (args.model && args.task_type && (args.type === "boolean" || args.type === "float")) {
+          const quality =
+            args.type === "boolean"
+              ? (args.value ? 8 : 2)
+              : (typeof args.value === "number" ? Math.min(10, Math.max(0, args.value * 10)) : 5);
+
+          try {
+            await this.reporter.record({
+              model: args.model,
+              taskType: args.task_type,
+              quality,
+              latencyMs: 0,
+              tokens: { input: 0, output: 0 },
+            });
+          } catch {
+            // Best-effort — don't fail the feedback recording
+          }
+        }
+
+        return this.textResult(JSON.stringify({ recorded: true, feedbackId }));
+      } catch (error) {
+        return this.errorResult(`Error: ${sanitizeError(error)}`);
       }
     });
   }

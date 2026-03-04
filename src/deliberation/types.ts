@@ -111,6 +111,15 @@ export interface DeliberateInput {
   readonly qualityWeight?: number;
   /** Per-request cost weight override. */
   readonly costWeight?: number;
+  /** Deliberation protocol. Default: "diverge-synth". */
+  readonly protocol?: "diverge-synth" | "debate";
+  /** Explicit model IDs to use. First N-1 are workers, last is leader. Bypasses auto team composition. */
+  readonly models?: readonly string[];
+  /**
+   * When true, the leader also responds independently in the diverge phase
+   * before synthesizing. Default: true.
+   */
+  readonly leaderContributes?: boolean;
 }
 
 /**
@@ -123,6 +132,11 @@ export interface DeliberateOutput {
   readonly totalTokens: TokenUsage;
   readonly totalLLMCalls: number;
   readonly modelsUsed: readonly string[];
-  /** Per-round synthesis summaries for diagnostics. */
-  readonly rounds?: readonly { number: number; synthesis?: string }[];
+  /** Per-round details for diagnostics. */
+  readonly rounds?: readonly {
+    number: number;
+    responses?: readonly { model: string; content: string }[];
+    synthesis?: string;
+    failedWorkers?: readonly { model: string; error: string }[];
+  }[];
 }

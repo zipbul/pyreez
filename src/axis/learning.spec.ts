@@ -259,8 +259,8 @@ describe("LocalLearningLayer", () => {
     expect(io.writeFile).toHaveBeenCalled();
   });
 
-  // 11. [ED] recordCount at autoCalibThreshold → triggers calibrate
-  it("should trigger calibrate at exact threshold", async () => {
+  // 11. [ED] recordCount at autoCalibThreshold → triggers batch calibrate
+  it("should trigger batch calibrate at exact threshold", async () => {
     const io = makeFakeIO();
     const scoring = makeFakeScoring();
     const layer = new LocalLearningLayer({
@@ -271,10 +271,14 @@ describe("LocalLearningLayer", () => {
     });
 
     await layer.record(makeClassified(), makePlan("a", "b"), makeResult(["a", "b"]));
-    expect(scoring.update).not.toHaveBeenCalled();
+    // Online BT already calls update on each pairwise — check call count
+    const callsAfter1 = (scoring.update as ReturnType<typeof mock>).mock.calls.length;
+    expect(callsAfter1).toBe(1); // online BT
 
     await layer.record(makeClassified(), makePlan("a", "b"), makeResult(["a", "b"]));
-    expect(scoring.update).toHaveBeenCalled();
+    const callsAfter2 = (scoring.update as ReturnType<typeof mock>).mock.calls.length;
+    // 2nd online BT only (batch calibrate no longer calls scoring.update)
+    expect(callsAfter2).toBe(callsAfter1 + 1);
   });
 
   // 12. [ED] single model plan → no pairwise no preference change
@@ -333,10 +337,14 @@ describe("LocalLearningLayer", () => {
     for (let i = 0; i < 4; i++) {
       await layer.record(makeClassified(), makePlan("a", "b"), makeResult(["a", "b"]));
     }
-    expect(scoring.update).not.toHaveBeenCalled();
+    // Online BT calls update on each pairwise record (4 calls)
+    const callsBefore = (scoring.update as ReturnType<typeof mock>).mock.calls.length;
+    expect(callsBefore).toBe(4);
 
     await layer.record(makeClassified(), makePlan("a", "b"), makeResult(["a", "b"]));
-    expect(scoring.update).toHaveBeenCalled();
+    // 5th record: online BT only (batch calibrate no longer calls scoring.update)
+    const callsAfter = (scoring.update as ReturnType<typeof mock>).mock.calls.length;
+    expect(callsAfter).toBe(callsBefore + 1);
   });
 
   // 16. [ST] preference table preserves state across enhance calls
@@ -400,6 +408,75 @@ describe("LocalLearningLayer", () => {
     const aScore = e1.find((s) => s.modelId === "model-a")!.overall;
     const bScore = e1.find((s) => s.modelId === "model-b")!.overall;
     expect(aScore).toBeGreaterThanOrEqual(bScore);
+  });
+
+  // 19a. [API] table getter returns PreferenceTable instance
+  it("should expose preference table via table getter", async () => {
+    const io = makeFakeIO();
+    const scoring = makeFakeScoring();
+    const layer = new LocalLearningLayer({ scoring, io, syncInterval: 100 });
+
+    const table = layer.table;
+    expect(table).toBeDefined();
+    expect(table.taskTypes()).toEqual([]);
+
+    // Record some data and verify table reflects it
+    await layer.record(makeClassified(), makePlan("a", "b"), makeResult(["a", "b"]));
+    expect(table.taskTypes()).toContain("IMPLEMENT_FEATURE");
+  });
+
+  // 19b. [API] flush writes dirty preferences to disk
+  it("should flush dirty preferences to disk", async () => {
+    const io = makeFakeIO();
+    const scoring = makeFakeScoring();
+    const layer = new LocalLearningLayer({ scoring, io, syncInterval: 100 });
+
+    await layer.record(makeClassified(), makePlan("a", "b"), makeResult(["a", "b"]));
+    expect(io.writeFile).not.toHaveBeenCalled();
+
+    await layer.flush();
+    expect(io.writeFile).toHaveBeenCalled();
+  });
+
+  // 19c. [API] flush does nothing when not dirty
+  it("should not write when flushing clean state", async () => {
+    const io = makeFakeIO();
+    const scoring = makeFakeScoring();
+    const layer = new LocalLearningLayer({ scoring, io, syncInterval: 100 });
+
+    await layer.flush();
+    expect(io.writeFile).not.toHaveBeenCalled();
+  });
+
+  // 19d. [BT] online BT calls scoring.update on each pairwise record
+  it("should call scoring.update immediately on each multi-model record (online BT)", async () => {
+    const io = makeFakeIO();
+    const scoring = makeFakeScoring();
+    const layer = new LocalLearningLayer({ scoring, io, syncInterval: 100, autoCalibThreshold: 999 });
+
+    await layer.record(makeClassified(), makePlan("a", "b"), makeResult(["a", "b"]));
+    expect(scoring.update).toHaveBeenCalledTimes(1);
+
+    await layer.record(makeClassified(), makePlan("a", "b", "c"), makeResult(["a", "b", "c"]));
+    expect(scoring.update).toHaveBeenCalledTimes(2);
+  });
+
+  // 19e. [BT] single-model protocol produces no pairwise (no online BT call)
+  it("should skip pairwise extraction for single-model protocol", async () => {
+    const io = makeFakeIO();
+    const scoring = makeFakeScoring();
+    const layer = new LocalLearningLayer({ scoring, io, syncInterval: 100, autoCalibThreshold: 999 });
+
+    const result: DeliberationResult = {
+      result: "test",
+      roundsExecuted: 0,
+      consensusReached: true,
+      totalLLMCalls: 1,
+      modelsUsed: ["model-a"],
+      protocol: "single",
+    };
+    await layer.record(makeClassified(), makePlan("model-a"), result);
+    expect(scoring.update).not.toHaveBeenCalled();
   });
 
   // 19. [OR] record order affects which model gets boosted

@@ -6,6 +6,7 @@ import {
   PreferenceTable,
   winRate,
   entryConfidence,
+  decayedWinRate,
   routeByPreference,
 } from "./preference";
 import type { PairwiseResult } from "../evaluation/types";
@@ -130,6 +131,115 @@ describe("entryConfidence", () => {
   it("should approach 1.0 for many comparisons", () => {
     const conf = entryConfidence({ modelId: "m", taskType: "t", wins: 100, losses: 50, ties: 50 });
     expect(conf).toBeGreaterThan(0.9);
+  });
+});
+
+// ================================================================
+// decayedWinRate
+// ================================================================
+
+describe("decayedWinRate", () => {
+  it("should return raw win rate when lastUpdated is not set", () => {
+    const entry = { modelId: "m", taskType: "t", wins: 10, losses: 0, ties: 0 };
+    expect(decayedWinRate(entry)).toBe(1.0);
+  });
+
+  it("should return close to raw win rate for recent data", () => {
+    const entry = {
+      modelId: "m", taskType: "t", wins: 10, losses: 0, ties: 0,
+      lastUpdated: Date.now() - 1000, // 1 second ago
+    };
+    expect(decayedWinRate(entry)).toBeCloseTo(1.0, 2);
+  });
+
+  it("should decay towards 0.5 for old data", () => {
+    const thirtyDaysAgo = Date.now() - 30 * 86_400_000;
+    const entry = {
+      modelId: "m", taskType: "t", wins: 10, losses: 0, ties: 0,
+      lastUpdated: thirtyDaysAgo,
+    };
+    // After one half-life (30 days), decay factor = 0.5
+    // decayed = 0.5 + (1.0 - 0.5) * 0.5 = 0.75
+    expect(decayedWinRate(entry, 30)).toBeCloseTo(0.75, 1);
+  });
+
+  it("should approach 0.5 for very old data", () => {
+    const yearAgo = Date.now() - 365 * 86_400_000;
+    const entry = {
+      modelId: "m", taskType: "t", wins: 10, losses: 0, ties: 0,
+      lastUpdated: yearAgo,
+    };
+    const result = decayedWinRate(entry, 30);
+    // After ~12 half-lives, should be very close to 0.5
+    expect(result).toBeGreaterThan(0.5);
+    expect(result).toBeLessThan(0.51);
+  });
+
+  it("should handle zero win rate with decay", () => {
+    const entry = {
+      modelId: "m", taskType: "t", wins: 0, losses: 10, ties: 0,
+      lastUpdated: Date.now() - 30 * 86_400_000,
+    };
+    // decayed = 0.5 + (0 - 0.5) * 0.5 = 0.25
+    expect(decayedWinRate(entry, 30)).toBeCloseTo(0.25, 1);
+  });
+
+  it("should clamp future timestamps to ageDays=0 (no amplification)", () => {
+    const entry = {
+      modelId: "m", taskType: "t", wins: 10, losses: 0, ties: 0,
+      lastUpdated: Date.now() + 86_400_000, // 1 day in future
+    };
+    // Should return raw win rate (ageDays clamped to 0)
+    expect(decayedWinRate(entry)).toBe(1.0);
+  });
+
+  it("should return raw win rate when lastUpdated is NaN", () => {
+    const entry = {
+      modelId: "m", taskType: "t", wins: 10, losses: 0, ties: 0,
+      lastUpdated: NaN,
+    };
+    expect(decayedWinRate(entry)).toBe(1.0);
+  });
+
+  it("should return raw win rate when lastUpdated is Infinity", () => {
+    const entry = {
+      modelId: "m", taskType: "t", wins: 10, losses: 0, ties: 0,
+      lastUpdated: Infinity,
+    };
+    expect(decayedWinRate(entry)).toBe(1.0);
+  });
+});
+
+// ================================================================
+// PreferenceTable.record — lastUpdated
+// ================================================================
+
+describe("PreferenceTable lastUpdated", () => {
+  it("should set lastUpdated on record", () => {
+    const table = new PreferenceTable();
+    const before = Date.now();
+    table.record(makePairwise("m1", "m2", "A>B"), "CODE_WRITE");
+    const after = Date.now();
+
+    const e1 = table.getEntry("CODE_WRITE", "m1")!;
+    expect(e1.lastUpdated).toBeGreaterThanOrEqual(before);
+    expect(e1.lastUpdated).toBeLessThanOrEqual(after);
+  });
+
+  it("should preserve lastUpdated in loadEntry", () => {
+    const table = new PreferenceTable();
+    const ts = 1700000000000;
+    table.loadEntry("CODE_WRITE", "m1", 5, 3, 1, ts);
+    const entry = table.getEntry("CODE_WRITE", "m1")!;
+    expect(entry.lastUpdated).toBe(ts);
+    expect(entry.wins).toBe(5);
+  });
+
+  it("should not set lastUpdated in loadEntry when not provided", () => {
+    const table = new PreferenceTable();
+    table.loadEntry("CODE_WRITE", "m1", 5, 3, 1);
+    const entry = table.getEntry("CODE_WRITE", "m1")!;
+    expect(entry.lastUpdated).toBeUndefined();
   });
 });
 

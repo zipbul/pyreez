@@ -35,6 +35,7 @@ export interface PreferenceEntry {
   wins: number;
   losses: number;
   ties: number;
+  lastUpdated?: number;
 }
 
 /**
@@ -61,6 +62,10 @@ export class PreferenceTable {
 
     const entryA = this.getEntry(taskType, result.modelA)!;
     const entryB = this.getEntry(taskType, result.modelB)!;
+
+    const now = Date.now();
+    entryA.lastUpdated = now;
+    entryB.lastUpdated = now;
 
     switch (result.outcome) {
       case "A>>B":
@@ -123,6 +128,16 @@ export class PreferenceTable {
     return total / 2;
   }
 
+  /** Directly load an entry (for deserialization — no dummy opponents). */
+  loadEntry(taskType: string, modelId: string, wins: number, losses: number, ties: number, lastUpdated?: number): void {
+    this.ensureEntry(taskType, modelId);
+    const entry = this.getEntry(taskType, modelId)!;
+    entry.wins = wins;
+    entry.losses = losses;
+    entry.ties = ties;
+    if (lastUpdated != null) entry.lastUpdated = lastUpdated;
+  }
+
   private ensureEntry(taskType: string, modelId: string): void {
     if (!this.entries.has(taskType)) this.entries.set(taskType, new Map());
     const taskEntries = this.entries.get(taskType)!;
@@ -160,11 +175,28 @@ export function entryConfidence(entry: PreferenceEntry): number {
   return total / (total + 10);
 }
 
+// -- Time Decay --
+
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * Calculate decayed win rate: recent data weighs more than stale data.
+ * Uses exponential decay with configurable half-life.
+ * Without lastUpdated, returns raw win rate (backward compatible).
+ */
+export function decayedWinRate(entry: PreferenceEntry, halfLifeDays = 30): number {
+  const raw = winRate(entry);
+  if (entry.lastUpdated == null || !Number.isFinite(entry.lastUpdated)) return raw;
+  const ageDays = Math.max(0, (Date.now() - entry.lastUpdated) / MS_PER_DAY);
+  const decayFactor = Math.pow(0.5, ageDays / halfLifeDays);
+  return 0.5 + (raw - 0.5) * decayFactor;
+}
+
 // -- Router --
 
 /**
  * Route a query to the best model based on preference history.
- * Returns models ranked by preference score.
+ * Returns models ranked by preference score (with time decay).
  */
 export function routeByPreference(
   table: PreferenceTable,
@@ -180,7 +212,7 @@ export function routeByPreference(
       if (!entry) return { modelId, score: 0.5, confidence: 0 };
       return {
         modelId,
-        score: winRate(entry),
+        score: decayedWinRate(entry),
         confidence: entryConfidence(entry),
       };
     })

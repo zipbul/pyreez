@@ -65,6 +65,7 @@ export class PyreezEngine {
     const trace = await this.traceOnly(prompt, budget, classification);
     const { scores, plan } = trace;
 
+    const sessionId = crypto.randomUUID();
     let result: DeliberationResult;
 
     // Single-model shortcut: skip deliberation
@@ -77,15 +78,17 @@ export class PyreezEngine {
         totalLLMCalls: 1,
         modelsUsed: [plan.models[0]!.modelId],
         protocol: "single",
+        sessionId,
       };
     } else {
       // Stage 3: deliberate
-      result = await this.deliberation.deliberate(
+      const raw = await this.deliberation.deliberate(
         prompt,
         plan,
         scores,
         this.chat,
       );
+      result = { ...raw, sessionId };
     }
 
     // Learning Layer: fire-and-forget record

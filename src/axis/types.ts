@@ -88,6 +88,8 @@ export interface DeliberationResult {
   modelsUsed: string[];
   /** Which protocol variant was used (e.g., "leader_decides", "single", "role-based"). */
   protocol: string;
+  /** Unique session ID for feedback linkage (Not Diamond session reference). */
+  sessionId?: string;
 }
 
 // -- Scoring output: ModelScore --

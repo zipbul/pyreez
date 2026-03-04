@@ -90,6 +90,13 @@ export interface EngineDeps {
     instructions?: string,
     roundInfo?: RoundInfo,
     consensus?: ConsensusMode,
+    protocol?: "diverge-synth" | "debate",
+  ) => ChatMessage[];
+  /** Debate protocol: worker messages include all previous responses. */
+  readonly buildDebateWorkerMessages?: (
+    ctx: SharedContext,
+    instructions?: string,
+    roundInfo?: RoundInfo,
   ) => ChatMessage[];
 }
 
@@ -99,10 +106,19 @@ export interface EngineDeps {
 export interface EngineConfig {
   readonly maxRounds: number;
   readonly consensus?: ConsensusMode;
+  readonly protocol?: "diverge-synth" | "debate";
+  /**
+   * When true, the leader also responds independently in the worker (diverge) phase
+   * before synthesizing all responses including its own.
+   * Prevents anchoring bias and ensures the strongest model contributes its own reasoning.
+   * Default: true.
+   */
+  readonly leaderContributes?: boolean;
 }
 
 const DEFAULT_CONFIG: EngineConfig = {
   maxRounds: 1,
+  leaderContributes: true,
 };
 
 // -- Internal Helpers --
@@ -122,6 +138,32 @@ function stripJsonWrapping(text: string): string {
   return text;
 }
 
+/**
+ * Extract the outermost JSON object from a string that may contain
+ * surrounding text (e.g. LLM commentary before/after the JSON block).
+ * Returns null if no valid JSON object is found.
+ */
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\" && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    if (ch === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 // -- Parsers --
 
 /**
@@ -138,8 +180,10 @@ export function parseSynthesis(
     return { content: response };
   }
 
-  const cleaned = stripJsonWrapping(response);
   const VALID_DECISIONS = ["continue", "approve"];
+
+  // Attempt 1: strip markdown wrapping and parse
+  const cleaned = stripJsonWrapping(response);
   try {
     const parsed = JSON.parse(cleaned);
     const decision = VALID_DECISIONS.includes(parsed.decision)
@@ -150,8 +194,28 @@ export function parseSynthesis(
       decision,
     };
   } catch {
-    return { content: response };
+    // fall through to fallback
   }
+
+  // Attempt 2: extract outermost JSON object from response text
+  // Handles cases where the LLM wraps JSON in commentary
+  const jsonBlock = extractJsonObject(response);
+  if (jsonBlock) {
+    try {
+      const parsed = JSON.parse(jsonBlock);
+      const decision = VALID_DECISIONS.includes(parsed.decision)
+        ? (parsed.decision as "continue" | "approve")
+        : undefined;
+      return {
+        content: parsed.result ?? parsed.content ?? response,
+        decision,
+      };
+    } catch {
+      // fall through
+    }
+  }
+
+  return { content: response };
 }
 
 // -- Round Execution --
@@ -174,29 +238,35 @@ export async function executeRound(
   let totalInput = 0;
   let totalOutput = 0;
 
-  // 1. Workers — all parallel
-  const workerMessages = deps.buildWorkerMessages(
-    ctx,
-    input.workerInstructions,
-    roundInfo,
-  );
+  // 1. Diverge phase — all participants respond in parallel
+  //    When leaderContributes is true (default), leader also responds independently
+  //    before synthesizing, ensuring the strongest model's unanchored opinion is captured.
+  const useDebateBuilder = config.protocol === "debate" && deps.buildDebateWorkerMessages && roundNumber > 1;
+  const workerMessages = useDebateBuilder
+    ? deps.buildDebateWorkerMessages!(ctx, input.workerInstructions, roundInfo)
+    : deps.buildWorkerMessages(ctx, input.workerInstructions, roundInfo);
 
-  const workerPromises = ctx.team.workers.map(async (worker) => {
-    const result = await deps.chat(worker.model, workerMessages);
+  const leaderContributes = config.leaderContributes !== false;
+  const divergeParticipants = leaderContributes
+    ? [...ctx.team.workers, ctx.team.leader]
+    : [...ctx.team.workers];
+
+  const workerPromises = divergeParticipants.map(async (participant) => {
+    const result = await deps.chat(participant.model, workerMessages);
     totalInput += result.inputTokens;
     totalOutput += result.outputTokens;
-    return { model: worker.model, content: result.content } as WorkerResponse;
+    return { model: participant.model, content: result.content } as WorkerResponse;
   });
 
   const settled = await Promise.allSettled(workerPromises);
 
-  // If ALL workers failed, treat as a hard error
+  // If ALL participants failed, treat as a hard error
   if (
-    ctx.team.workers.length > 0 &&
+    divergeParticipants.length > 0 &&
     settled.every((r) => r.status === "rejected")
   ) {
     const firstFailure = settled[0] as PromiseRejectedResult;
-    const failedModel = ctx.team.workers[0]!.model;
+    const failedModel = divergeParticipants[0]!.model;
     throw new RoundExecutionError("worker", failedModel, firstFailure.reason);
   }
 
@@ -208,9 +278,9 @@ export async function executeRound(
     if (result.status === "fulfilled") {
       responses.push(result.value);
     } else {
-      const workerModel = ctx.team.workers[idx]!.model;
+      const model = divergeParticipants[idx]!.model;
       const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
-      failedWorkers.push({ model: workerModel, error: reason });
+      failedWorkers.push({ model, error: reason });
     }
   }
 
@@ -222,6 +292,7 @@ export async function executeRound(
     input.leaderInstructions,
     roundInfo,
     config.consensus,
+    config.protocol,
   );
   let leaderResult: ChatResult;
   try {
@@ -238,10 +309,16 @@ export async function executeRound(
     config.consensus,
   );
 
+  // For debate protocol, force "continue" on round 1: workers haven't exchanged views yet,
+  // so the leader can't meaningfully approve consensus. Round 2+ may approve early.
+  const effectiveDecision = (config.protocol === "debate" && roundNumber === 1 && config.maxRounds > 1)
+    ? "continue" as const
+    : decision;
+
   const synthesis = {
     model: ctx.team.leader.model,
     content,
-    ...(decision ? { decision } : {}),
+    ...(effectiveDecision ? { decision: effectiveDecision } : {}),
   };
 
   return {
@@ -412,10 +489,12 @@ export async function deliberate(
 
   const result = lastRound?.synthesis?.content ?? "";
 
-  // Extract per-round synthesis summaries for diagnostics
+  // Extract per-round details for diagnostics (worker responses + synthesis + failures)
   const roundsSummary = ctx.rounds.map((r) => ({
     number: r.number,
+    responses: r.responses.map((resp) => ({ model: resp.model, content: resp.content })),
     ...(r.synthesis ? { synthesis: r.synthesis.content } : {}),
+    ...(r.failedWorkers?.length ? { failedWorkers: r.failedWorkers } : {}),
   }));
 
   return {

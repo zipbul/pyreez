@@ -12,108 +12,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 1000,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 980.444556685608,
+          "sigma": 320.2410383639308,
+          "comparisons": 4
         },
         "MATH_REASONING": {
-          "mu": 900,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 846,
+          "sigma": 345.40625,
+          "comparisons": 1
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 1000,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
           "mu": 1000,
-          "sigma": 350,
-          "comparisons": 0
+          "sigma": 324.426450544983,
+          "comparisons": 3
         },
         "JUDGMENT": {
           "mu": 1000,
-          "sigma": 350,
-          "comparisons": 0
+          "sigma": 341.1578947368421,
+          "comparisons": 1
         },
         "CODE_GENERATION": {
-          "mu": 1000,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 946.6666666666666,
+          "sigma": 345.3333333333333,
+          "comparisons": 1
         },
         "CODE_UNDERSTANDING": {
-          "mu": 1000,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 1000,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
           "mu": 1000,
-          "sigma": 350,
-          "comparisons": 0
+          "sigma": 332.35174807533804,
+          "comparisons": 2
         },
         "TOOL_USE": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 1000,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 300,
-          "sigma": 350,
+          "mu": 250,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 200,
-          "sigma": 350,
+          "mu": 250,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -130,108 +130,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 900,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 986.4904911748532,
+          "sigma": 246.54571722763666,
+          "comparisons": 14
         },
         "MATH_REASONING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 900,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 934.319771733961,
+          "sigma": 324.8414062454511,
+          "comparisons": 3
         },
         "JUDGMENT": {
           "mu": 900,
-          "sigma": 350,
-          "comparisons": 0
+          "sigma": 341.1578947368421,
+          "comparisons": 1
         },
         "CODE_GENERATION": {
-          "mu": 900,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 1000,
+          "sigma": 264.90813934894214,
+          "comparisons": 11
         },
         "CODE_UNDERSTANDING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 900,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 1000,
+          "sigma": 250.5434247156882,
+          "comparisons": 13
         },
         "TOOL_USE": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 771,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 357,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 357,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -248,108 +248,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 750,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 677.5321002252756,
+          "sigma": 265.19786304094134,
+          "comparisons": 11
         },
         "MATH_REASONING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 750,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 647.8481288633907,
+          "sigma": 265.1504842882236,
+          "comparisons": 11
         },
         "CODE_UNDERSTANDING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 700,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 608.927177077197,
+          "sigma": 265.422540727546,
+          "comparisons": 11
         },
         "TOOL_USE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 57,
+          "sigma": 117,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 625,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 625,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -366,108 +366,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 857,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 471,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 471,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -484,108 +484,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 781,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 781,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -602,108 +602,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 952,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 952,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -720,108 +720,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 952,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 952,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -838,108 +838,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 132,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 741,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 741,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -956,108 +956,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 886,
+          "sigma": 117,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 417,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 417,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -1074,108 +1074,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 157,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 417,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 417,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -1192,108 +1192,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 357,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 357,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -1310,108 +1310,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 101,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 300,
-          "sigma": 350,
+          "mu": 250,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 200,
-          "sigma": 350,
+          "mu": 250,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -1428,108 +1428,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 829,
+          "sigma": 106,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 300,
-          "sigma": 350,
+          "mu": 100,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
           "mu": 100,
-          "sigma": 350,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -1546,108 +1546,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 357,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 357,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -1664,108 +1664,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "MATH_REASONING": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "TOOL_USE": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 300,
-          "sigma": 350,
+          "mu": 100,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
           "mu": 100,
-          "sigma": 350,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -1782,107 +1782,107 @@
       "scores": {
         "REASONING": {
           "mu": 1000,
-          "sigma": 116.90968165628315,
-          "comparisons": 36
+          "sigma": 96.37641066840953,
+          "comparisons": 44
         },
         "MATH_REASONING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 900,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 1000,
+          "sigma": 288.4327395555443,
+          "comparisons": 8
         },
         "JUDGMENT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 900,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 1000,
+          "sigma": 286.77873716852326,
+          "comparisons": 8
         },
         "TOOL_USE": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
           "mu": 500,
-          "sigma": 350,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
           "mu": 500,
-          "sigma": 350,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -1899,108 +1899,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 919.0936141104169,
-          "sigma": 140.3524739901051,
-          "comparisons": 30
+          "mu": 980.6848537925654,
+          "sigma": 100.00243795404242,
+          "comparisons": 45
         },
         "MATH_REASONING": {
-          "mu": 700,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 754,
+          "sigma": 345.40625,
+          "comparisons": 1
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 700,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 752.7903225806451,
+          "sigma": 334.94534274193546,
+          "comparisons": 2
         },
         "JUDGMENT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 800,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 850.5705768899247,
+          "sigma": 281.2768882258448,
+          "comparisons": 9
         },
         "CODE_UNDERSTANDING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 700,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 752.1993604785779,
+          "sigma": 272.0984870819864,
+          "comparisons": 10
         },
         "TOOL_USE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 106,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 833,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 833,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -2017,108 +2017,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 461.9630134978172,
-          "sigma": 94.46101716709994,
-          "comparisons": 43
+          "mu": 438.4244887059941,
+          "sigma": 72.14160696983993,
+          "comparisons": 56
         },
         "MATH_REASONING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 500,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 290.22025113345137,
+          "sigma": 294.2568905887943,
+          "comparisons": 8
         },
         "JUDGMENT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 600,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 604.914627580018,
+          "sigma": 332.5850176488184,
+          "comparisons": 2
         },
         "CODE_UNDERSTANDING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 400,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 239.3931285651144,
+          "sigma": 276.61004001736563,
+          "comparisons": 10
         },
         "TOOL_USE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 400,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 400,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 0,
+          "sigma": 143,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 952,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 1000,
-          "sigma": 350,
+          "mu": 952,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -2135,108 +2135,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 444,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 444,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -2253,108 +2253,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 400,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 400,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 114,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 930,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 930,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -2371,108 +2371,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 1000,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 1000,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 1000,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 1000,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 943,
+          "sigma": 106,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 300,
-          "sigma": 350,
+          "mu": 167,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 200,
-          "sigma": 350,
+          "mu": 167,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -2489,108 +2489,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 117,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 645,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 645,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -2609,107 +2609,107 @@
       "scores": {
         "REASONING": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 132,
           "comparisons": 0
         },
         "MATH_REASONING": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 132,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 132,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 132,
           "comparisons": 0
         },
         "ANALYSIS": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 132,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 132,
           "comparisons": 0
         },
         "CODE_GENERATION": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 132,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 132,
           "comparisons": 0
         },
         "DEBUGGING": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 132,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 132,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 132,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 132,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 132,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 132,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 132,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 132,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 132,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 132,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 132,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 400,
-          "sigma": 350,
+          "mu": 333,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 400,
-          "sigma": 350,
+          "mu": 333,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -2821,13 +2821,13 @@
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 300,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -2939,13 +2939,13 @@
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 350,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -3057,13 +3057,13 @@
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 1000,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
           "mu": 1000,
-          "sigma": 350,
+          "sigma": 150,
           "comparisons": 0
         }
       },
@@ -3081,108 +3081,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 971,
+          "sigma": 124,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 388,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 400,
-          "sigma": 350,
+          "mu": 388,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -3199,108 +3199,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 914,
+          "sigma": 106,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 471,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 471,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -3317,108 +3317,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 117,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 816,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 816,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -3435,108 +3435,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 550,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 550,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 550,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 550,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 550,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 550,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 550,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 550,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 550,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 229,
+          "sigma": 143,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 957,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 957,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -3553,108 +3553,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 686,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 939,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 939,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -3671,108 +3671,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "JUDGMENT": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_GENERATION": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "DEBUGGING": {
           "mu": 800,
-          "sigma": 350,
+          "sigma": 100,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 300,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 800,
+          "sigma": 100,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 400,
-          "sigma": 350,
+          "mu": 785,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 785,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -3789,108 +3789,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 571,
+          "sigma": 143,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 935,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 935,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -3907,108 +3907,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 743,
+          "sigma": 124,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 357,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 300,
-          "sigma": 350,
+          "mu": 357,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -4025,108 +4025,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 855,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 855,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -4143,108 +4143,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 457,
+          "sigma": 132,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 833,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 833,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -4261,108 +4261,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 343,
+          "sigma": 143,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 893,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 893,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -4379,108 +4379,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 550,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 157,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 806,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 806,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -4497,108 +4497,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 629,
+          "sigma": 117,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 781,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 781,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -4615,108 +4615,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 400,
+          "sigma": 132,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 952,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 952,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -4733,108 +4733,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 500,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 800,
-          "sigma": 350,
+          "mu": 514,
+          "sigma": 143,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 850,
-          "sigma": 350,
+          "mu": 920,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 920,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -4851,108 +4851,108 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 750,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 286,
+          "sigma": 132,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 926,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 900,
-          "sigma": 350,
+          "mu": 926,
+          "sigma": 150,
           "comparisons": 0
         }
       }
@@ -4969,110 +4969,228 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "MATH_REASONING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTI_STEP_DEPTH": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "ANALYSIS": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_GENERATION": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "CODE_UNDERSTANDING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "DEBUGGING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "SYSTEM_THINKING": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "TOOL_USE": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "SELF_CONSISTENCY": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 550,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "INSTRUCTION_FOLLOWING": {
-          "mu": 700,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "STRUCTURED_OUTPUT": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "LONG_CONTEXT": {
-          "mu": 600,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "MULTILINGUAL": {
-          "mu": 650,
-          "sigma": 350,
+          "mu": 171,
+          "sigma": 143,
           "comparisons": 0
         },
         "SPEED": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 957,
+          "sigma": 150,
           "comparisons": 0
         },
         "COST_EFFICIENCY": {
-          "mu": 950,
-          "sigma": 350,
+          "mu": 957,
+          "sigma": 150,
           "comparisons": 0
         }
+      }
+    },
+    "deepseek/DeepSeek-V3-0324": {
+      "scores": {
+        "SYSTEM_THINKING": {
+          "mu": 444.2539537084411,
+          "sigma": 282.2996745060592,
+          "comparisons": 8
+        },
+        "REASONING": {
+          "mu": 457.0201281538641,
+          "sigma": 282.3463792813737,
+          "comparisons": 8
+        },
+        "ANALYSIS": {
+          "mu": 445.91054950511904,
+          "sigma": 282.4663388008539,
+          "comparisons": 8
+        },
+        "MATH_REASONING": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "MULTI_STEP_DEPTH": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "CREATIVITY": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "JUDGMENT": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "CODE_GENERATION": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "CODE_UNDERSTANDING": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "DEBUGGING": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "TOOL_USE": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "HALLUCINATION_RESISTANCE": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "CONFIDENCE_CALIBRATION": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "SELF_CONSISTENCY": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "AMBIGUITY_HANDLING": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "INSTRUCTION_FOLLOWING": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "STRUCTURED_OUTPUT": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "LONG_CONTEXT": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "MULTILINGUAL": {
+          "mu": 571,
+          "sigma": 117,
+          "comparisons": 0
+        },
+        "SPEED": {
+          "mu": 880,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "COST_EFFICIENCY": {
+          "mu": 880,
+          "sigma": 150,
+          "comparisons": 0
+        }
+      },
+      "name": "DeepSeek V3 (0324)",
+      "provider": "deepseek",
+      "contextWindow": 128000,
+      "supportsToolCalling": true,
+      "available": true,
+      "cost": {
+        "inputPer1M": 0.27,
+        "outputPer1M": 1.1
       }
     }
   }

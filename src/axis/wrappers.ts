@@ -14,7 +14,7 @@ import type { CapabilityRequirement } from "../profile/types";
 import type { TaskRequirement } from "../profile/types";
 import { ModelRegistry } from "../model/registry";
 import type { CapabilityDimension, ModelInfo } from "../model/types";
-import { SIGMA_BASE } from "../model/types";
+import { SIGMA_BASE, OPERATIONAL_DIM_NAMES } from "../model/types";
 import {
   extractRatingsMap,
   persistRatings,
@@ -33,6 +33,7 @@ import type { DeliberateOutput } from "../deliberation/types";
 import {
   buildWorkerMessages,
   buildLeaderMessages,
+  buildDebateWorkerMessages,
 } from "../deliberation/prompts";
 import type {
   TeamComposition,
@@ -44,6 +45,7 @@ import {
   estimateStaticCost,
   estimateEffectiveCost,
 } from "../cost/effective-cost";
+import { computeWeightedThompson, MIN_CONFIDENCE, poolCostEfficiency } from "../router/composite-score";
 import type { RoutingConfig } from "../config";
 
 import type {
@@ -72,7 +74,14 @@ function getRegistry(): ModelRegistry {
 }
 
 /** Operational dimensions excluded from overall quality score. */
-const OPERATIONAL_DIMS = new Set(["SPEED", "COST_EFFICIENCY"]);
+const OPERATIONAL_DIMS = OPERATIONAL_DIM_NAMES;
+
+/** Criticality → quality/cost weight defaults. Used by selectors when no user override. */
+const CRITICALITY_WEIGHTS: Record<string, { qw: number; cw: number }> = {
+  low: { qw: 0.5, cw: 0.5 },
+  medium: { qw: 0.7, cw: 0.3 },
+  high: { qw: 0.85, cw: 0.15 },
+};
 
 /** Compute overall composite score from capability dimension mu values (excludes operational metrics). */
 function computeOverall(dimensions: Record<string, { mu: number; sigma: number }>): number {
@@ -198,15 +207,23 @@ export class DomainOverrideProfiler implements Profiler {
 export class TwoTrackCeSelector implements Selector {
   private readonly registry: ModelRegistry;
   private readonly weights: RoutingConfig;
+  private latencyMap?: Map<string, number>;
 
-  constructor(ensembleSize?: number, registry?: ModelRegistry, weights?: RoutingConfig);
+  constructor(ensembleSize?: number, registry?: ModelRegistry, weights?: RoutingConfig, latencyMap?: Map<string, number>);
   constructor(
     private readonly ensembleSize: number = 1,
     registry?: ModelRegistry,
     weights?: RoutingConfig,
+    latencyMap?: Map<string, number>,
   ) {
     this.registry = registry ?? getRegistry();
     this.weights = weights ?? { qualityWeight: 0.7, costWeight: 0.3 };
+    this.latencyMap = latencyMap;
+  }
+
+  /** Update latency data (called periodically from index.ts). */
+  setLatencyMap(map: Map<string, number>): void {
+    this.latencyMap = map;
   }
 
   async select(
@@ -234,9 +251,10 @@ export class TwoTrackCeSelector implements Selector {
       filteredScores = scores;
     }
 
-    // Use per-request overrides if provided, else fall back to config weights
-    const qw = req.budget.qualityWeight ?? this.weights.qualityWeight;
-    const cw = req.budget.costWeight ?? this.weights.costWeight;
+    // Priority: user per-request > criticality-based (when set) > config file
+    const critW = req.criticality ? CRITICALITY_WEIGHTS[req.criticality] : undefined;
+    const qw = req.budget.qualityWeight ?? critW?.qw ?? this.weights.qualityWeight;
+    const cw = req.budget.costWeight ?? critW?.cw ?? this.weights.costWeight;
 
     const inputTokens = req.estimatedInputTokens ?? 500;
     const outputTokens = req.estimatedOutputTokens ?? 500;
@@ -251,29 +269,32 @@ export class TwoTrackCeSelector implements Selector {
     };
     let ranked: Ranked[] = [];
 
+    const useThompson = (this.weights.exploration ?? "thompson") === "thompson";
+
     for (const ms of filteredScores) {
       const info = registry.getById(ms.modelId);
       if (!info) continue;
 
       const cost = estimateStaticCost(info, inputTokens, outputTokens);
 
-      let weighted = 0;
-      const capEntries = Object.entries(req.capabilities);
-      if (capEntries.length > 0) {
-        for (const [dim, weight] of capEntries) {
-          const d = ms.dimensions[dim];
-          const mu = d?.mu ?? ms.overall;
-          // Sigma-based confidence with floor: uncalibrated models (sigma=SIGMA_BASE)
-          // get MIN_CONFIDENCE instead of 0, so they remain selectable but penalized.
-          // confidence = max(MIN_CONFIDENCE, 1 - sigma / SIGMA_BASE)
-          const MIN_CONFIDENCE = 0.15;
-          const confidence = d
-            ? Math.max(MIN_CONFIDENCE, 1 - d.sigma / SIGMA_BASE)
-            : MIN_CONFIDENCE;
-          weighted += mu * confidence * weight;
-        }
+      let weighted: number;
+      if (useThompson) {
+        weighted = computeWeightedThompson(ms, req.capabilities);
       } else {
-        weighted = ms.overall;
+        weighted = 0;
+        const capEntries = Object.entries(req.capabilities);
+        if (capEntries.length > 0) {
+          for (const [dim, weight] of capEntries) {
+            const d = ms.dimensions[dim];
+            const mu = d?.mu ?? ms.overall;
+            const confidence = d
+              ? Math.max(MIN_CONFIDENCE, 1 - d.sigma / SIGMA_BASE)
+              : MIN_CONFIDENCE;
+            weighted += mu * confidence * weight;
+          }
+        } else {
+          weighted = ms.overall;
+        }
       }
 
       // Average sigma for exploration
@@ -292,24 +313,33 @@ export class TwoTrackCeSelector implements Selector {
       if (filtered.length > 0) ranked = filtered;
     }
 
-    // Unified composite scoring: quality × qw + costEfficiency × cw
+    // Unified composite scoring: quality × qw + costEfficiency × cw + latencyEff × lw
+    // Cost efficiency is pool-relative: cheapest=1.0, most expensive=0.0
+    const lw = this.weights.latencyWeight ?? 0;
     const maxWeighted = Math.max(...ranked.map((r) => r.weighted), 1);
+    const minCost = ranked.length > 0 ? Math.min(...ranked.map((r) => r.cost)) : 0;
+    const maxCost = ranked.length > 0 ? Math.max(...ranked.map((r) => r.cost)) : 0;
     ranked.sort((a, b) => {
       const aQuality = a.weighted / maxWeighted;
       const bQuality = b.weighted / maxWeighted;
-      const aCostEff = 1 / (1 + a.cost);
-      const bCostEff = 1 / (1 + b.cost);
-      const aComposite = qw * aQuality + cw * aCostEff;
-      const bComposite = qw * bQuality + cw * bCostEff;
+      const aCostEff = poolCostEfficiency(a.cost, minCost, maxCost);
+      const bCostEff = poolCostEfficiency(b.cost, minCost, maxCost);
+      let aComposite = qw * aQuality + cw * aCostEff;
+      let bComposite = qw * bQuality + cw * bCostEff;
+      if (lw > 0 && this.latencyMap) {
+        const aLatMs = this.latencyMap.get(a.modelId);
+        const bLatMs = this.latencyMap.get(b.modelId);
+        if (aLatMs != null) aComposite += lw * (1 / (1 + aLatMs / 1000));
+        if (bLatMs != null) bComposite += lw * (1 / (1 + bLatMs / 1000));
+      }
       return bComposite - aComposite;
     });
 
     const topN = ranked.slice(0, Math.min(take, ranked.length));
 
-    // Exploration: swap in an uncalibrated model when the pool has a mix
-    // of calibrated (tested) and uncalibrated (untested) models.
-    // Skip when ALL models are uncalibrated (initial state) — no signal to learn from.
-    if (topN.length >= 2) {
+    // Exploration: in greedy mode, swap in an uncalibrated model.
+    // Thompson mode doesn't need this — sigma-based sampling naturally explores.
+    if (!useThompson && topN.length >= 2) {
       const topNHasCalibrated = topN.some((r) => r.avgSigma < SIGMA_BASE * 0.9);
       if (topNHasCalibrated) {
         const uncalibrated = ranked
@@ -363,6 +393,7 @@ export class TwoTrackCeSelector implements Selector {
 export class DivergeSynthProtocol implements DeliberationProtocol {
   private readonly consensus?: ConsensusMode;
   private readonly maxRounds: number;
+  private readonly protocol?: "diverge-synth" | "debate";
   private readonly retryDeps?: RetryDeps;
   private readonly runDeliberation: (
     team: TeamComposition,
@@ -383,9 +414,11 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
       retryDeps?: RetryDeps,
     ) => Promise<DeliberateOutput>,
     retryDeps?: RetryDeps,
+    protocol?: "diverge-synth" | "debate",
   ) {
     this.consensus = consensus === "leader_decides" ? "leader_decides" : undefined;
     this.maxRounds = maxRounds ?? 1;
+    this.protocol = protocol;
     this.runDeliberation = deliberateFn ?? defaultDeliberateFn;
     this.retryDeps = retryDeps;
   }
@@ -412,15 +445,18 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
       return result;
     };
 
+    const isDebate = this.protocol === "debate";
     const deps: EngineDeps = {
       chat: engineChat,
       buildWorkerMessages,
       buildLeaderMessages,
+      ...(isDebate ? { buildDebateWorkerMessages } : {}),
     };
 
     const config: EngineConfig = {
-      maxRounds: this.maxRounds,
+      maxRounds: isDebate ? Math.max(this.maxRounds, 3) : this.maxRounds,
       consensus: this.consensus,
+      protocol: this.protocol,
     };
 
     const output = await this.runDeliberation(team, input, deps, config, this.retryDeps);
@@ -431,7 +467,7 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
       consensusReached: output.consensusReached,
       totalLLMCalls: output.totalLLMCalls,
       modelsUsed: [...output.modelsUsed],
-      protocol: "diverge-synth",
+      protocol: this.protocol === "debate" ? "debate" : "diverge-synth",
     };
   }
 

@@ -437,27 +437,92 @@ describe("TwoTrackCeSelector composite scoring", () => {
 describe("DomainOverrideProfiler weight passthrough", () => {
   const profiler = new DomainOverrideProfiler();
 
-  it("should pass qualityWeight through to budget", async () => {
-    const input: TaskClassification = {
+  it("should pass explicit qualityWeight/costWeight through to budget", async () => {
+    const req = await profiler.profile({
       domain: "CODING",
       taskType: "IMPLEMENT_FEATURE",
       complexity: "simple",
       qualityWeight: 0.9,
       costWeight: 0.1,
-    };
-    const req = await profiler.profile(input);
+    });
     expect(req.budget.qualityWeight).toBe(0.9);
     expect(req.budget.costWeight).toBe(0.1);
   });
 
-  it("should leave budget weights undefined when not set", async () => {
-    const input: TaskClassification = {
+  it("should leave budget weights undefined when not explicitly set", async () => {
+    const req = await profiler.profile({
       domain: "CODING",
       taskType: "IMPLEMENT_FEATURE",
       complexity: "simple",
-    };
-    const req = await profiler.profile(input);
+    });
     expect(req.budget.qualityWeight).toBeUndefined();
     expect(req.budget.costWeight).toBeUndefined();
+  });
+
+  it("should pass criticality through for selector to use", async () => {
+    const req = await profiler.profile({
+      domain: "CODING",
+      taskType: "IMPLEMENT_FEATURE",
+      complexity: "simple",
+      criticality: "low",
+    });
+    expect(req.criticality).toBe("low");
+  });
+});
+
+describe("TwoTrackCeSelector criticality-based weights", () => {
+  // Use real model IDs from registry so getById succeeds
+  const realScores: ModelScore[] = [{
+    modelId: "anthropic/claude-sonnet-4.6",
+    dimensions: { REASONING: { mu: 900, sigma: 150 } },
+    overall: 900,
+  }, {
+    modelId: "anthropic/claude-haiku-4.5",
+    dimensions: { REASONING: { mu: 600, sigma: 150 } },
+    overall: 600,
+  }];
+
+  it("should use criticality-based weights when no user override", async () => {
+    const selector = new TwoTrackCeSelector(1, undefined, { qualityWeight: 0.7, costWeight: 0.3 });
+    const plan = await selector.select(
+      { capabilities: { REASONING: 1.0 }, constraints: {}, budget: {}, criticality: "low" },
+      realScores,
+      { perRequest: 10 },
+    );
+    expect(plan.reason).toContain("q=0.5");
+    expect(plan.reason).toContain("c=0.5");
+  });
+
+  it("should use criticality high weights for complex tasks", async () => {
+    const selector = new TwoTrackCeSelector(1, undefined, { qualityWeight: 0.7, costWeight: 0.3 });
+    const plan = await selector.select(
+      { capabilities: { REASONING: 1.0 }, constraints: {}, budget: {}, criticality: "high" },
+      realScores,
+      { perRequest: 10 },
+    );
+    expect(plan.reason).toContain("q=0.85");
+    expect(plan.reason).toContain("c=0.15");
+  });
+
+  it("should prefer user explicit weights over criticality defaults", async () => {
+    const selector = new TwoTrackCeSelector(1, undefined, { qualityWeight: 0.7, costWeight: 0.3 });
+    const plan = await selector.select(
+      { capabilities: { REASONING: 1.0 }, constraints: {}, budget: { qualityWeight: 0.6, costWeight: 0.4 }, criticality: "high" },
+      realScores,
+      { perRequest: 10 },
+    );
+    expect(plan.reason).toContain("q=0.6");
+    expect(plan.reason).toContain("c=0.4");
+  });
+
+  it("should fall back to config weights when criticality is missing", async () => {
+    const selector = new TwoTrackCeSelector(1, undefined, { qualityWeight: 0.9, costWeight: 0.1 });
+    const plan = await selector.select(
+      { capabilities: { REASONING: 1.0 }, constraints: {}, budget: {} },
+      realScores,
+      { perRequest: 10 },
+    );
+    expect(plan.reason).toContain("q=0.9");
+    expect(plan.reason).toContain("c=0.1");
   });
 });
