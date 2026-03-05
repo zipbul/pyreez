@@ -1,6 +1,8 @@
-# 숙의 시스템 개선 계획 (v2)
+# 숙의 시스템 개선 계획 (v3)
 
 ## 배경
+
+### v1: 수학 오답 만장일치 사건
 
 5개 모델(DeepSeek-R1, Grok-4, o3, Gemini-2.5-Pro, Claude-Sonnet-4.6)이 3라운드 debate를 통해
 "truncated normal이 clamp보다 기대값 inflation을 줄인다"고 만장일치 합의했으나, 실제 구현 후 테스트에서
@@ -9,52 +11,93 @@
 5개 모델이 5라운드 추가 debate로 이 문제의 해결책을 논의했으나,
 전부 동일한 프레임("검증 레이어 추가") 안에서만 사고했다.
 
-### 근본 원인
+### v2: 자세 원칙 + 리더 검증자 재정의
 
-1. **자세의 부재** -- 확신 없이 단언, 전제를 의심하지 않음, 대안을 탐색하지 않음, 스코프가 좁아짐
-2. **능력의 한계** -- 모든 모델이 동일 학습 데이터에서 동일 오개념을 공유. 자세가 완벽해도 공유 맹점은 돌파 불가
+v1의 교훈을 바탕으로 10개 분야(CIA ACH, Strong Inference, 소크라테스 방법, Six Thinking Hats,
+지적 겸손 연구, Steel-manning, 적대적 협업, Delphi, 티벳 불교 논쟁, 배심 숙의 연구)의 교차 검증으로
+8개 보편 자세 원칙과 4계층 구조를 설계.
 
-따라서 **자세(프롬프트)와 구조(엔진) 두 계층 모두** 필요하다.
+구현 결과:
+- 계층 1(보편 자세 원칙): **구현 완료** — `prompts.ts` WORKER_POSTURE 8개 원칙
+- 계층 3(리더 검증자 재정의): **구현 완료** — `prompts.ts` LEADER_VERIFIER_OBLIGATIONS 4개 의무
+- REVIEW.md의 C1~C3, S1~S5: **구현 완료** — consensusReached 의미론, leaderContributes 기본값, debate 프로토콜, Thompson Sampling 리더 선택, verification-first 출력 구조, 워커 아이덴티티, DivergeSynthProtocol 테스트, 능력 필터링
 
-### v1에서의 교훈
+### v3: 8단계 실전 시뮬레이션에서 발견된 구조적 문제
 
-v1(16개 항목)을 3개 서브에이전트 + GPT-5/GPT-5.2/Claude Opus 4.6 숙의 + 웹 조사로 엄격 검토한 결과:
+최상급 모델 6개(GPT-5/5.2, Gemini 2.5 Pro/3.1 Pro, Claude Opus 4.6/Sonnet 4.6, Grok 4)로
+트위터 클론 MVP를 아이디어→요구사항→아키텍처→개발계획→테스트→구현→검증→리뷰의 8단계로 진행.
 
-- 16개 항목 중 상당수가 특정 실패(수학 오답 만장일치)에 과적합
-- 3-모드 분류(검증/논증/발산)가 범용적이지 않음 (윤리, 해석, 예측, 규범 과제 누락)
-- 메타인지(#5)는 구조적으로 불건전 (LLM의 Dunning-Kruger)
-- 의무 시뮬레이션(#11)은 같은 오개념의 코드가 거짓 권위를 부여
-- 심박 DA(#10), 적층 규칙(#15)은 ROI 부족 또는 역효과
-- 가장 효과적인 접근은 무거운 인프라가 아닌 **토론의 자세와 역할 구조**
+전 8단계 `diverge-synth` 1라운드, Worker 2명, LLM 호출 3회/단계.
 
-10개 분야(CIA ACH, Strong Inference, 소크라테스 방법, Six Thinking Hats, 지적 겸손 연구,
-Steel-manning, 적대적 협업, Delphi, 티벳 불교 논쟁, 배심 숙의 연구)의 교차 검증으로
-범용 원칙을 도출하여 v2를 설계했다.
+**종합 점수 5.75/10** — 최상급 모델들의 능력 대비 부당하게 낮은 결과.
+
+#### 근본 원인 분석
+
+모델 자체의 능력 문제는 아님. 95%가 프로세스와 구조의 문제:
+
+1. **리더가 합성이 아닌 선택을 함** (40%) — "A가 맞고 B가 틀리다" 패턴으로 B의 장점이 소실
+2. **평가 기준 불명확** (25%) — MVP 스코프에 없는 항목(모니터링, 법적 페이지)으로 감점
+3. **1라운드 single-shot** (15%) — Worker 간 상호작용 제로. 진정한 토론 부재
+4. **단계 간 컨텍스트 단절** (10%) — Step 7 검증자가 Step 6 코드를 한 줄도 보지 못함
+5. **약한 모델 미스캐스팅** (5%) — DeepSeek R1(로컬 경량)이 복잡한 아키텍처 태스크에 투입
+
+#### 구체적 증거
+
+**리더의 선택 편향**:
+
+| 단계 | 리더 행동 | 유형 |
+|------|-----------|------|
+| Step 2 | JWT 7일 vs 1h+30d → Claude 채택 | 승패 결정 |
+| Step 3 | DeepSeek 전체 기각 | 전면 탈락 |
+| Step 4 | Claude 불완전 → Gemini 기반 | 소거법 |
+| Step 5 | Grok 피라미드 기각 → Gemini 다이아몬드 | 승패 결정 |
+| Step 7 | Gemini의 upload fix 기술적 오류 → 수정 | 오류 교정 (적절) |
+| Step 8 | Gemini 낙관 vs Claude 보수 → 절충 | 가중 평균 (적절) |
+
+6번 중 4번이 "A가 맞고 B가 틀리다" 패턴. 합성이 아닌 선택.
+
+Step 5 예시 — Grok이 주장한 "빠른 유닛 테스트의 CI 피드백 루프", "병렬 테스트 실행", "CI 매트릭스"는
+Gemini의 다이아몬드 피라미드와 양립 가능한 독립적 장점이었으나 합성에서 소실.
+`autocannon` 성능 도구 하나만 부분 채택.
+
+**컨텍스트 단절의 증거**:
+
+Step 8에서 Claude Sonnet이 직접 고백:
+> "I'm working from the implementation summary and described patterns, **not a full codebase**."
+> "I **cannot read** the actual files."
+> "What would change this score: **Show me the actual code files.**"
+
+실제 코드를 안 보고 코드 리뷰를 수행 — 모델의 잘못이 아닌 구조의 한계.
 
 ---
 
-## 설계 철학: 4계층 구조
+## 설계 철학: 5계층 구조
 
 ```
-계층 1: 보편 자세 원칙 (모든 참여자 공통 프롬프트)
+계층 1: 보편 자세 원칙 (모든 참여자 공통 프롬프트)       [구현 완료]
          비용 0, 즉시 적용. 대부분의 자세 문제를 해결.
 
-계층 2: 스탠스 분화 (워커 역할 분화)
+계층 2: 스탠스 분화 (워커 역할 분화)                    [미구현]
          제안자 / 비판자 / 탐색자. 구조적 사고 다양성 확보.
 
-계층 3: 리더 역할 재정의
-         합의자 -> 검증자. 워커 주장의 독립 검증 + 누락 탐색.
+계층 3: 리더 역할 재정의                               [부분 구현 → 보강 필요]
+         검증자 + 강점 극대화 합성자 + 스코프 감시자.
 
-계층 4: 구조적 안전망 (엔진 레벨)
+계층 4: 구조적 안전망 (엔진 레벨)                       [미구현]
          자세로 해결 불가능한 공유 맹점을 위한 최후 방어선.
+
+계층 5: 세션 연속성 (오케스트레이션 레벨)                [신규]
+         멀티세션 컨텍스트 체인 + 프로토콜 자동 전환.
 ```
 
 ---
 
-## 계층 1: 보편 자세 원칙
+## 계층 1: 보편 자세 원칙 [구현 완료]
 
 모든 워커와 리더에게 공통 적용되는 8개 원칙.
 10개 분야에서 교차 검증된 범용 원칙으로, 특정 도메인에 한정되지 않는다.
+
+`prompts.ts` WORKER_POSTURE에 반영 완료. 클라우드 모델 평균 6.9/8 준수율.
 
 ### 원칙 1: 증거-확신 정직성
 
@@ -94,7 +137,7 @@ Steel-manning, 적대적 협업, Delphi, 티벳 불교 논쟁, 배심 숙의 연
 - **출처**: Delphi 방법, Wisdom of Crowds(Surowiecki)
 - **해결하는 문제**: 그룹싱크, 앵커링
 - **메커니즘**: 독립성이 깨지면 오류가 상관되어 집단지성이 무너짐. 현재 엔진의 diverge 페이즈가 이미 이를 구현(워커 병렬 응답)
-- **실패 모드**: 모델들이 동일 학습 데이터를 공유하므로 "독립적" 판단이 이미 상관됨. 이것은 자세로 해결 불가 -> 계층 4(구조적 안전망)로 보완
+- **실패 모드**: 모델들이 동일 학습 데이터를 공유하므로 "독립적" 판단이 이미 상관됨. 이것은 자세로 해결 불가 → 계층 4(구조적 안전망)로 보완
 
 ### 원칙 5: Steel-man 후 반박
 
@@ -113,8 +156,8 @@ Steel-manning, 적대적 협업, Delphi, 티벳 불교 논쟁, 배심 숙의 연
 
 - **출처**: 배심 숙의 연구(Hastie, Pennington), 구성적 논쟁(Johnson & Johnson)
 - **해결하는 문제**: 진영화, 확증 편향
-- **메커니즘**: 조기 투표 -> 진영 형성 -> 선택적 증거 활용이라는 인과 경로가 실증됨
-- **실패 모드**: "증거"가 LLM의 학습 데이터에 기반하므로 증거 자체가 틀릴 수 있음 -> 계층 4(외부 도구)로 보완
+- **메커니즘**: 조기 투표 → 진영 형성 → 선택적 증거 활용이라는 인과 경로가 실증됨
+- **실패 모드**: "증거"가 LLM의 학습 데이터에 기반하므로 증거 자체가 틀릴 수 있음 → 계층 4(외부 도구)로 보완
 
 ### 원칙 7: 마음 바꿀 조건 사전 선언
 
@@ -138,10 +181,16 @@ Steel-manning, 적대적 협업, Delphi, 티벳 불교 논쟁, 배심 숙의 연
 
 ---
 
-## 계층 2: 스탠스 분화
+## 계층 2: 스탠스 분화 [미구현]
 
 8개 원칙을 모든 워커에게 동일 적용하되, 각 워커에게 다른 강조점을 부여한다.
 스탠스는 **고정이 아닌 강조**. 비판자도 대안을 제시할 수 있고, 제안자도 자기 제안을 비판할 수 있다.
+
+> **설계 의도에 대한 주의**: 같은 역할에서 모델 고유의 사고 차이가 자연스럽게 드러나게 하는 것이
+> diverge-synth의 핵심 설계 의도이다. 8단계 시뮬레이션에서 이것이 실제로 작동했다 —
+> 같은 "QA architect" 지시에서 Gemini는 통합 테스트를, Grok은 유닛 테스트를 자연스럽게 옹호했다.
+> 스탠스 분화는 이 자연스러운 분화를 대체하는 것이 아니라 **보완**하는 것이다.
+> 필수(mandatory)가 아닌 선택적(optional) 계층으로 구현한다.
 
 ### 제안자 (Proposer)
 
@@ -169,15 +218,16 @@ Steel-manning, 적대적 협업, Delphi, 티벳 불교 논쟁, 배심 숙의 연
 - 2인 팀: 제안자 + 비판자
 - 3인 팀: 제안자 + 비판자 + 탐색자
 - 4인+ 팀: 제안자 복수 가능, 비판자/탐색자 각 최소 1인
+- 스탠스가 지정되지 않으면: 모든 워커에 동일 프롬프트 (현재 동작 유지)
 
 ---
 
-## 계층 3: 리더 역할 재정의
+## 계층 3: 리더 역할 재정의 [부분 구현 → 보강 필요]
 
-**현재**: "워커 응답을 비교하고 최선을 종합하라" (합의자)
-**변경**: 검증자 + 종합자 + 스코프 감시자
+**현재 구현**: 검증자 + 종합자 (LEADER_VERIFIER_OBLIGATIONS 의무 1-4)
+**변경**: 의무 4 "정직한 종합"을 **"강점 극대화 합성"으로 강화**, 의무 5 추가
 
-### 의무 1: 독립 검증
+### 의무 1: 독립 검증 [구현됨]
 
 워커의 사실 주장을 액면 그대로 받지 마라. 근거가 충분한가, 논리에 비약이 없는가,
 검증되지 않은 가정은 없는가를 독립적으로 판단하라. 다수 동의는 정당성의 근거가 아니다.
@@ -185,7 +235,7 @@ Steel-manning, 적대적 협업, Delphi, 티벳 불교 논쟁, 배심 숙의 연
 - 워커 전원이 동의해도 근거가 부실하면 거부할 수 있어야 함
 - "왜 이렇게 생각하는가?"를 추궁하는 소크라테스적 역할
 
-### 의무 2: 누락 탐색
+### 의무 2: 누락 탐색 [구현됨]
 
 워커들이 탐색하지 않은 영역이 있는가? 논의의 프레임이 적절한가?
 더 넓은 맥락에서 볼 때 빠진 관점이 있는가?
@@ -193,18 +243,68 @@ Steel-manning, 적대적 협업, Delphi, 티벳 불교 논쟁, 배심 숙의 연
 - 워커 응답의 범위에 갇히지 않음
 - 원칙 #2(경쟁 대안)를 메타 레벨에서 적용
 
-### 의무 3: 정직한 종합
+### 의무 3: 논거 독립성 평가 [구현됨]
 
-진짜 합의와 거짓 합의를 구분하라. 해결된 것과 미해결인 것을 명확히 분리하라.
-불확실성을 숨기지 마라.
+워커들이 합의했을 때, 같은 결론을 같은 추론 경로로 도달했는가(의심), 아니면
+서로 다른 추론 경로로 도달했는가(건강). 공유 표현, 동일 예시, 동기화된 논리는
+독립적 검증이 아니라 상관된 학습 데이터를 시사한다.
 
-- "합의에 도달했다"가 아니라 "이 부분은 합의, 이 부분은 미해결, 이 부분은 추가 검증 필요"
-- 워커들의 확신도가 높을수록 더 엄격하게 근거를 검증
-- 만장일치는 안심이 아니라 주의 신호
+### 의무 4: 강점 극대화 합성 [보강 필요 — v3 핵심 변경]
+
+> **현재 문제**: 리더가 "A가 맞고 B가 틀리다"는 선택(selection)을 하고 있다.
+> 합성(synthesis)이 아니다. Worker B의 전체 접근법이 채택되지 않더라도
+> B만이 제시한 고유한 장점이 있을 수 있다. 이것이 소실되고 있다.
+
+**변경된 지시**:
+
+각 워커 응답에서 고유한 강점을 추출하라.
+전체 접근법이 채택되지 않더라도, 그 접근법만의 독자적 기여를 합성에 반영하라.
+최종 결과물은 어느 한 워커의 응답보다 **반드시** 우수해야 한다.
+응답을 선택하는 것이 아니라 합성하는 것이 임무다.
+
+구체적으로:
+1. 각 워커 응답에서 다른 응답에 없는 고유 아이디어를 나열하라
+2. 기각하는 접근법의 부분적 장점이 채택하는 접근법에 어떻게 통합되는지 명시하라
+3. "Worker B의 X는 기각하지만, B가 제시한 Y는 최종 합성에 반영한다"를 의무화하라
+
+**프롬프트 변경** (`prompts.ts` LEADER_VERIFIER_OBLIGATIONS):
+
+```
+현재:
+"4. Synthesize honestly — distinguish certain conclusions from uncertain
+inferences and unresolved questions. Do not fabricate consensus.
+Unanimity is a warning signal, not reassurance."
+
+변경:
+"4. Synthesize honestly — distinguish certain conclusions from uncertain
+inferences and unresolved questions. Do not fabricate consensus.
+Unanimity is a warning signal, not reassurance.
+5. Maximize strengths — for each worker response, extract unique ideas
+that no other worker provided. Never fully discard a response; identify
+what it contributes that others lack. When rejecting an approach,
+explicitly state which partial strengths from it are integrated into
+the final synthesis. The synthesis must be strictly better than any
+individual response."
+```
+
+**근거**: 8단계 시뮬레이션에서 6번의 리더 합성 중 4번이 "승패 결정"이었음.
+Grok의 CI 병렬 실행 전략, Claude의 보수적 시간 추정 등 양립 가능한 장점이 소실.
+
+### 의무 5: 스코프 준수 [신규 — v3]
+
+리더는 주어진 과제의 평가 범위를 벗어나지 않는다.
+과제에 명시된 스코프에 없는 항목으로 감점하지 않는다.
+
+- "MVP를 평가하라"에서 프로덕션 모니터링 부재를 감점하지 않음
+- 스코프 외 항목은 "추천 사항"으로 별도 분리하여 제시
+- 스코프가 불명확할 경우, 과제 정의에서 명시적으로 언급된 기능만 평가 대상
+
+**근거**: Step 8에서 Tier 1 스코프에 없는 항목(모니터링, 법적 페이지, 백업)이
+Launch Readiness 4/10의 감점 근거가 됨. 이로 인해 종합 점수가 1점 이상 하락.
 
 ---
 
-## 계층 4: 구조적 안전망
+## 계층 4: 구조적 안전망 [미구현]
 
 자세(계층 1-3)로 해결 불가능한 문제를 위한 엔진 레벨 메커니즘.
 "같은 자로 자기를 재는" 한계를 돌파하기 위한 최후 방어선.
@@ -242,9 +342,135 @@ Steel-manning, 적대적 협업, Delphi, 티벳 불교 논쟁, 배심 숙의 연
 - **핵심 제약**: 자기 평가가 아닌 외부 ground truth에만 기반
 - **부트스트래핑**: 초기에는 인간 큐레이션 불신 규칙으로 시작, 데이터 축적 후 점진적 자동화
 
+### 안전망 5: 능력 기반 라우팅 강화 [신규 — v3]
+
+> **문제**: Step 3에서 `local/ai/deepseek-r1-distill-llama`가 아키텍처 설계에 투입됨.
+> 리더가 전체 응답을 "Cannot adopt; treat as unverified"로 기각 — 해당 모델의 LLM 호출 비용이 낭비.
+
+- **조건**: `complexity: "complex"` 태스크에서 팀 구성 시
+- **동작**: `filterByCapability`의 `minScore` 임계값을 복잡도에 따라 상향
+- **구체적 변경**: `team-composer.ts`에서 complexity 파라미터 수용
+
+```typescript
+// 현재: 고정 임계값 300
+const qualified = filterByCapability(models, 300, count);
+
+// 변경: complexity 기반 동적 임계값
+const minScore = complexity === "complex" ? 500 : complexity === "moderate" ? 400 : 300;
+const qualified = filterByCapability(models, minScore, count);
+```
+
+- **핵심 제약**: soft fallback 유지 — 자격 모델이 부족하면 임계값 하향하여 전체 모델 반환
+- **근거**: Posture compliance 데이터에서 로컬 모델은 0-3/8, 클라우드 모델은 6.9/8로 명확한 격차
+
 ---
 
-## v1 대비 변경 추적
+## 계층 5: 세션 연속성 [신규 — v3]
+
+멀티스텝 워크플로에서 단계 간 컨텍스트를 보존하고, 상황에 맞는 프로토콜을 자동 선택하는 오케스트레이션 레벨 메커니즘.
+
+### 5-1: 프로토콜 자동 전환 (Auto-Escalation)
+
+> **문제**: 8단계 전부 `diverge-synth` 1라운드였음.
+> debate 프로토콜은 구현되어 있고 `wire.ts`에서 최소 3라운드를 강제하지만, 사용되지 않았음.
+> 1라운드에서 Worker 간 불일치가 크더라도 추가 라운드 없이 리더가 혼자 판정.
+
+- **트리거 조건**: 1라운드 diverge-synth 완료 후 리더가 Worker 간 불일치를 감지
+  - 구체적 지표: Worker 응답의 핵심 결론이 상반됨 (리더가 합성 시 판정)
+  - `decision: "continue"` + 불일치 설명을 리더가 반환
+- **동작**: 자동으로 debate 프로토콜로 전환하여 추가 2라운드 실행
+  - Worker들이 리더의 불일치 요약을 보고 서로의 주장에 대해 반박/수용
+  - 최종 라운드에서 리더가 합성 (이 때 의무 4 "강점 극대화 합성" 적용)
+- **제약**: 오케스트레이터가 명시적으로 `maxRounds: 1`을 지정한 경우 전환하지 않음
+- **구현 위치**: `engine.ts` `deliberate()` 함수 내부
+
+```typescript
+// 의사코드
+const round1 = await executeRound(ctx, 1, deps, cfg, input);
+if (round1.round.synthesis?.decision === "continue" && cfg.maxRounds === 1 && !cfg.disableAutoEscalation) {
+  // 자동으로 debate로 전환
+  const debateCfg = { ...cfg, protocol: "debate", maxRounds: 3 };
+  // round 2-3 실행 (debate 프로토콜)
+}
+```
+
+### 5-2: 멀티세션 컨텍스트 체인
+
+> **문제**: 각 `pyreez_deliberate` 호출은 독립 세션.
+> Step 6의 92,530자 코드가 Step 7 프롬프트에 포함되지 않아 검증자가 코드를 못 봄.
+> 오케스트레이터가 매번 이전 결과의 전체 텍스트를 수동으로 task에 포함해야 하는데,
+> 토큰 비용과 컨텍스트 윈도우 제약이 있음.
+
+- **인터페이스**: `DeliberateInput`에 `previousSessionId?: string` 필드 추가
+- **동작**:
+  1. 이전 세션의 `result`를 자동으로 worker/leader 프롬프트의 `## Previous Session Output` 섹션에 포함
+  2. 결과가 설정 가능한 임계값(기본 30,000자)을 초과하면:
+     - Worker별로 결과를 분할하여 각 Worker가 다른 청크를 집중 검토
+     - 리더에게는 전체 결과의 요약 + 각 Worker가 담당한 청크 정보를 전달
+  3. 체인 깊이 제한 (기본 3세션) — 무한 체인 방지
+- **구현 위치**: `wire.ts` `createDeliberateFn` 내부에서 store로부터 이전 세션 결과 조회
+- **저장소**: 기존 `DeliberationStore`에 이미 `result`, `sessionId` 필드 존재 — 추가 스키마 불필요
+
+```typescript
+// wire.ts — createDeliberateFn 내부
+if (input.previousSessionId && deps.store) {
+  const prev = await deps.store.getBySessionId(input.previousSessionId);
+  if (prev) {
+    const context = prev.result;
+    // Worker 프롬프트에 이전 세션 결과 포함
+    engineDeps.buildWorkerMessages = (ctx, instructions, roundInfo) =>
+      buildWorkerMessages(ctx, instructions, roundInfo, context);
+  }
+}
+```
+
+### 5-3: 평가 스코프 전달
+
+> **문제**: Step 8 리뷰에서 스코프 밖 항목으로 감점 (MVP에 없는 모니터링으로 4/10).
+
+- **인터페이스**: `DeliberateInput`에 `evaluationScope?: string` 필드 추가
+- **동작**: 지정 시 리더 프롬프트에 평가 기준으로 주입
+
+```
+## Evaluation Scope
+{evaluationScope}
+Rate ONLY against the scope defined above.
+Items outside scope: list as "Recommendations" in a separate section. Do NOT penalize for their absence.
+```
+
+- **구현**: `prompts.ts` `buildLeaderMessages`에서 `evaluationScope`가 있으면 systemContent에 추가
+- **근거**: 이 필드 하나로 Step 8의 Launch Readiness가 4→6점, 종합 5.75→6.9점으로 상승 추정
+
+---
+
+## v1 → v2 → v3 변경 추적
+
+### v2에서 구현 완료된 것
+
+| 항목 | 구현 위치 |
+|------|-----------|
+| 8개 보편 자세 원칙 (계층 1) | `prompts.ts` WORKER_POSTURE |
+| 리더 검증자 재정의 의무 1-4 (계층 3) | `prompts.ts` LEADER_VERIFIER_OBLIGATIONS |
+| Verification-first 출력 구조 (S2) | `prompts.ts` LEADER_OUTPUT_STRUCTURE |
+| consensusReached 의미론 (C1) | `engine.ts`, `types.ts` — `boolean \| null` |
+| leaderContributes 기본값 (C2) | `engine.ts` — `=== true` |
+| debate 프로토콜 정상화 (C3) | `prompts.ts`, `wire.ts` — 중재자 프롬프트 + 최소 3라운드 |
+| Thompson Sampling 리더 선택 (S1) | `wrappers.ts` — `computeWeightedThompson` |
+| 워커 아이덴티티 추적 (S3) | `prompts.ts` — `workerModel` 파라미터 |
+| DivergeSynthProtocol 테스트 (S4) | `wrappers.spec.ts` — 6개 테스트 |
+| 능력 필터링 (S5) | `team-composer.ts` — `filterByCapability` |
+
+### v3에서 추가/변경되는 것
+
+| 항목 | 유형 | 영향 |
+|------|------|------|
+| 의무 5: 강점 극대화 합성 | 프롬프트 보강 | 리더가 선택이 아닌 합성을 하도록 강제 |
+| 의무 6: 스코프 준수 | 프롬프트 추가 | 평가 범위 이탈 방지 |
+| 안전망 5: 능력 기반 라우팅 강화 | 엔진 변경 | 약한 모델 미스캐스팅 방지 |
+| 5-1: 프로토콜 자동 전환 | 엔진 변경 | Worker 불일치 시 자동 debate 전환 |
+| 5-2: 멀티세션 컨텍스트 체인 | 와이어/스토어 변경 | 단계 간 컨텍스트 보존 |
+| 5-3: 평가 스코프 전달 | 프롬프트/인터페이스 변경 | 스코프 밖 감점 방지 |
+| 스탠스 분화 선택적 적용 | 설계 명확화 | 필수→선택적으로 변경 |
 
 ### v1 항목이 흡수된 위치
 
@@ -257,15 +483,6 @@ Steel-manning, 적대적 협업, Delphi, 티벳 불교 논쟁, 배심 숙의 연
 | #14 반수렴 프로토콜 | 원칙 #3(사고 모드 분리) + 탐색자 스탠스 |
 | #16 관점 강제 할당 | 스탠스 분화(제안자/비판자/탐색자) |
 
-### v1 항목이 개선되어 유지된 것
-
-| v1 항목 | 변경 내용 |
-|---------|-----------|
-| #1 검증 모드 | 이진 분류 -> 검증 가능성 스펙트럼 + 블라인드 검증 |
-| #9 구조적 DA | 만장일치 단일 트리거 -> 3조건 복합 트리거 |
-| #6 숙의 학습 | 자기 평가 기반 -> 외부 ground truth 기반만 |
-| #8 모드 자동 선택 | 분류기 단일 의존 -> fallback/override 메커니즘 포함 |
-
 ### v1에서 폐기된 항목
 
 | v1 항목 | 폐기 이유 |
@@ -275,39 +492,42 @@ Steel-manning, 적대적 협업, Delphi, 티벳 불교 논쟁, 배심 숙의 연
 | #13 수치 검증 게이트 | #11과 동일한 근본 문제. 외부 도구 연결로 대체 |
 | #15 적층 규칙 | 오류 교정을 구조적으로 억제. 범용 시스템에서 역효과 |
 
-### v2에서 새로 추가된 것
-
-| 항목 | 이유 |
-|------|------|
-| 8개 보편 자세 원칙 | 10개 분야 교차 검증. 비용 0으로 대부분의 자세 문제 해결 |
-| 3종 스탠스 분화 | 역할 기반 사고 다양성 확보. 프롬프트 레벨 구현 |
-| 리더 = 검증자 재정의 | 합의자에서 검증자로. 품질 보증의 핵심 |
-| 외부 도구 연결 계층 | LLM-LLM 검증의 근본 한계 돌파 수단 |
-| 추론 경로 다양성 측정 | 결론 일치와 논거 일치를 구분하는 DA 트리거 조건 |
-
 ---
 
 ## 구현 우선순위
 
-### Phase 1: 프롬프트 레벨 (즉시)
+### Phase 1: 프롬프트 레벨 (즉시, 난이도 낮음)
 
-- 8개 원칙을 워커/리더 시스템 프롬프트에 반영
-- 스탠스 분화 (제안자/비판자/탐색자) 프롬프트 설계
-- 리더 프롬프트 재정의 (합의자 -> 검증자)
+영향 대비 비용이 가장 낮은 변경. 코드 몇 줄 수정으로 합성 품질 개선.
 
-### Phase 2: 엔진 레벨 (단기)
+- [ ] **의무 5 추가**: `prompts.ts` LEADER_VERIFIER_OBLIGATIONS에 강점 극대화 원칙 추가
+- [ ] **5-3 평가 스코프 전달**: `DeliberateInput`에 `evaluationScope` 필드 추가, `buildLeaderMessages`에서 주입
+- [ ] 스탠스 분화 프롬프트 설계 (제안자/비판자/탐색자) — 선택적 적용
 
-- 스탠스 할당 로직 (팀 크기별 자동 배분)
-- 리더 독립 사고 지원 (리더가 워커와 다른 프롬프트로 diverge 참여)
-- 추론 경로 유사성 감지 (DA 트리거 조건 2)
+### Phase 2: 엔진 레벨 (단기, 난이도 중간)
 
-### Phase 3: 인프라 레벨 (중기)
+핵심 구조적 문제를 해결하는 변경.
 
-- 검증 모드 (블라인드 코드 실행 샌드박스)
-- 외부 도구 연결 (검색, 계산기, DB)
-- 조건부 DA 전체 구현
+- [ ] **5-1 프로토콜 자동 전환**: `engine.ts`에서 1라운드 후 불일치 감지 시 debate 자동 전환
+- [ ] **안전망 5 능력 기반 라우팅**: `team-composer.ts`에 complexity 기반 동적 minScore
+- [ ] 스탠스 할당 로직 (팀 크기별 자동 배분)
+- [ ] 리더 독립 사고 지원 (리더가 워커와 다른 프롬프트로 diverge 참여)
+- [ ] 추론 경로 유사성 감지 (DA 트리거 조건 2)
 
-### Phase 4: 학습 레벨 (장기)
+### Phase 3: 와이어/스토어 레벨 (중기, 난이도 중간~높음)
 
-- 숙의 학습 파이프라인 (외부 피드백 -> 패턴 축적 -> DA 트리거 보정)
-- 영역별 LLM 신뢰도 맵 자동 갱신
+멀티세션 워크플로를 가능하게 하는 인프라 변경.
+
+- [ ] **5-2 멀티세션 컨텍스트 체인**: `DeliberateInput`에 `previousSessionId`, store에서 이전 결과 조회, 프롬프트에 자동 포함
+- [ ] 대용량 결과 분할 전략 (Worker별 청크 분배)
+- [ ] 조건부 DA 전체 구현
+
+### Phase 4: 인프라 레벨 (중기~장기)
+
+- [ ] 검증 모드 (블라인드 코드 실행 샌드박스)
+- [ ] 외부 도구 연결 (검색, 계산기, DB)
+
+### Phase 5: 학습 레벨 (장기)
+
+- [ ] 숙의 학습 파이프라인 (외부 피드백 → 패턴 축적 → DA 트리거 보정)
+- [ ] 영역별 LLM 신뢰도 맵 자동 갱신
