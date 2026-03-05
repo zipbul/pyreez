@@ -107,7 +107,7 @@ function fixtureRegistry() {
 function detectRole(messages: ChatMessage[]): "worker" | "leader" {
   const system = messages.find((m) => m.role === "system");
   if (!system?.content) return "worker";
-  if (system.content.includes("multiple responses")) return "leader";
+  if (system.content.includes("verifier-synthesizer") || system.content.includes("moderator and verifier")) return "leader";
   return "worker";
 }
 
@@ -142,7 +142,7 @@ describe("Deliberation E2E", () => {
     const result = await fn(input);
 
     // Assert
-    expect(result.consensusReached).toBe(true);
+    expect(result.consensusReached).toBeNull(); // no consensus mode = null
     expect(result.roundsExecuted).toBe(1);
     expect(result.result).toBe("Leader synthesis of all responses");
     expect(result.modelsUsed.length).toBeGreaterThanOrEqual(1);
@@ -192,7 +192,7 @@ describe("Deliberation E2E", () => {
   // ----------------------------------------------------------
   // 3. [HP] maxRounds exhausted without consensus mode
   // ----------------------------------------------------------
-  it("should run all rounds and report consensusReached=true when no consensus mode", async () => {
+  it("should run all rounds and report consensusReached=null when no consensus mode", async () => {
     // Arrange
     const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
       const role = detectRole(messages);
@@ -210,8 +210,8 @@ describe("Deliberation E2E", () => {
       maxRounds: 3,
     });
 
-    // Assert — no consensus mode means completing all rounds = consensusReached
-    expect(result.consensusReached).toBe(true);
+    // Assert — no consensus mode = null
+    expect(result.consensusReached).toBeNull();
     expect(result.roundsExecuted).toBe(3);
   });
 
@@ -240,12 +240,13 @@ describe("Deliberation E2E", () => {
       leaderInstructions: "Prioritize security",
     });
 
-    // Assert — worker instructions appear in worker calls, leader instructions in leader call
+    // Assert — worker instructions appear in worker calls (with posture suffix appended),
+    // leader instructions in leader call (with verifier suffix appended)
     const workerMsgs = capturedSystemMessages.filter(
-      (msg) => msg === "Use TypeScript strictly",
+      (msg) => msg.includes("Use TypeScript strictly") && msg.includes("observed fact"),
     );
     const leaderMsgs = capturedSystemMessages.filter(
-      (msg) => msg === "Prioritize security",
+      (msg) => msg.includes("Prioritize security") && msg.includes("Verify independently"),
     );
     expect(workerMsgs.length).toBeGreaterThanOrEqual(1);
     expect(leaderMsgs.length).toBe(1);
@@ -319,7 +320,7 @@ describe("Deliberation E2E", () => {
     // Assert — no JSON parsing attempted without consensus mode
     expect(result.roundsExecuted).toBe(1);
     expect(result.result).toBe("Here is my plain text synthesis without JSON");
-    expect(result.consensusReached).toBe(true);
+    expect(result.consensusReached).toBeNull();
   });
 
   // ----------------------------------------------------------
@@ -345,7 +346,7 @@ describe("Deliberation E2E", () => {
     // Assert — every field in DeliberateOutput
     expect(result.result).toBe("Final leader output");
     expect(result.roundsExecuted).toBe(1);
-    expect(result.consensusReached).toBe(true);
+    expect(result.consensusReached).toBeNull();
     expect(result.totalTokens.input).toBeGreaterThan(0);
     expect(result.totalTokens.output).toBeGreaterThan(0);
     // workers + leader = at least 2 LLM calls
@@ -381,8 +382,8 @@ describe("Deliberation E2E", () => {
 
     // Assert — different tasks, different contexts
     // Both reach consensus independently
-    expect(result1.consensusReached).toBe(true);
-    expect(result2.consensusReached).toBe(true);
+    expect(result1.consensusReached).toBeNull();
+    expect(result2.consensusReached).toBeNull();
     // Results differ (different globalCallCount at leader time)
     expect(result1.result).not.toBe(result2.result);
     // Round counts are independent

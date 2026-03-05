@@ -97,6 +97,7 @@ export interface EngineDeps {
     ctx: SharedContext,
     instructions?: string,
     roundInfo?: RoundInfo,
+    workerModel?: string,
   ) => ChatMessage[];
 }
 
@@ -111,14 +112,14 @@ export interface EngineConfig {
    * When true, the leader also responds independently in the worker (diverge) phase
    * before synthesizing all responses including its own.
    * Prevents anchoring bias and ensures the strongest model contributes its own reasoning.
-   * Default: true.
+   * Default: false.
    */
   readonly leaderContributes?: boolean;
 }
 
 const DEFAULT_CONFIG: EngineConfig = {
   maxRounds: 1,
-  leaderContributes: true,
+  leaderContributes: false,
 };
 
 // -- Internal Helpers --
@@ -239,20 +240,25 @@ export async function executeRound(
   let totalOutput = 0;
 
   // 1. Diverge phase — all participants respond in parallel
-  //    When leaderContributes is true (default), leader also responds independently
+  //    When leaderContributes is true, leader also responds independently
   //    before synthesizing, ensuring the strongest model's unanchored opinion is captured.
   const useDebateBuilder = config.protocol === "debate" && deps.buildDebateWorkerMessages && roundNumber > 1;
-  const workerMessages = useDebateBuilder
-    ? deps.buildDebateWorkerMessages!(ctx, input.workerInstructions, roundInfo)
-    : deps.buildWorkerMessages(ctx, input.workerInstructions, roundInfo);
 
-  const leaderContributes = config.leaderContributes !== false;
+  const leaderContributes = config.leaderContributes === true;
   const divergeParticipants = leaderContributes
     ? [...ctx.team.workers, ctx.team.leader]
     : [...ctx.team.workers];
 
+  // Non-debate: shared messages built once. Debate: per-worker messages with identity.
+  const sharedMessages = useDebateBuilder
+    ? null
+    : deps.buildWorkerMessages(ctx, input.workerInstructions, roundInfo);
+
   const workerPromises = divergeParticipants.map(async (participant) => {
-    const result = await deps.chat(participant.model, workerMessages);
+    const messages = useDebateBuilder
+      ? deps.buildDebateWorkerMessages!(ctx, input.workerInstructions, roundInfo, participant.model)
+      : sharedMessages!;
+    const result = await deps.chat(participant.model, messages);
     totalInput += result.inputTokens;
     totalOutput += result.outputTokens;
     return { model: participant.model, content: result.content } as WorkerResponse;
@@ -354,7 +360,7 @@ export async function deliberate(
   const maxRetries = retryDeps?.maxRetries ?? 1;
   let currentTeam = team;
   let ctx = createSharedContext(input.task, currentTeam);
-  let consensusReached = false;
+  let consensusReached: boolean | null = false;
   let accTokens: TokenUsage = { input: 0, output: 0 };
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
@@ -476,9 +482,9 @@ export async function deliberate(
     }
   }
 
-  // If no consensus mode, completing all rounds counts as "reached"
+  // If no consensus mode, consensusReached is null (not applicable)
   if (!cfg.consensus) {
-    consensusReached = true;
+    consensusReached = null;
   }
 
   // -- Assemble output --

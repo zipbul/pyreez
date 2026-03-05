@@ -117,7 +117,7 @@ export interface DeliberateInput {
   readonly models?: readonly string[];
   /**
    * When true, the leader also responds independently in the diverge phase
-   * before synthesizing. Default: true.
+   * before synthesizing. Default: false.
    */
   readonly leaderContributes?: boolean;
 }
@@ -128,7 +128,7 @@ export interface DeliberateInput {
 export interface DeliberateOutput {
   readonly result: string;
   readonly roundsExecuted: number;
-  readonly consensusReached: boolean;
+  readonly consensusReached: boolean | null;
   readonly totalTokens: TokenUsage;
   readonly totalLLMCalls: number;
   readonly modelsUsed: readonly string[];

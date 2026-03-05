@@ -431,7 +431,7 @@ describe("deliberate", () => {
 
     expect(output.result).toBe("final-synthesis");
     expect(output.roundsExecuted).toBe(1);
-    expect(output.consensusReached).toBe(true); // no consensus mode = always true
+    expect(output.consensusReached).toBeNull(); // no consensus mode = null
     expect(output.totalLLMCalls).toBe(3); // 2 workers + 1 leader
     expect(output.modelsUsed).toContain("worker/model-0");
     expect(output.modelsUsed).toContain("worker/model-1");
@@ -459,7 +459,7 @@ describe("deliberate", () => {
     const output = await deliberate(team, input, deps, config);
 
     expect(output.roundsExecuted).toBe(3);
-    expect(output.consensusReached).toBe(true); // no consensus = always true after all rounds
+    expect(output.consensusReached).toBeNull(); // no consensus mode = null
     expect(output.result).toBe("synthesis-round-3"); // last round's synthesis
     expect(output.totalLLMCalls).toBe(6); // 3 rounds * (1 worker + 1 leader)
   });
@@ -587,7 +587,7 @@ describe("deliberate", () => {
     const output = await deliberate(team, input, deps); // no config
 
     expect(output.roundsExecuted).toBe(1);
-    expect(output.consensusReached).toBe(true);
+    expect(output.consensusReached).toBeNull(); // default config has no consensus mode
     expect(output.result).toBe("default-config-result");
   });
 
@@ -851,10 +851,10 @@ describe("leaderContributes", () => {
     expect(output.totalLLMCalls).toBe(3);
   });
 
-  it("should default to leaderContributes=true when config is undefined", async () => {
+  it("should default to leaderContributes=false when config is undefined", async () => {
     const team = makeTeam(1);
     const input = makeInput();
-    // No config — uses DEFAULT_CONFIG which has leaderContributes: true
+    // No config — uses DEFAULT_CONFIG which has leaderContributes: false
 
     const calledModels: string[] = [];
     const deps = makeDeps({
@@ -866,8 +866,28 @@ describe("leaderContributes", () => {
 
     await deliberate(team, input, deps);
 
-    // Leader should be called twice (worker + synthesis)
-    expect(calledModels.filter((m) => m === "leader/model")).toHaveLength(2);
+    // Leader should be called once (synthesis only, not as worker)
+    expect(calledModels.filter((m) => m === "leader/model")).toHaveLength(1);
+  });
+
+  it("should NOT include leader in diverge when leaderContributes is omitted (undefined)", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    // Explicit config with leaderContributes omitted (undefined, not false)
+    const config: EngineConfig = { maxRounds: 1 };
+
+    const calledModels: string[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        calledModels.push(model);
+        return chatResult("response", 10, 20);
+      }),
+    });
+
+    await deliberate(team, input, deps, config);
+
+    // leaderContributes undefined → treated as false → leader called once (synthesis only)
+    expect(calledModels.filter((m) => m === "leader/model")).toHaveLength(1);
   });
 
   it("should track leader failure in failedWorkers when it fails during diverge", async () => {
@@ -997,9 +1017,9 @@ describe("debate protocol", () => {
     await deliberate(team, input, deps, config);
 
     // Round 1: normal builder (no debate call)
-    // Round 2: debate builder sees 1 previous round
-    // Round 3: debate builder sees 2 previous rounds
-    expect(debateContexts).toEqual(["rounds=1", "rounds=2"]);
+    // Round 2: debate builder called per-worker (2 workers), each sees 1 previous round
+    // Round 3: debate builder called per-worker (2 workers), each sees 2 previous rounds
+    expect(debateContexts).toEqual(["rounds=1", "rounds=1", "rounds=2", "rounds=2"]);
   });
 
   it("should force continue on round 1 of multi-round debate (no premature consensus)", async () => {

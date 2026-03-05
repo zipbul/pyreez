@@ -63,6 +63,7 @@ import type {
   Profiler,
   Selector,
   DeliberationProtocol,
+  DeliberationOverrides,
 } from "./interfaces";
 
 // -- Shared registry (lazy singleton) --
@@ -335,7 +336,57 @@ export class TwoTrackCeSelector implements Selector {
       return bComposite - aComposite;
     });
 
-    const topN = ranked.slice(0, Math.min(take, ranked.length));
+    let topN = ranked.slice(0, Math.min(take, ranked.length));
+
+    // Provider diversity: ensure no single provider dominates the team.
+    // Allow at most 1 model per provider initially; fill remaining slots round-robin.
+    if (topN.length >= 2) {
+      const seen = new Map<string, number>(); // provider → count in topN
+      const diverse: typeof topN = [];
+      const displaced: typeof topN = [];
+
+      for (const r of topN) {
+        const provider = r.modelId.split("/")[0] ?? r.modelId;
+        const count = seen.get(provider) ?? 0;
+        if (count === 0) {
+          diverse.push(r);
+          seen.set(provider, 1);
+        } else {
+          displaced.push(r);
+        }
+      }
+
+      // Fill remaining slots from ranked models not yet selected, preferring new providers
+      if (diverse.length < topN.length) {
+        const selectedIds = new Set(diverse.map((r) => r.modelId));
+        const candidates = ranked.filter((r) => !selectedIds.has(r.modelId));
+
+        for (const c of candidates) {
+          if (diverse.length >= topN.length) break;
+          const provider = c.modelId.split("/")[0] ?? c.modelId;
+          const count = seen.get(provider) ?? 0;
+          if (count === 0) {
+            diverse.push(c);
+            seen.set(provider, 1);
+          }
+        }
+
+        // If still not enough (few providers available), add back displaced models
+        for (const d of displaced) {
+          if (diverse.length >= topN.length) break;
+          diverse.push(d);
+        }
+        // Last resort: fill from remaining candidates
+        for (const c of candidates) {
+          if (diverse.length >= topN.length) break;
+          if (!diverse.some((r) => r.modelId === c.modelId)) {
+            diverse.push(c);
+          }
+        }
+      }
+
+      topN = diverse;
+    }
 
     // Exploration: in greedy mode, swap in an uncalibrated model.
     // Thompson mode doesn't need this — sigma-based sampling naturally explores.
@@ -428,6 +479,7 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
     plan: EnsemblePlan,
     scores: ModelScore[],
     chat: ChatFn,
+    overrides?: DeliberationOverrides,
   ): Promise<DeliberationResult> {
     if (!plan.models.length) {
       throw new Error("DivergeSynthProtocol: plan.models must not be empty");
@@ -435,7 +487,11 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
 
     const team = this.buildTeam(plan, scores);
 
-    const input: DeliberateInput = { task };
+    const input: DeliberateInput = {
+      task,
+      ...(overrides?.workerInstructions ? { workerInstructions: overrides.workerInstructions } : {}),
+      ...(overrides?.leaderInstructions ? { leaderInstructions: overrides.leaderInstructions } : {}),
+    };
 
     const engineChat = async (
       model: string,
@@ -445,7 +501,11 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
       return result;
     };
 
-    const isDebate = this.protocol === "debate";
+    const effectiveProtocol = overrides?.protocol ?? this.protocol;
+    const effectiveMaxRounds = overrides?.maxRounds ?? this.maxRounds;
+    const effectiveConsensus = overrides?.consensus ?? this.consensus;
+    const isDebate = effectiveProtocol === "debate";
+
     const deps: EngineDeps = {
       chat: engineChat,
       buildWorkerMessages,
@@ -454,9 +514,10 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
     };
 
     const config: EngineConfig = {
-      maxRounds: isDebate ? Math.max(this.maxRounds, 3) : this.maxRounds,
-      consensus: this.consensus,
-      protocol: this.protocol,
+      maxRounds: isDebate ? Math.max(effectiveMaxRounds, 3) : effectiveMaxRounds,
+      consensus: effectiveConsensus,
+      leaderContributes: overrides?.leaderContributes,
+      protocol: effectiveProtocol,
     };
 
     const output = await this.runDeliberation(team, input, deps, config, this.retryDeps);
@@ -467,7 +528,9 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
       consensusReached: output.consensusReached,
       totalLLMCalls: output.totalLLMCalls,
       modelsUsed: [...output.modelsUsed],
-      protocol: this.protocol === "debate" ? "debate" : "diverge-synth",
+      protocol: isDebate ? "debate" : "diverge-synth",
+      totalTokens: output.totalTokens,
+      rounds: output.rounds,
     };
   }
 
@@ -503,25 +566,27 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
     const scoreMap = new Map(scores.map((s) => [s.modelId, s]));
     const modelIds = plan.models.map((m) => m.modelId);
 
-    const getDimScore = (modelId: string, dimension: string): number => {
-      const s = scoreMap.get(modelId);
-      if (!s) return 0;
-      const rating = s.dimensions[dimension];
-      if (!rating) return 0;
-      const penalty = 1 / (1 + rating.sigma / SIGMA_BASE);
-      return rating.mu * penalty;
-    };
+    // Leader selection via Thompson sampling on LEADER_DIMS.
+    // Stochastic sampling ensures leader rotation across calls,
+    // preventing a single model from always being selected.
+    const leaderCapabilities: Record<string, number> = {};
+    for (const { dimension, weight } of [
+      { dimension: "JUDGMENT", weight: 0.4 },
+      { dimension: "ANALYSIS", weight: 0.3 },
+      { dimension: "REASONING", weight: 0.2 },
+      { dimension: "SELF_CONSISTENCY", weight: 0.1 },
+    ]) {
+      leaderCapabilities[dimension] = weight;
+    }
 
-    // Leader: best JUDGMENT composite
     let leaderId = modelIds[modelIds.length - 1]!;
-    let bestJudgment = -Infinity;
+    let bestScore = -Infinity;
     for (const id of modelIds) {
-      const score = getDimScore(id, "JUDGMENT") * 0.4
-        + getDimScore(id, "ANALYSIS") * 0.3
-        + getDimScore(id, "REASONING") * 0.2
-        + getDimScore(id, "SELF_CONSISTENCY") * 0.1;
-      if (score > bestJudgment) {
-        bestJudgment = score;
+      const ms = scoreMap.get(id);
+      if (!ms) continue;
+      const sampled = computeWeightedThompson(ms, leaderCapabilities);
+      if (sampled > bestScore) {
+        bestScore = sampled;
         leaderId = id;
       }
     }

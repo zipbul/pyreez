@@ -58,7 +58,7 @@ const mockPlanSingle: EnsemblePlan = {
 const mockResult: DeliberationResult = {
   result: "deliberation output",
   roundsExecuted: 1,
-  consensusReached: true,
+  consensusReached: null,
   totalLLMCalls: 3,
   modelsUsed: ["test/model-a", "test/model-b"],
   protocol: "leader_decides",
@@ -168,7 +168,7 @@ describe("PyreezEngine", () => {
       expect(deliberation.deliberate).not.toHaveBeenCalled();
       expect(result.protocol).toBe("single");
       expect(result.roundsExecuted).toBe(0);
-      expect(result.consensusReached).toBe(true);
+      expect(result.consensusReached).toBeNull();
       expect(result.modelsUsed).toEqual(["test/model-a"]);
     });
 

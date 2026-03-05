@@ -58,7 +58,7 @@ const STUB_TEAM: TeamComposition = {
 const STUB_DELIBERATE_OUTPUT: DeliberateOutput = {
   result: "deliberation result",
   roundsExecuted: 1,
-  consensusReached: true,
+  consensusReached: null,
   totalTokens: { input: 100, output: 200 },
   totalLLMCalls: 3,
   modelsUsed: ["openai/gpt-4.1", "deepseek/deepseek-r1", "anthropic/claude-sonnet-4.6"],
@@ -337,7 +337,7 @@ describe("createDeliberateFn", () => {
     // Assert
     expect(result.result).toBe("deliberation result");
     expect(result.roundsExecuted).toBe(1);
-    expect(result.consensusReached).toBe(true);
+    expect(result.consensusReached).toBeNull();
     expect(result.totalTokens).toEqual({ input: 100, output: 200 });
     expect(result.totalLLMCalls).toBe(3);
     expect(result.modelsUsed).toEqual([
@@ -369,7 +369,7 @@ describe("createDeliberateFn", () => {
     const savedRecord = mockSave.mock.calls[0]![0] as any;
     expect(savedRecord.task).toBe("Test task");
     expect(savedRecord.result).toBe("deliberation result");
-    expect(savedRecord.consensusReached).toBe(true);
+    expect(savedRecord.consensusReached).toBeNull();
     expect(savedRecord.roundsExecuted).toBe(1);
     expect(savedRecord.modelsUsed).toEqual([
       "openai/gpt-4.1",

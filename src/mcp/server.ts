@@ -352,7 +352,7 @@ export class PyreezMcpServer {
           leader_contributes: z
             .boolean()
             .optional()
-            .describe("When true (default), the leader also responds independently in the diverge phase before synthesizing. Ensures the strongest model's unanchored opinion is captured."),
+            .describe("When true, the leader also responds independently in the diverge phase before synthesizing. Ensures the strongest model's unanchored opinion is captured."),
           protocol: z
             .enum(["diverge-synth", "debate"])
             .optional()
@@ -710,8 +710,20 @@ export class PyreezMcpServer {
           qualityWeight: args.quality_weight,
           costWeight: args.cost_weight,
         };
+        // Build deliberation overrides from user params
+        const validProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
+        const hasOverrides = validProtocol != null || args.max_rounds != null || args.consensus != null || args.leader_contributes != null || args.worker_instructions != null || args.leader_instructions != null;
+        const deliberationOverrides = hasOverrides ? {
+          protocol: validProtocol,
+          maxRounds: args.max_rounds,
+          consensus: args.consensus === "leader_decides" ? "leader_decides" as const : undefined,
+          leaderContributes: args.leader_contributes,
+          workerInstructions: args.worker_instructions,
+          leaderInstructions: args.leader_instructions,
+        } : undefined;
+
         // D-2: Use runWithTrace to include routing info in response
-        const traceResult = await this.engine.runWithTrace(args.task, budget, classification);
+        const traceResult = await this.engine.runWithTrace(args.task, budget, classification, deliberationOverrides);
         const result = traceResult.result;
 
         // Auto-save deliberation result to store (best-effort)
@@ -726,6 +738,12 @@ export class PyreezMcpServer {
               result: result.result,
               modelsUsed: result.modelsUsed,
               totalLLMCalls: result.totalLLMCalls,
+              totalTokens: result.totalTokens,
+              protocol: result.protocol as "diverge-synth" | "debate" | undefined,
+              consensus: deliberationOverrides?.consensus,
+              workerInstructions: args.worker_instructions,
+              leaderInstructions: args.leader_instructions,
+              ...(result.rounds ? { roundsSummary: result.rounds } : {}),
             });
           } catch {
             // best-effort save

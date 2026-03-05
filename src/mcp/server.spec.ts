@@ -104,7 +104,7 @@ const DEFAULT_TRACE_RESULT: SlotTrace = {
 const DEFAULT_RUN_RESULT: DeliberationResult = {
   result: "function add(a, b) { return a + b; }",
   roundsExecuted: 1,
-  consensusReached: true,
+  consensusReached: null,
   totalLLMCalls: 1,
   modelsUsed: ["openai/gpt-4.1"],
   protocol: "single",
@@ -994,7 +994,7 @@ describe("PyreezMcpServer", () => {
     const DELIBERATE_OUTPUT: DeliberateOutput = {
       result: "function add(a, b) { return a + b; }",
       roundsExecuted: 2,
-      consensusReached: true,
+      consensusReached: null,
       totalTokens: { input: 100, output: 200 },
       totalLLMCalls: 8,
       modelsUsed: ["worker/a", "worker/b", "leader/m"],
@@ -1023,7 +1023,7 @@ describe("PyreezMcpServer", () => {
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed.result).toBe("function add(a, b) { return a + b; }");
       expect(parsed.roundsExecuted).toBe(2);
-      expect(parsed.consensusReached).toBe(true);
+      expect(parsed.consensusReached).toBeNull();
       expect(parsed.totalLLMCalls).toBe(8);
     });
 

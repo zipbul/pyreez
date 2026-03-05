@@ -94,6 +94,98 @@ export function selectTopModel(
   return best;
 }
 
+// -- Capability Filtering --
+
+/**
+ * Filter models by minimum capability score across LEADER_DIMS.
+ * Soft fallback: returns all models if fewer than `minCount` qualify.
+ *
+ * @param models - Models to filter.
+ * @param minScore - Minimum scoreDimensions() threshold.
+ * @param minCount - Minimum models required; falls back to unfiltered if not met.
+ */
+export function filterByCapability(
+  models: readonly ModelInfo[],
+  minScore: number,
+  minCount: number = 2,
+): ModelInfo[] {
+  const qualifying = models.filter((m) => {
+    // Skip models without proper capabilities (graceful degradation)
+    const hasCapabilities = LEADER_DIMS.every(
+      ({ dimension }) => m.capabilities[dimension] != null,
+    );
+    if (!hasCapabilities) return true; // include uncalibrated models
+    return scoreDimensions(m, LEADER_DIMS) >= minScore;
+  });
+  if (qualifying.length >= minCount) return qualifying;
+  return [...models];
+}
+
+// -- Provider Diversity Selection --
+
+/**
+ * Select up to `count` models with maximum provider diversity.
+ *
+ * Algorithm: round-robin across providers, picking the best model
+ * (by JUDGMENT composite) from each provider per round.
+ * This ensures teams span multiple LLM providers, reducing correlated
+ * errors from shared training data.
+ *
+ * @param models - Available models to select from.
+ * @param count - Maximum team size.
+ * @returns Selected models with provider diversity guarantee.
+ */
+export function selectDiverseModels(
+  models: readonly ModelInfo[],
+  count: number,
+): ModelInfo[] {
+  if (models.length <= count) {
+    // Even when all models fit, still sort by provider diversity
+    // to ensure team-composer sees providers in round-robin order.
+    if (models.length <= 1) return [...models];
+    // Fall through to diversity selection logic
+    count = models.length;
+  }
+
+  // Apply capability filter before diversity selection (soft: falls back to all if too few qualify)
+  const qualified = filterByCapability(models, 300, count);
+
+  // Group by provider, sorted by JUDGMENT composite within each group
+  const byProvider = new Map<string, ModelInfo[]>();
+  for (const model of qualified) {
+    const provider = extractProvider(model.id);
+    const group = byProvider.get(provider) ?? [];
+    group.push(model);
+    byProvider.set(provider, group);
+  }
+
+  // Sort each provider's models by LEADER_DIMS score descending
+  for (const group of byProvider.values()) {
+    group.sort((a, b) => scoreDimensions(b, LEADER_DIMS) - scoreDimensions(a, LEADER_DIMS));
+  }
+
+  // Round-robin: take best from each provider, then second-best, etc.
+  const selected: ModelInfo[] = [];
+  const providers = [...byProvider.keys()];
+  let round = 0;
+
+  while (selected.length < count) {
+    let addedThisRound = false;
+    for (const provider of providers) {
+      if (selected.length >= count) break;
+      const group = byProvider.get(provider)!;
+      if (round < group.length) {
+        selected.push(group[round]!);
+        addedThisRound = true;
+      }
+    }
+    if (!addedThisRound) break;
+    round++;
+  }
+
+  return selected;
+}
+
 // -- Main function --
 
 /**
@@ -126,8 +218,11 @@ export function composeTeam(
     return found;
   };
 
-  // Resolve all requested models
-  const requestedModels = options.modelIds.map(resolveModel);
+  // Resolve all requested models, filtering by capability
+  const requestedModels = filterByCapability(
+    options.modelIds.map(resolveModel),
+    300, // minimum LEADER_DIMS composite score
+  );
 
   // Leader selection
   let leader: TeamMember;

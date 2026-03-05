@@ -13,7 +13,7 @@ export interface DeliberationRecord {
   readonly id: string;
   readonly task: string;
   readonly timestamp: number;
-  readonly consensusReached: boolean;
+  readonly consensusReached: boolean | null;
   readonly roundsExecuted: number;
   readonly result: string;
   readonly modelsUsed: readonly string[];

@@ -157,7 +157,7 @@ async function main(): Promise<void> {
 
   // Restore SPEED/COST_EFFICIENCY from pricing data (skip if already calibrated)
   let restored = 0;
-  for (const [modelId, model] of Object.entries(data.models as Record<string, { cost: { inputPer1M: number; outputPer1M: number }; scores: Record<string, { mu: number; sigma: number; comparisons: number }> }>)) {
+  for (const [_modelId, model] of Object.entries(data.models as Record<string, { cost: { inputPer1M: number; outputPer1M: number }; scores: Record<string, { mu: number; sigma: number; comparisons: number }> }>)) {
     const cost = model.cost;
     if (!cost) continue;
 

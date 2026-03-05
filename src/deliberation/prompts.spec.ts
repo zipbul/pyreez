@@ -79,20 +79,22 @@ describe("buildWorkerMessages", () => {
     // Assert
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toBe("Respond to the following task.");
+    expect(messages[0]!.content).toContain("deliberation participant");
+    expect(messages[0]!.content).toContain("observed fact");
     expect(messages[1]!.role).toBe("user");
     expect(messages[1]!.content).toContain("Write a sorting function");
   });
 
-  it("should use host-provided instructions as system message when given", () => {
+  it("should use host-provided instructions with posture suffix as system message when given", () => {
     // Arrange
     const ctx = makeCtx();
 
     // Act
     const messages = buildWorkerMessages(ctx, "Use TypeScript strict mode");
 
-    // Assert
-    expect(messages[0]!.content).toBe("Use TypeScript strict mode");
+    // Assert — host instructions present with posture appended
+    expect(messages[0]!.content).toContain("Use TypeScript strict mode");
+    expect(messages[0]!.content).toContain("observed fact");
   });
 
   it("should include previous round synthesis in user message when rounds exist", () => {
@@ -117,9 +119,9 @@ describe("buildWorkerMessages", () => {
     // Act
     const messages = buildWorkerMessages(ctx, undefined);
 
-    // Assert — system should fall back to default, NOT contain "Instructions" header
-    expect(messages[0]!.content).toBe("Respond to the following task.");
-    expect(messages[1]!.content).not.toContain("Instructions");
+    // Assert — system should fall back to default with posture
+    expect(messages[0]!.content).toContain("deliberation participant");
+    expect(messages[0]!.content).toContain("observed fact");
   });
 
   it("should omit instructions section when instructions is empty string", () => {
@@ -130,8 +132,8 @@ describe("buildWorkerMessages", () => {
     const messages = buildWorkerMessages(ctx, "");
 
     // Assert — empty string is falsy, so default is used
-    expect(messages[0]!.content).toBe("Respond to the following task.");
-    expect(messages[1]!.content).not.toContain("Instructions");
+    expect(messages[0]!.content).toContain("deliberation participant");
+    expect(messages[0]!.content).toContain("observed fact");
   });
 
   it("should include round budget when roundInfo is provided", () => {
@@ -239,9 +241,11 @@ describe("buildLeaderMessages", () => {
     // Assert
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toBe(
-      "You are given multiple responses to a task. Compare, evaluate, and produce the best final answer.",
-    );
+    expect(messages[0]!.content).toContain("verifier-synthesizer");
+    expect(messages[0]!.content).toContain("Verify independently");
+    expect(messages[0]!.content).toContain("Search for gaps");
+    expect(messages[0]!.content).toContain("argument independence");
+    expect(messages[0]!.content).toContain("Synthesize honestly");
     expect(messages[1]!.role).toBe("user");
     expect(messages[1]!.content).toContain("Write a sorting function");
   });
@@ -268,15 +272,16 @@ describe("buildLeaderMessages", () => {
     expect(user).toContain("Worker Responses");
   });
 
-  it("should use host-provided instructions as system message when given", () => {
+  it("should use host-provided instructions with verifier suffix as system message when given", () => {
     // Arrange
     const ctx = makeCtx([makeRound(1)]);
 
     // Act
     const messages = buildLeaderMessages(ctx, "Be strict on security");
 
-    // Assert
-    expect(messages[0]!.content).toBe("Be strict on security");
+    // Assert — host instructions present with verifier suffix appended
+    expect(messages[0]!.content).toContain("Be strict on security");
+    expect(messages[0]!.content).toContain("Verify independently");
   });
 
   it("should omit instructions section when instructions is undefined", () => {
@@ -286,11 +291,9 @@ describe("buildLeaderMessages", () => {
     // Act
     const messages = buildLeaderMessages(ctx, undefined);
 
-    // Assert
-    expect(messages[0]!.content).toBe(
-      "You are given multiple responses to a task. Compare, evaluate, and produce the best final answer.",
-    );
-    expect(messages[1]!.content).not.toContain("Instructions");
+    // Assert — falls back to verifier default
+    expect(messages[0]!.content).toContain("verifier-synthesizer");
+    expect(messages[0]!.content).toContain("Verify independently");
   });
 
   it("should omit instructions section when instructions is empty string", () => {
@@ -300,11 +303,9 @@ describe("buildLeaderMessages", () => {
     // Act
     const messages = buildLeaderMessages(ctx, "");
 
-    // Assert
-    expect(messages[0]!.content).toBe(
-      "You are given multiple responses to a task. Compare, evaluate, and produce the best final answer.",
-    );
-    expect(messages[1]!.content).not.toContain("Instructions");
+    // Assert — empty string is falsy, falls back to verifier default
+    expect(messages[0]!.content).toContain("verifier-synthesizer");
+    expect(messages[0]!.content).toContain("Verify independently");
   });
 
   it("should include round budget when roundInfo is provided", () => {
@@ -364,8 +365,9 @@ describe("buildLeaderMessages", () => {
     });
     const user = messages[1]!.content!;
 
-    // Assert — instructions in system, round budget in user
-    expect(messages[0]!.content).toBe("Be strict");
+    // Assert — instructions + verifier suffix in system, round budget in user
+    expect(messages[0]!.content).toContain("Be strict");
+    expect(messages[0]!.content).toContain("Verify independently");
     expect(user).toContain("Round 2");
   });
 
@@ -451,9 +453,11 @@ describe("buildLeaderMessages", () => {
     // Round 1 of 3 → intermediate round with debate protocol + consensus
     const messages = buildLeaderMessages(ctx, undefined, { current: 1, max: 3 }, "leader_decides", "debate");
     const systemContent = messages.find(m => m.role === "system")!.content;
-    expect(systemContent).toContain("moderator");
+    expect(systemContent).toContain("moderator and verifier");
     expect(systemContent).toContain("AGREEMENT");
     expect(systemContent).toContain("DISAGREEMENT");
+    expect(systemContent).toContain("evaluate the evidence");
+    expect(systemContent).toContain("Identify gaps");
     expect(systemContent).toContain("continue");
   });
 
@@ -473,7 +477,8 @@ describe("buildLeaderMessages", () => {
     const messages = buildLeaderMessages(ctx, undefined, { current: 3, max: 3 }, "leader_decides", "debate");
     const systemContent = messages.find(m => m.role === "system")!.content;
     expect(systemContent).toContain("approve");
-    expect(systemContent).not.toContain("moderator");
+    expect(systemContent).toContain("verifier-synthesizer");
+    expect(systemContent).not.toContain("moderator and verifier of a structured debate");
   });
 
   it("should skip JSON injection when host instructions already contain json+decision", () => {
@@ -492,7 +497,44 @@ describe("buildLeaderMessages", () => {
     const messages = buildLeaderMessages(ctx, hostInstructions, undefined, "leader_decides");
     const systemContent = messages.find(m => m.role === "system")!.content;
     // Host already specified JSON+decision → should NOT double-inject
-    expect(systemContent).toBe(hostInstructions);
+    expect(systemContent).toContain(hostInstructions);
+    expect(systemContent).toContain("Verify independently");
+    // Should NOT have pyreez's JSON injection
+    expect(systemContent).not.toContain("IMPORTANT: You MUST respond");
+  });
+
+  it("should use moderator prompt for intermediate debate rounds WITHOUT consensus mode", () => {
+    const ctx: SharedContext = {
+      task: "Test task",
+      team: {
+        workers: [{ model: "w1", role: "worker" }],
+        leader: { model: "l1", role: "leader" },
+      },
+      rounds: [{
+        number: 1,
+        responses: [{ model: "w1", content: "response 1" }],
+      }],
+    };
+    // Round 1 of 3, debate protocol, NO consensus mode
+    const messages = buildLeaderMessages(ctx, undefined, { current: 1, max: 3 }, undefined, "debate");
+    const systemContent = messages.find(m => m.role === "system")!.content;
+    // Moderator prompt should activate even without consensus
+    expect(systemContent).toContain("moderator and verifier");
+    expect(systemContent).toContain("AGREEMENT");
+    expect(systemContent).toContain("DISAGREEMENT");
+    // Should NOT include JSON decision instruction (no consensus mode)
+    expect(systemContent).not.toContain('"decision"');
+  });
+
+  it("should place verification section before synthesis section in output structure", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const messages = buildLeaderMessages(ctx);
+    const systemContent = messages.find(m => m.role === "system")!.content!;
+    const verificationIdx = systemContent.indexOf("Verification");
+    const synthesisIdx = systemContent.indexOf("Synthesis");
+    expect(verificationIdx).toBeGreaterThan(-1);
+    expect(synthesisIdx).toBeGreaterThan(-1);
+    expect(verificationIdx).toBeLessThan(synthesisIdx);
   });
 });
 
@@ -539,10 +581,11 @@ describe("buildDebateWorkerMessages", () => {
     expect(user).not.toContain("Synth-1: disagreement on X");
   });
 
-  it("should include debate context in system message", () => {
+  it("should include debate context and posture in system message", () => {
     const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
     const messages = buildDebateWorkerMessages(ctx);
     expect(messages[0]!.content).toContain("debate");
+    expect(messages[0]!.content).toContain("observed fact");
   });
 
   it("should include final round instruction on last round", () => {
@@ -552,11 +595,47 @@ describe("buildDebateWorkerMessages", () => {
     expect(user).toMatch(/final/i);
   });
 
-  it("should use host instructions combined with debate context", () => {
+  it("should use host instructions combined with debate context and posture", () => {
     const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
     const messages = buildDebateWorkerMessages(ctx, "Focus on performance");
     expect(messages[0]!.content).toContain("Focus on performance");
     expect(messages[0]!.content).toContain("debate");
+    expect(messages[0]!.content).toContain("observed fact");
+  });
+
+  it("should include worker's own previous response when workerModel is provided", () => {
+    const round1 = makeRound(1, {
+      responses: [
+        makeResponse("worker/a", "My analysis of quicksort"),
+        makeResponse("worker/b", "My analysis of mergesort"),
+      ],
+      synthesis: makeSynthesis("continue", "Disagreement on sort choice"),
+    });
+    const ctx = makeCtx([round1]);
+
+    const messages = buildDebateWorkerMessages(ctx, undefined, undefined, "worker/a");
+    const user = messages[1]!.content!;
+
+    // Should include this worker's own previous response
+    expect(user).toContain("Your Previous Response");
+    expect(user).toContain("My analysis of quicksort");
+    // Should NOT include the other worker's response
+    expect(user).not.toContain("My analysis of mergesort");
+  });
+
+  it("should NOT include previous response section when workerModel is not provided", () => {
+    const round1 = makeRound(1, {
+      responses: [
+        makeResponse("worker/a", "My analysis"),
+      ],
+      synthesis: makeSynthesis("continue", "Summary"),
+    });
+    const ctx = makeCtx([round1]);
+
+    const messages = buildDebateWorkerMessages(ctx);
+    const user = messages[1]!.content!;
+
+    expect(user).not.toContain("Your Previous Response");
   });
 
   it("should instruct workers to rebut and refine positions", () => {

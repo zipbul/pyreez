@@ -16,7 +16,7 @@ import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput } from "./types";
 import type { ChatResult, EngineDeps, EngineConfig, RetryDeps } from "./engine";
 import type { DeliberationStore } from "./store-types";
-import { composeTeam } from "./team-composer";
+import { composeTeam, selectDiverseModels } from "./team-composer";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
 import {
@@ -213,13 +213,17 @@ export function createDeliberateFn(
         },
       );
     } else {
-      // Auto compose from available models
+      // Auto compose from available models, capped to prevent cost explosion.
+      // selectDiverseModels ensures provider diversity (round-robin across providers).
+      // Team-composer handles leader selection by JUDGMENT score internally.
       const available = deps.registry.getAvailable();
-      const modelIds = available.map((m) => m.id);
+      const MAX_AUTO_TEAM = 5;
+      const selected = selectDiverseModels(available, MAX_AUTO_TEAM);
+      const modelIds = selected.map((m) => m.id);
       team = composeTeam(
         { task: input.task, modelIds },
         {
-          getModels: () => available,
+          getModels: () => selected,
           getById: (id) => deps.registry.getById(id),
         },
       );
@@ -235,9 +239,11 @@ export function createDeliberateFn(
 
     // 4. Build engine config
     const hasConfig = input.maxRounds != null || input.consensus != null || input.leaderContributes != null || input.protocol != null;
+    const effectiveMaxRounds = input.maxRounds ?? 1;
+    const isDebate = input.protocol === "debate";
     const config: EngineConfig | undefined = hasConfig
       ? {
-          maxRounds: input.maxRounds ?? 1,
+          maxRounds: isDebate ? Math.max(effectiveMaxRounds, 3) : effectiveMaxRounds,
           consensus: input.consensus,
           leaderContributes: input.leaderContributes,
           protocol: input.protocol,

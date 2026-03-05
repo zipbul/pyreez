@@ -11,6 +11,7 @@ import type {
   Profiler,
   Selector,
   DeliberationProtocol,
+  DeliberationOverrides,
   LearningLayer,
 } from "./interfaces";
 import type {
@@ -61,6 +62,7 @@ export class PyreezEngine {
     prompt: string,
     budget: BudgetConfig,
     classification: TaskClassification,
+    deliberationOverrides?: DeliberationOverrides,
   ): Promise<RunTrace> {
     const trace = await this.traceOnly(prompt, budget, classification);
     const { scores, plan } = trace;
@@ -74,7 +76,7 @@ export class PyreezEngine {
       result = {
         result: chatResult.content,
         roundsExecuted: 0,
-        consensusReached: true,
+        consensusReached: null,
         totalLLMCalls: 1,
         modelsUsed: [plan.models[0]!.modelId],
         protocol: "single",
@@ -87,6 +89,7 @@ export class PyreezEngine {
         plan,
         scores,
         this.chat,
+        deliberationOverrides,
       );
       result = { ...raw, sessionId };
     }
@@ -104,7 +107,8 @@ export class PyreezEngine {
     prompt: string,
     budget: BudgetConfig,
     classification: TaskClassification,
+    deliberationOverrides?: DeliberationOverrides,
   ): Promise<DeliberationResult> {
-    return (await this.runWithTrace(prompt, budget, classification)).result;
+    return (await this.runWithTrace(prompt, budget, classification, deliberationOverrides)).result;
   }
 }

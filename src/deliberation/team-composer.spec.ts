@@ -10,6 +10,7 @@ import {
   extractProvider,
   scoreDimensions,
   selectTopModel,
+  selectDiverseModels,
   composeTeam,
   type ComposeTeamDeps,
 } from "./team-composer";
@@ -291,6 +292,82 @@ describe("selectTopModel", () => {
     const models = [makeModel({ id: "a/only" })];
     const dims = [{ dimension: "CODE_GENERATION" as CapabilityDimension, weight: 1.0 }];
     expect(selectTopModel(models, dims, new Set(["a/only"]))).toBeUndefined();
+  });
+});
+
+// ================================================================
+// selectDiverseModels
+// ================================================================
+
+describe("selectDiverseModels", () => {
+  it("should return all models when count >= models.length", () => {
+    const models = [
+      makeModel({ id: "openai/a" }),
+      makeModel({ id: "anthropic/b" }),
+    ];
+    const result = selectDiverseModels(models, 5);
+    expect(result).toHaveLength(2);
+  });
+
+  it("should select one model per provider before doubling up", () => {
+    // 3 openai, 2 anthropic, 1 deepseek — select 3 → should get 1 from each provider
+    const models = [
+      makeModel({ id: "openai/a", capabilities: { JUDGMENT: 9 } }),
+      makeModel({ id: "openai/b", capabilities: { JUDGMENT: 7 } }),
+      makeModel({ id: "openai/c", capabilities: { JUDGMENT: 5 } }),
+      makeModel({ id: "anthropic/d", capabilities: { JUDGMENT: 8 } }),
+      makeModel({ id: "anthropic/e", capabilities: { JUDGMENT: 6 } }),
+      makeModel({ id: "deepseek/f", capabilities: { JUDGMENT: 7 } }),
+    ];
+    const result = selectDiverseModels(models, 3);
+
+    expect(result).toHaveLength(3);
+    const providers = result.map((m) => extractProvider(m.id));
+    // All 3 providers represented
+    expect(new Set(providers).size).toBe(3);
+  });
+
+  it("should pick best model from each provider (sorted by JUDGMENT composite)", () => {
+    const models = [
+      makeModel({ id: "openai/weak", capabilities: { JUDGMENT: 3 } }),
+      makeModel({ id: "openai/strong", capabilities: { JUDGMENT: 9 } }),
+      makeModel({ id: "anthropic/mid", capabilities: { JUDGMENT: 6 } }),
+    ];
+    const result = selectDiverseModels(models, 2);
+
+    // Should pick openai/strong (best openai) and anthropic/mid (best anthropic)
+    expect(result).toHaveLength(2);
+    const ids = result.map((m) => m.id);
+    expect(ids).toContain("openai/strong");
+    expect(ids).toContain("anthropic/mid");
+  });
+
+  it("should round-robin second picks when count exceeds provider count", () => {
+    const models = [
+      makeModel({ id: "openai/a", capabilities: { JUDGMENT: 9 } }),
+      makeModel({ id: "openai/b", capabilities: { JUDGMENT: 7 } }),
+      makeModel({ id: "anthropic/c", capabilities: { JUDGMENT: 8 } }),
+    ];
+    const result = selectDiverseModels(models, 3);
+
+    // Round 1: openai/a, anthropic/c; Round 2: openai/b
+    expect(result).toHaveLength(3);
+    expect(result[0]!.id).toBe("openai/a");
+    expect(result[1]!.id).toBe("anthropic/c");
+    expect(result[2]!.id).toBe("openai/b");
+  });
+
+  it("should handle single provider gracefully", () => {
+    const models = [
+      makeModel({ id: "openai/a", capabilities: { JUDGMENT: 9 } }),
+      makeModel({ id: "openai/b", capabilities: { JUDGMENT: 7 } }),
+      makeModel({ id: "openai/c", capabilities: { JUDGMENT: 5 } }),
+    ];
+    const result = selectDiverseModels(models, 2);
+    expect(result).toHaveLength(2);
+    // Best two from the single provider
+    expect(result[0]!.id).toBe("openai/a");
+    expect(result[1]!.id).toBe("openai/b");
   });
 });
 

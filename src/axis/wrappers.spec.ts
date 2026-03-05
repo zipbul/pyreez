@@ -526,3 +526,160 @@ describe("TwoTrackCeSelector criticality-based weights", () => {
     expect(plan.reason).toContain("c=0.1");
   });
 });
+
+// -- DivergeSynthProtocol --
+
+describe("DivergeSynthProtocol", () => {
+  const { DivergeSynthProtocol } = require("./wrappers") as typeof import("./wrappers");
+  type DeliberateOutput = import("../deliberation/types").DeliberateOutput;
+  type TeamComposition = import("../deliberation/types").TeamComposition;
+  type DeliberateInput = import("../deliberation/types").DeliberateInput;
+  type EngineDeps = import("../deliberation/engine").EngineDeps;
+  type EngineConfig = import("../deliberation/engine").EngineConfig;
+
+  const mockDeliberateOutput: DeliberateOutput = {
+    result: "mock result",
+    roundsExecuted: 1,
+    consensusReached: null,
+    totalTokens: { input: 50, output: 100 },
+    totalLLMCalls: 3,
+    modelsUsed: ["a/model-1", "a/model-2"],
+  };
+
+  const mockScores: ModelScore[] = [
+    {
+      modelId: "a/model-1",
+      dimensions: {
+        JUDGMENT: { mu: 800, sigma: 100 },
+        ANALYSIS: { mu: 750, sigma: 100 },
+        REASONING: { mu: 700, sigma: 100 },
+        SELF_CONSISTENCY: { mu: 650, sigma: 100 },
+      },
+      overall: 750,
+    },
+    {
+      modelId: "a/model-2",
+      dimensions: {
+        JUDGMENT: { mu: 600, sigma: 100 },
+        ANALYSIS: { mu: 600, sigma: 100 },
+        REASONING: { mu: 600, sigma: 100 },
+        SELF_CONSISTENCY: { mu: 600, sigma: 100 },
+      },
+      overall: 600,
+    },
+  ];
+
+  const mockPlan: import("./types").EnsemblePlan = {
+    models: [{ modelId: "a/model-1" }, { modelId: "a/model-2" }],
+    strategy: "composite",
+    estimatedCost: 0.01,
+    reason: "test",
+  };
+
+  const mockPlanWithRoles: import("./types").EnsemblePlan = {
+    models: [
+      { modelId: "a/model-1", role: "worker" },
+      { modelId: "a/model-2", role: "leader" },
+    ],
+    strategy: "composite",
+    estimatedCost: 0.01,
+    reason: "test",
+  };
+
+  const mockChat: import("./types").ChatFn = mock(async () => ({
+    content: "chat response",
+    inputTokens: 10,
+    outputTokens: 20,
+  }));
+
+  function makeDeliberateFn() {
+    const calls: Array<{
+      team: TeamComposition;
+      input: DeliberateInput;
+      config?: EngineConfig;
+    }> = [];
+    const fn = mock(async (
+      team: TeamComposition,
+      input: DeliberateInput,
+      _deps: EngineDeps,
+      config?: EngineConfig,
+    ) => {
+      calls.push({ team, input, config });
+      return mockDeliberateOutput;
+    });
+    return { fn, calls };
+  }
+
+  it("should build team from explicit roles when plan has roles", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol(undefined, 1, fn);
+
+    await protocol.deliberate("test task", mockPlanWithRoles, mockScores, mockChat);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.team.leader.model).toBe("a/model-2");
+    expect(calls[0]!.team.workers[0]!.model).toBe("a/model-1");
+  });
+
+  it("should auto-select leader when plan has no roles", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol(undefined, 1, fn);
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat);
+
+    expect(calls).toHaveLength(1);
+    // Leader is auto-selected based on JUDGMENT composite (Thompson sampling)
+    expect(calls[0]!.team.leader.model).toBeDefined();
+    expect(calls[0]!.team.workers.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("should enforce min 3 rounds for debate protocol", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol(undefined, 1, fn, undefined, "debate");
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.config!.maxRounds).toBeGreaterThanOrEqual(3);
+  });
+
+  it("should use override maxRounds when larger than 3 for debate", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol(undefined, 1, fn, undefined, "debate");
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat, {
+      maxRounds: 5,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.config!.maxRounds).toBe(5);
+  });
+
+  it("should pass leaderContributes override to config", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol(undefined, 1, fn);
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat, {
+      leaderContributes: true,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.config!.leaderContributes).toBe(true);
+  });
+
+  it("should throw when plan.models is empty", async () => {
+    const { fn } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol(undefined, 1, fn);
+
+    const emptyPlan: import("./types").EnsemblePlan = {
+      models: [],
+      strategy: "composite",
+      estimatedCost: 0,
+      reason: "empty",
+    };
+
+    await expect(
+      protocol.deliberate("test task", emptyPlan, mockScores, mockChat),
+    ).rejects.toThrow("plan.models must not be empty");
+  });
+});

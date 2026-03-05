@@ -56,12 +56,22 @@ export interface Selector {
  * Deliberation protocol — coordinates multiple models to produce a final result.
  * scores parameter: role-based protocol uses it for role assignment.
  */
+export interface DeliberationOverrides {
+  readonly protocol?: "diverge-synth" | "debate";
+  readonly maxRounds?: number;
+  readonly consensus?: "leader_decides";
+  readonly leaderContributes?: boolean;
+  readonly workerInstructions?: string;
+  readonly leaderInstructions?: string;
+}
+
 export interface DeliberationProtocol {
   deliberate(
     task: string,
     plan: EnsemblePlan,
     scores: ModelScore[],
     chat: ChatFn,
+    overrides?: DeliberationOverrides,
   ): Promise<DeliberationResult>;
 }
 
