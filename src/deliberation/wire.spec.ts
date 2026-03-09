@@ -321,7 +321,7 @@ describe("createDeliberateFn", () => {
     expect(typeof engineDeps.chat).toBe("function");
     expect(typeof engineDeps.buildWorkerMessages).toBe("function");
     expect(typeof engineDeps.buildLeaderMessages).toBe("function");
-    expect(config).toEqual({ maxRounds: 2, consensus: "leader_decides" });
+    expect(config).toMatchObject({ maxRounds: 2, consensus: "leader_decides", validateStructure: true });
   });
 
   it("should return deliberation output", async () => {

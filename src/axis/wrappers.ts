@@ -24,6 +24,7 @@ import {
   updateRating as btUpdateRating,
   getRating as btGetRating,
   setRating as btSetRating,
+  MU_FLOOR_RATIO,
 } from "../evaluation/bt-updater";
 import type { PairwiseOutcome } from "../evaluation/types";
 import type { ChatMessage } from "../llm/types";
@@ -139,7 +140,19 @@ export class BtScoringSystem implements ScoringSystem {
 
     const VALID_OUTCOMES: string[] = ["A>>B", "A>B", "A=B", "B>A", "B>>A"];
     const registry = this.registry;
-    const ratings = extractRatingsMap(registry.getAll());
+    const models = registry.getAll();
+    const ratings = extractRatingsMap(models);
+
+    // Compute bootstrap μ floors: for each model×dim, floor = bootstrap_μ × MU_FLOOR_RATIO.
+    // Bootstrap μ is the original μ when comparisons === 0, or the current μ as fallback.
+    const bootstrapFloors = new Map<string, Map<string, number>>();
+    for (const model of models) {
+      const dimFloors = new Map<string, number>();
+      for (const [dim, rating] of Object.entries(model.capabilities)) {
+        dimFloors.set(dim, rating.mu * MU_FLOOR_RATIO);
+      }
+      bootstrapFloors.set(model.id, dimFloors);
+    }
 
     for (const r of results) {
       if (!VALID_OUTCOMES.includes(r.outcome)) continue;
@@ -147,7 +160,9 @@ export class BtScoringSystem implements ScoringSystem {
       const dim = r.dimension as CapabilityDimension;
       const rA = btGetRating(ratings, r.modelAId, dim);
       const rB = btGetRating(ratings, r.modelBId, dim);
-      const { updatedA, updatedB } = btUpdateRating(rA, rB, r.outcome as PairwiseOutcome);
+      const floorA = bootstrapFloors.get(r.modelAId)?.get(dim) ?? 0;
+      const floorB = bootstrapFloors.get(r.modelBId)?.get(dim) ?? 0;
+      const { updatedA, updatedB } = btUpdateRating(rA, rB, r.outcome as PairwiseOutcome, floorA, floorB);
       btSetRating(ratings, r.modelAId, dim, updatedA);
       btSetRating(ratings, r.modelBId, dim, updatedB);
     }
@@ -491,6 +506,7 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
       task,
       ...(overrides?.workerInstructions ? { workerInstructions: overrides.workerInstructions } : {}),
       ...(overrides?.leaderInstructions ? { leaderInstructions: overrides.leaderInstructions } : {}),
+      ...(overrides?.taskNature ? { taskNature: overrides.taskNature } : {}),
     };
 
     const engineChat = async (

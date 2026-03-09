@@ -4,10 +4,8 @@ import type { PyreezMcpServerConfig } from "./server";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { ModelRegistry } from "../model/registry";
-import type { Reporter } from "../report/types";
 import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
-import type { CalibrationResult } from "../model/calibration";
 import type { PyreezEngine } from "../axis/engine";
 import type { SlotTrace, DeliberationResult } from "../axis/types";
 
@@ -62,15 +60,6 @@ function stubRegistry(
     }),
     ...overrides,
   } as unknown as ModelRegistry;
-}
-
-function stubReporter(
-  overrides: Partial<Reporter> = {},
-): Reporter {
-  return {
-    record: mock(() => Promise.resolve()),
-    ...overrides,
-  } as unknown as Reporter;
 }
 
 const DEFAULT_TRACE_RESULT: SlotTrace = {
@@ -129,7 +118,6 @@ function validConfig(
   return {
     mcpServer: stubMcpServer(),
     registry: stubRegistry(),
-    reporter: stubReporter(),
     engine: stubEngine(),
     ...overrides,
   };
@@ -141,21 +129,18 @@ describe("PyreezMcpServer", () => {
   // === Constructor ===
 
   describe("constructor", () => {
-    it("should create instance and register 6 tools when config is valid", () => {
+    it("should create instance and register 3 tools when config is valid", () => {
       const mcp = stubMcpServer();
       const server = new PyreezMcpServer(validConfig({ mcpServer: mcp }));
 
       expect(server).toBeInstanceOf(PyreezMcpServer);
-      expect(mcp.registerTool).toHaveBeenCalledTimes(6);
+      expect(mcp.registerTool).toHaveBeenCalledTimes(3);
 
       const calls = (mcp.registerTool as ReturnType<typeof mock>).mock.calls;
       const toolNames = calls.map((c: unknown[]) => c[0]);
       expect(toolNames).toContain("pyreez_route");
       expect(toolNames).toContain("pyreez_scores");
-      expect(toolNames).toContain("pyreez_report");
       expect(toolNames).toContain("pyreez_deliberate");
-      expect(toolNames).toContain("pyreez_calibrate");
-      expect(toolNames).toContain("pyreez_feedback");
     });
 
     it('should throw "mcpServer is required" when mcpServer is missing', () => {
@@ -176,16 +161,6 @@ describe("PyreezMcpServer", () => {
             registry: undefined as unknown as ModelRegistry,
           }),
       ).toThrow("registry is required");
-    });
-
-    it('should throw "reporter is required" when reporter is missing', () => {
-      expect(
-        () =>
-          new PyreezMcpServer({
-            ...validConfig(),
-            reporter: undefined as unknown as Reporter,
-          }),
-      ).toThrow("reporter is required");
     });
 
     it('should throw "engine is required" when engine is missing', () => {
@@ -690,304 +665,6 @@ describe("PyreezMcpServer", () => {
     });
   });
 
-  // === pyreez_report ===
-
-  describe("pyreez_report", () => {
-    it("should record call and return { recorded: true }", async () => {
-      const reporter = stubReporter();
-      const server = new PyreezMcpServer(validConfig({ reporter }));
-
-      const result = await server.handleReport({
-        model: "openai/gpt-4.1",
-        task_type: "CODE_WRITE",
-        quality: 8,
-        latency_ms: 1200,
-        tokens: { input: 100, output: 200 },
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.recorded).toBe(true);
-      expect(reporter.record).toHaveBeenCalledTimes(1);
-
-      const recordCall = (reporter.record as ReturnType<typeof mock>).mock
-        .calls[0]![0];
-      expect(recordCall.model).toBe("openai/gpt-4.1");
-      expect(recordCall.taskType).toBe("CODE_WRITE");
-      expect(recordCall.quality).toBe(8);
-      expect(recordCall.latencyMs).toBe(1200);
-      expect(recordCall.tokens).toEqual({ input: 100, output: 200 });
-    });
-
-    it("should return error when required fields missing", async () => {
-      const server = new PyreezMcpServer(validConfig());
-
-      const result = await server.handleReport({
-        model: "",
-        task_type: "CODE_WRITE",
-        quality: 8,
-        latency_ms: 1200,
-        tokens: { input: 100, output: 200 },
-      });
-
-      expect(result.isError).toBe(true);
-    });
-
-    it("should accept quality=0 as a valid value in report record", async () => {
-      // Arrange — quality=0 is a valid score (worst but valid)
-      const reporter = stubReporter();
-      const server = new PyreezMcpServer(validConfig({ reporter }));
-
-      // Act
-      const result = await server.handleReport({
-        model: "openai/gpt-4.1",
-        task_type: "CODE_WRITE",
-        quality: 0,
-        latency_ms: 500,
-        tokens: { input: 50, output: 100 },
-      });
-
-      // Assert — should succeed, not reject quality=0
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.recorded).toBe(true);
-      const recordCall = (reporter.record as ReturnType<typeof mock>).mock
-        .calls[0]![0];
-      expect(recordCall.quality).toBe(0);
-    });
-
-    it("should return error when reporter.record() throws", async () => {
-      const reporter = stubReporter({
-        record: mock(() =>
-          Promise.reject(new Error("storage full")),
-        ) as any,
-      });
-      const server = new PyreezMcpServer(validConfig({ reporter }));
-
-      const result = await server.handleReport({
-        model: "openai/gpt-4.1",
-        task_type: "CODE_WRITE",
-        quality: 8,
-        latency_ms: 1200,
-        tokens: { input: 100, output: 200 },
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain(
-        "storage full",
-      );
-    });
-
-    it("should record call with context metrics when context provided", async () => {
-      const reporter = stubReporter();
-      const server = new PyreezMcpServer(validConfig({ reporter }));
-
-      const result = await server.handleReport({
-        model: "openai/gpt-4.1",
-        task_type: "CODE_WRITE",
-        quality: 8,
-        latency_ms: 1200,
-        tokens: { input: 100, output: 200 },
-        context: { window_size: 128000, utilization: 0.45, estimated_waste: 0.1 },
-      });
-
-      expect(result.isError).toBeUndefined();
-      const recordCall = (reporter.record as ReturnType<typeof mock>).mock
-        .calls[0]![0];
-      expect(recordCall.context).toEqual({
-        windowSize: 128000,
-        utilization: 0.45,
-        estimatedWaste: 0.1,
-      });
-    });
-
-    it("should record call with team metadata when team_id and leader_id provided", async () => {
-      const reporter = stubReporter();
-      const server = new PyreezMcpServer(validConfig({ reporter }));
-
-      const result = await server.handleReport({
-        model: "openai/gpt-4.1",
-        task_type: "CODE_WRITE",
-        quality: 8,
-        latency_ms: 1200,
-        tokens: { input: 100, output: 200 },
-        team_id: "team-alpha",
-        leader_id: "openai/gpt-4.1",
-      });
-
-      expect(result.isError).toBeUndefined();
-      const recordCall = (reporter.record as ReturnType<typeof mock>).mock
-        .calls[0]![0];
-      expect(recordCall.teamId).toBe("team-alpha");
-      expect(recordCall.leaderId).toBe("openai/gpt-4.1");
-    });
-
-    it("should return summary when action is summary", async () => {
-      const summaryData = {
-        totalRecords: 5,
-        models: {
-          "openai/gpt-4.1": {
-            count: 3,
-            avgQuality: 8.5,
-            avgLatencyMs: 1000,
-            avgTokens: { input: 100, output: 200 },
-            avgContextUtilization: 0.4,
-          },
-        },
-      };
-      const summaryFn = mock(() => Promise.resolve(summaryData));
-      const server = new PyreezMcpServer(validConfig({ summaryFn }));
-
-      const result = await server.handleReport({ action: "summary" });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.totalRecords).toBe(5);
-      expect(parsed.models["openai/gpt-4.1"].count).toBe(3);
-      expect(summaryFn).toHaveBeenCalledTimes(1);
-    });
-
-    it("should return error when action is summary but summaryFn not configured", async () => {
-      const server = new PyreezMcpServer(validConfig());
-
-      const result = await server.handleReport({ action: "summary" });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain(
-        "summary not available",
-      );
-    });
-
-    it("should return error when summaryFn throws", async () => {
-      const summaryFn = mock(() =>
-        Promise.reject(new Error("read failed")),
-      );
-      const server = new PyreezMcpServer(validConfig({ summaryFn }));
-
-      const result = await server.handleReport({ action: "summary" });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain(
-        "read failed",
-      );
-    });
-
-    it("should record with partial optional fields mapping correctly", async () => {
-      const reporter = stubReporter();
-      const server = new PyreezMcpServer(validConfig({ reporter }));
-
-      const result = await server.handleReport({
-        model: "openai/gpt-4.1",
-        task_type: "CODE_WRITE",
-        quality: 7,
-        latency_ms: 800,
-        tokens: { input: 50, output: 100 },
-        context: { window_size: 128000, utilization: 0.3 },
-      });
-
-      expect(result.isError).toBeUndefined();
-      const recordCall = (reporter.record as ReturnType<typeof mock>).mock
-        .calls[0]![0];
-      expect(recordCall.context).toEqual({
-        windowSize: 128000,
-        utilization: 0.3,
-      });
-      expect(recordCall.teamId).toBeUndefined();
-      expect(recordCall.leaderId).toBeUndefined();
-    });
-
-    // -- query_deliberation --
-
-    it("should query deliberation store and return results", async () => {
-      const mockRecords = [
-        {
-          id: "d1",
-          task: "Write tests",
-          timestamp: 1700000000000,
-          consensusReached: true,
-          roundsExecuted: 2,
-          result: "code here",
-          modelsUsed: ["openai/gpt-4.1"],
-          totalLLMCalls: 5,
-        },
-      ];
-      const store = {
-        save: mock(() => Promise.resolve()),
-        query: mock(() => Promise.resolve(mockRecords)),
-        getById: mock(() => Promise.resolve(undefined)),
-      };
-      const server = new PyreezMcpServer(
-        validConfig({ deliberationStore: store }),
-      );
-
-      const result = await server.handleReport({
-        action: "query_deliberation",
-        query_task: "tests",
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(1);
-      expect(parsed[0].id).toBe("d1");
-      expect(store.query).toHaveBeenCalledTimes(1);
-    });
-
-    it("should return error when store is not configured for query_deliberation", async () => {
-      const server = new PyreezMcpServer(validConfig());
-
-      const result = await server.handleReport({
-        action: "query_deliberation",
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain("deliberation store");
-    });
-
-    it("should return all records when query_deliberation has no filters", async () => {
-      const mockRecords = [
-        {
-          id: "d1",
-          task: "A",
-          timestamp: 1,
-          consensusReached: true,
-          roundsExecuted: 1,
-          result: "r",
-          modelsUsed: [],
-          totalLLMCalls: 1,
-        },
-        {
-          id: "d2",
-          task: "B",
-          timestamp: 2,
-          consensusReached: false,
-          roundsExecuted: 1,
-          result: "r",
-          modelsUsed: [],
-          totalLLMCalls: 1,
-        },
-      ];
-      const store = {
-        save: mock(() => Promise.resolve()),
-        query: mock(() => Promise.resolve(mockRecords)),
-        getById: mock(() => Promise.resolve(undefined)),
-      };
-      const server = new PyreezMcpServer(
-        validConfig({ deliberationStore: store }),
-      );
-
-      const result = await server.handleReport({
-        action: "query_deliberation",
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(2);
-      // Verify query was called with empty filters (no task/model)
-      const queryArg = (store.query as ReturnType<typeof mock>).mock.calls[0]![0];
-      expect(queryArg.task).toBeUndefined();
-    });
-  });
-
   // === pyreez_deliberate ===
 
   describe("pyreez_deliberate", () => {
@@ -1452,203 +1129,6 @@ describe("PyreezMcpServer", () => {
       const text = (result.content[0] as { text: string }).text;
       expect(text).toContain("engine down");
       expect(text).not.toContain("log write failed");
-    });
-  });
-
-  // === pyreez_calibrate ===
-
-  describe("pyreez_calibrate", () => {
-    const CALIBRATION_RESULT: CalibrationResult = {
-      comparisonsProcessed: 5,
-      anomalies: [],
-      converged: [{ modelId: "openai/gpt-4.1", dimension: "REASONING", sigma: 80 }],
-      stale: [],
-    };
-
-    function stubCalibrateFn(
-      result?: CalibrationResult,
-      error?: unknown,
-    ): () => Promise<CalibrationResult> {
-      if (error !== undefined) {
-        return mock(() => Promise.reject(error)) as any;
-      }
-      return mock(() => Promise.resolve(result ?? CALIBRATION_RESULT)) as any;
-    }
-
-    it("should return summarized CalibrationResult when calibrateFn succeeds", async () => {
-      // Arrange
-      const calibrateFn = stubCalibrateFn();
-      const server = new PyreezMcpServer(validConfig({ calibrateFn }));
-
-      // Act
-      const result = await server.handleCalibrate();
-
-      // Assert
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.comparisonsProcessed).toBe(5);
-      expect(parsed.convergedCount).toBe(1);
-      expect(parsed.convergedSample).toHaveLength(1);
-      expect(parsed.convergedSample[0].modelId).toBe("openai/gpt-4.1");
-    });
-
-    it("should include summary fields with counts and samples in response", async () => {
-      // Arrange
-      const full: CalibrationResult = {
-        comparisonsProcessed: 3,
-        anomalies: [{ modelId: "m1", dimension: "REASONING", muDelta: 150 }],
-        converged: [],
-        stale: [{ modelId: "m2", dimension: "CODE_GENERATION", sigma: 400 }],
-      };
-      const server = new PyreezMcpServer(validConfig({ calibrateFn: stubCalibrateFn(full) }));
-
-      // Act
-      const result = await server.handleCalibrate();
-
-      // Assert
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.anomalies).toHaveLength(1);
-      expect(parsed.staleCount).toBe(1);
-      expect(parsed.staleSample).toHaveLength(1);
-      expect(parsed.staleSample[0].modelId).toBe("m2");
-    });
-
-    it("should return error when calibrateFn is not configured", async () => {
-      // Arrange — no calibrateFn in config
-      const server = new PyreezMcpServer(validConfig());
-
-      // Act
-      const result = await server.handleCalibrate();
-
-      // Assert
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain("calibration not available");
-    });
-
-    it("should return error with Error.message when calibrateFn throws Error", async () => {
-      // Arrange
-      const server = new PyreezMcpServer(
-        validConfig({ calibrateFn: stubCalibrateFn(undefined, new Error("persist failed")) }),
-      );
-
-      // Act
-      const result = await server.handleCalibrate();
-
-      // Assert
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain("persist failed");
-    });
-
-    it("should return valid JSON when comparisonsProcessed is 0", async () => {
-      // Arrange
-      const empty: CalibrationResult = { comparisonsProcessed: 0, anomalies: [], converged: [], stale: [] };
-      const server = new PyreezMcpServer(validConfig({ calibrateFn: stubCalibrateFn(empty) }));
-
-      // Act
-      const result = await server.handleCalibrate();
-
-      // Assert
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.comparisonsProcessed).toBe(0);
-    });
-  });
-
-  // === pyreez_feedback ===
-
-  describe("pyreez_feedback", () => {
-    function stubFeedbackStore() {
-      return {
-        record: mock(() => Promise.resolve()),
-        getAll: mock(() => Promise.resolve([])),
-        query: mock(() => Promise.resolve([])),
-      };
-    }
-
-    it("should record boolean feedback and return feedbackId", async () => {
-      const feedbackStore = stubFeedbackStore();
-      const server = new PyreezMcpServer(validConfig({ feedbackStore: feedbackStore as any }));
-
-      const result = await server.handleFeedback({
-        session_id: "sess-1",
-        model: "openai/gpt-4.1",
-        task_type: "IMPLEMENT_FEATURE",
-        type: "boolean",
-        value: true,
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.recorded).toBe(true);
-      expect(parsed.feedbackId).toBeDefined();
-      expect(feedbackStore.record).toHaveBeenCalledTimes(1);
-    });
-
-    it("should record float feedback", async () => {
-      const feedbackStore = stubFeedbackStore();
-      const server = new PyreezMcpServer(validConfig({ feedbackStore: feedbackStore as any }));
-
-      const result = await server.handleFeedback({
-        type: "float",
-        value: 0.85,
-        model: "openai/gpt-4.1",
-        task_type: "CODE_REVIEW",
-      });
-
-      expect(result.isError).toBeUndefined();
-      expect(feedbackStore.record).toHaveBeenCalledTimes(1);
-    });
-
-    it("should record comment feedback without triggering BT calibration", async () => {
-      const feedbackStore = stubFeedbackStore();
-      const reporter = stubReporter();
-      const server = new PyreezMcpServer(validConfig({
-        feedbackStore: feedbackStore as any,
-        reporter,
-      }));
-
-      await server.handleFeedback({
-        type: "comment",
-        value: "great response",
-        model: "openai/gpt-4.1",
-        task_type: "EXPLAIN",
-      });
-
-      // comment type should not trigger reporter.record
-      expect(reporter.record).not.toHaveBeenCalled();
-    });
-
-    it("should convert boolean feedback to quality signal via reporter", async () => {
-      const feedbackStore = stubFeedbackStore();
-      const reporter = stubReporter();
-      const server = new PyreezMcpServer(validConfig({
-        feedbackStore: feedbackStore as any,
-        reporter,
-      }));
-
-      await server.handleFeedback({
-        type: "boolean",
-        value: false,
-        model: "openai/gpt-4.1",
-        task_type: "IMPLEMENT_FEATURE",
-      });
-
-      expect(reporter.record).toHaveBeenCalledTimes(1);
-      const call = (reporter.record as ReturnType<typeof mock>).mock.calls[0]![0];
-      expect(call.quality).toBe(2); // false → quality 2
-      expect(call.model).toBe("openai/gpt-4.1");
-    });
-
-    it("should return error when feedback store is not available", async () => {
-      const server = new PyreezMcpServer(validConfig());
-
-      const result = await server.handleFeedback({
-        type: "boolean",
-        value: true,
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain("feedback store not available");
     });
   });
 

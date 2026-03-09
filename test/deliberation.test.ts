@@ -107,7 +107,7 @@ function fixtureRegistry() {
 function detectRole(messages: ChatMessage[]): "worker" | "leader" {
   const system = messages.find((m) => m.role === "system");
   if (!system?.content) return "worker";
-  if (system.content.includes("verifier-synthesizer") || system.content.includes("moderator and verifier")) return "leader";
+  if (system.content.includes("creative synthesizer") || system.content.includes("moderator and verifier")) return "leader";
   return "worker";
 }
 
@@ -240,16 +240,17 @@ describe("Deliberation E2E", () => {
       leaderInstructions: "Prioritize security",
     });
 
-    // Assert — worker instructions appear in worker calls (with posture suffix appended),
-    // leader instructions in leader call (with verifier suffix appended)
+    // Assert — worker instructions appear in worker calls (with self-doubt suffix appended),
+    // leader instructions in leader call (with synthesizer suffix appended).
+    // Note: structural validation may retry the leader call (up to 2 total).
     const workerMsgs = capturedSystemMessages.filter(
-      (msg) => msg.includes("Use TypeScript strictly") && msg.includes("observed fact"),
+      (msg) => msg.includes("Use TypeScript strictly") && msg.includes("Self-Doubt"),
     );
     const leaderMsgs = capturedSystemMessages.filter(
-      (msg) => msg.includes("Prioritize security") && msg.includes("Verify independently"),
+      (msg) => msg.includes("Prioritize security") && msg.includes("Adopt strengths"),
     );
     expect(workerMsgs.length).toBeGreaterThanOrEqual(1);
-    expect(leaderMsgs.length).toBe(1);
+    expect(leaderMsgs.length).toBeGreaterThanOrEqual(1);
   });
 
   // ----------------------------------------------------------

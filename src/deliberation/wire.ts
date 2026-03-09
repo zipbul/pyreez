@@ -16,9 +16,12 @@ import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput } from "./types";
 import type { ChatResult, EngineDeps, EngineConfig, RetryDeps } from "./engine";
 import type { DeliberationStore } from "./store-types";
+import type { ScoringSystem } from "../axis/interfaces";
+import type { PollJudgeConfig } from "./poll-judge";
 import { composeTeam, selectDiverseModels } from "./team-composer";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
+import { evaluateWithPoll } from "./poll-judge";
 import {
   buildWorkerMessages,
   buildLeaderMessages,
@@ -38,6 +41,8 @@ export interface WireDeps {
   };
   readonly chat: (model: string, messages: ChatMessage[]) => Promise<ChatResult>;
   readonly store?: DeliberationStore;
+  readonly pollJudge?: PollJudgeConfig;
+  readonly scoring?: ScoringSystem;
 }
 
 // -- Think Tag Stripping --
@@ -216,8 +221,9 @@ export function createDeliberateFn(
       // Auto compose from available models, capped to prevent cost explosion.
       // selectDiverseModels ensures provider diversity (round-robin across providers).
       // Team-composer handles leader selection by JUDGMENT score internally.
+      // Artifact tasks: 2 workers + 1 leader = 3. Critique: 4 workers + 1 leader = 5.
       const available = deps.registry.getAvailable();
-      const MAX_AUTO_TEAM = 5;
+      const MAX_AUTO_TEAM = input.taskNature === "artifact" ? 3 : 5;
       const selected = selectDiverseModels(available, MAX_AUTO_TEAM);
       const modelIds = selected.map((m) => m.id);
       team = composeTeam(
@@ -237,18 +243,16 @@ export function createDeliberateFn(
       buildDebateWorkerMessages,
     };
 
-    // 4. Build engine config
-    const hasConfig = input.maxRounds != null || input.consensus != null || input.leaderContributes != null || input.protocol != null;
+    // 4. Build engine config (always set validateStructure: true for quality gate)
     const effectiveMaxRounds = input.maxRounds ?? 1;
     const isDebate = input.protocol === "debate";
-    const config: EngineConfig | undefined = hasConfig
-      ? {
-          maxRounds: isDebate ? Math.max(effectiveMaxRounds, 3) : effectiveMaxRounds,
-          consensus: input.consensus,
-          leaderContributes: input.leaderContributes,
-          protocol: input.protocol,
-        }
-      : undefined;
+    const config: EngineConfig = {
+      maxRounds: isDebate ? Math.max(effectiveMaxRounds, 3) : effectiveMaxRounds,
+      consensus: input.consensus,
+      leaderContributes: input.leaderContributes,
+      protocol: input.protocol,
+      validateStructure: true,
+    };
 
     // 5. Build retryDeps for automatic team recomposition on failure
     const retryDeps: RetryDeps = {
@@ -257,9 +261,30 @@ export function createDeliberateFn(
     };
 
     // 6. Run deliberation
-    const result = await deliberate(team, input, engineDeps, config, retryDeps);
+    let result = await deliberate(team, input, engineDeps, config, retryDeps);
 
-    // 7. Auto-save to store (best-effort, errors are swallowed)
+    // 7. PoLL quality evaluation + BT update (best-effort)
+    if (deps.pollJudge && deps.scoring && result.rounds) {
+      try {
+        const lastRound = result.rounds[result.rounds.length - 1];
+        if (lastRound?.responses && lastRound.responses.length >= 2) {
+          const teamIds = new Set(result.modelsUsed as string[]);
+          const pollResult = await evaluateWithPoll(
+            input.task, lastRound.responses, teamIds, deps.pollJudge,
+          );
+          if (pollResult.pairwise.length > 0) {
+            await deps.scoring.update([...pollResult.pairwise]);
+          }
+          if (pollResult.workerScores.length > 0) {
+            result = { ...result, pollScores: pollResult.workerScores };
+          }
+        }
+      } catch {
+        // best-effort — do not fail deliberation
+      }
+    }
+
+    // 8. Auto-save to store (best-effort, errors are swallowed)
     if (deps.store) {
       try {
         await deps.store.save({

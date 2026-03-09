@@ -29,6 +29,9 @@ export const SIGMA_MIN = 50;
 /** Anomaly threshold — flag if mu changes more than this in one update. */
 export const ANOMALY_THRESHOLD = 100;
 
+/** Floor ratio: μ cannot drop below bootstrap_μ × MU_FLOOR_RATIO. Prevents collapse. */
+export const MU_FLOOR_RATIO = 0.7;
+
 // -- Core Update --
 
 /**
@@ -63,6 +66,8 @@ export function updateRating(
   ratingA: DimensionRating,
   ratingB: DimensionRating,
   outcome: PairwiseOutcome,
+  floorA?: number,
+  floorB?: number,
 ): { updatedA: DimensionRating; updatedB: DimensionRating; anomaly: boolean } {
   const signal = outcomeToSignal(outcome);
   const expected = btExpected(ratingA.mu, ratingB.mu);
@@ -82,10 +87,11 @@ export function updateRating(
   const k = (scaledK(ratingA.sigma) + scaledK(ratingB.sigma)) / 2;
 
   // Symmetric clamp: A's actual delta determines B's delta (preserves zero-sum at boundaries)
+  // Floor anchor: μ cannot drop below floor (bootstrap_μ × MU_FLOOR_RATIO)
   const rawMuA = ratingA.mu + k * surprise;
-  const newMuA = Math.max(0, Math.min(1000, rawMuA));
+  const newMuA = Math.max(floorA ?? 0, Math.min(1000, rawMuA));
   const actualDeltaA = newMuA - ratingA.mu;
-  const newMuB = Math.max(0, Math.min(1000, ratingB.mu - actualDeltaA));
+  const newMuB = Math.max(floorB ?? 0, Math.min(1000, ratingB.mu - actualDeltaA));
 
   // Sigma decay: surprising results preserve more uncertainty
   const absSurprise = Math.abs(surprise);

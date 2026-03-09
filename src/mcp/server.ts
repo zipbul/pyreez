@@ -1,7 +1,7 @@
 /**
- * PyreezMcpServer — MCP server exposing 6 infrastructure tools.
+ * PyreezMcpServer — MCP server exposing 3 infrastructure tools.
  *
- * Tools: pyreez_route, pyreez_scores, pyreez_report, pyreez_deliberate, pyreez_calibrate, pyreez_feedback
+ * Tools: pyreez_route, pyreez_scores, pyreez_deliberate
  * Architecture: pyreez = Infrastructure layer, Host = Orchestrator.
  *
  * Classification: host provides domain (required), task_type and complexity are auto-inferred if omitted.
@@ -13,15 +13,13 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import type { ModelRegistry } from "../model/registry";
 import type { ModelInfo } from "../model/types";
-import type { Reporter, CallRecord } from "../report/types";
 import type { RunLogger } from "../report/run-logger";
 import type { BudgetConfig } from "../axis/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 import type { DeliberationStore } from "../deliberation/store-types";
-import type { CalibrationResult } from "../model/calibration";
 import type { PyreezEngine } from "../axis/engine";
 import type { TaskClassification } from "../axis/types";
-import type { FileFeedbackStore } from "../report/feedback-store";
+import { resolveTaskNature } from "../deliberation/task-nature";
 
 /** Domain → default task_type mapping. Used when host omits task_type. */
 const DOMAIN_DEFAULTS: Record<string, string> = {
@@ -49,14 +47,10 @@ function inferComplexity(task: string): "simple" | "moderate" | "complex" {
 export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
   registry: ModelRegistry;
-  reporter: Reporter;
-  summaryFn?: () => Promise<import("../report/types").ReportSummary>;
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
   deliberationStore?: DeliberationStore;
   runLogger?: RunLogger;
   engine: PyreezEngine;
-  calibrateFn?: () => Promise<CalibrationResult>;
-  feedbackStore?: FileFeedbackStore;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -79,14 +73,10 @@ function sanitizeError(error: unknown): string {
 export class PyreezMcpServer {
   private readonly mcpServer: McpServer;
   private readonly registry: ModelRegistry;
-  private readonly reporter: Reporter;
-  private readonly summaryFn?: PyreezMcpServerConfig["summaryFn"];
   private readonly deliberateFn?: PyreezMcpServerConfig["deliberateFn"];
   private readonly deliberationStore?: DeliberationStore;
   private readonly runLogger?: RunLogger;
   private readonly engine: PyreezEngine;
-  private readonly calibrateFn?: () => Promise<CalibrationResult>;
-  private readonly feedbackStore?: FileFeedbackStore;
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -95,23 +85,16 @@ export class PyreezMcpServer {
     if (!config.registry) {
       throw new Error("registry is required");
     }
-    if (!config.reporter) {
-      throw new Error("reporter is required");
-    }
     if (!config.engine) {
       throw new Error("engine is required");
     }
 
     this.mcpServer = config.mcpServer;
     this.registry = config.registry;
-    this.reporter = config.reporter;
-    this.summaryFn = config.summaryFn;
     this.deliberateFn = config.deliberateFn;
     this.deliberationStore = config.deliberationStore;
     this.runLogger = config.runLogger;
     this.engine = config.engine;
-    this.calibrateFn = config.calibrateFn;
-    this.feedbackStore = config.feedbackStore;
 
     this.registerTools();
   }
@@ -212,81 +195,6 @@ export class PyreezMcpServer {
     );
 
     this.mcpServer.registerTool(
-      "pyreez_report",
-      {
-        title: "Pyreez Report",
-        description:
-          'Record an LLM call result for quality tracking, or retrieve summary (action="summary")',
-        inputSchema: z.object({
-          action: z
-            .enum(["record", "summary", "query_deliberation"])
-            .optional()
-            .describe('Action: "record" (default), "summary", or "query_deliberation"'),
-          query_task: z
-            .string()
-            .optional()
-            .describe("Filter deliberations by task (partial match)"),
-          query_model: z
-            .string()
-            .optional()
-            .describe("Filter deliberations by model"),
-          query_consensus: z
-            .boolean()
-            .optional()
-            .describe("Filter deliberations by consensus reached"),
-          query_limit: z
-            .number()
-            .optional()
-            .describe("Limit number of deliberation results"),
-          model: z.string().max(200).optional().describe("Model ID used"),
-          task_type: z
-            .string()
-            .optional()
-            .describe("Task type from classification"),
-          quality: z
-            .number()
-            .optional()
-            .describe("Quality score (0-10)"),
-          latency_ms: z
-            .number()
-            .optional()
-            .describe("Latency in milliseconds"),
-          tokens: z
-            .object({
-              input: z.number().describe("Input token count"),
-              output: z.number().describe("Output token count"),
-            })
-            .optional()
-            .describe("Token usage"),
-          context: z
-            .object({
-              window_size: z.number().describe("Model context window size"),
-              utilization: z
-                .number()
-                .describe("Input tokens / window size (0.0-1.0)"),
-              estimated_waste: z
-                .number()
-                .optional()
-                .describe("Estimated unnecessary token ratio"),
-            })
-            .optional()
-            .describe("Context utilization metrics"),
-          team_id: z
-            .string()
-            .max(200)
-            .optional()
-            .describe("Team identifier for team-level evaluation"),
-          leader_id: z
-            .string()
-            .max(200)
-            .optional()
-            .describe("Team Leader model ID"),
-        }),
-      },
-      async (args) => this.handleReport(args),
-    );
-
-    this.mcpServer.registerTool(
       "pyreez_deliberate",
       {
         title: "Pyreez Deliberate",
@@ -353,6 +261,10 @@ export class PyreezMcpServer {
             .boolean()
             .optional()
             .describe("When true, the leader also responds independently in the diverge phase before synthesizing. Ensures the strongest model's unanchored opinion is captured."),
+          models: z
+            .array(z.string())
+            .optional()
+            .describe("Explicit model IDs to use. First N-1 are workers, last is leader. Bypasses auto team composition."),
           protocol: z
             .enum(["diverge-synth", "debate"])
             .optional()
@@ -370,47 +282,6 @@ export class PyreezMcpServer {
       async (args) => this.handleDeliberate(args),
     );
 
-    this.mcpServer.registerTool(
-      "pyreez_calibrate",
-      {
-        title: "Pyreez Calibrate",
-        description:
-          "Run a calibration cycle to update BT ratings from usage data and persist results",
-        inputSchema: z.object({}),
-      },
-      async () => this.handleCalibrate(),
-    );
-
-    this.mcpServer.registerTool(
-      "pyreez_feedback",
-      {
-        title: "Pyreez Feedback",
-        description:
-          "Record feedback for a routing/deliberation session. Supports boolean, float, comment, and demonstration feedback types.",
-        inputSchema: z.object({
-          session_id: z
-            .string()
-            .optional()
-            .describe("Session ID from pyreez_route or pyreez_deliberate response"),
-          model: z
-            .string()
-            .max(200)
-            .optional()
-            .describe("Model ID to provide feedback for"),
-          task_type: z
-            .string()
-            .optional()
-            .describe("Task type for this feedback"),
-          type: z
-            .enum(["boolean", "float", "comment", "demonstration"])
-            .describe("Feedback type: boolean (thumbs up/down), float (0.0-1.0 rating), comment (text), demonstration (corrected output)"),
-          value: z
-            .union([z.boolean(), z.number(), z.string()])
-            .describe("Feedback value: boolean for thumbs, number for rating, string for comment/demonstration"),
-        }),
-      },
-      async (args) => this.handleFeedback(args),
-    );
   }
 
   // --- Run Logging ---
@@ -577,96 +448,6 @@ export class PyreezMcpServer {
     });
   }
 
-  async handleReport(args: {
-    action?: string;
-    model?: string;
-    task_type?: string;
-    quality?: number;
-    latency_ms?: number;
-    tokens?: { input: number; output: number };
-    context?: {
-      window_size: number;
-      utilization: number;
-      estimated_waste?: number;
-    };
-    team_id?: string;
-    leader_id?: string;
-    query_task?: string;
-    query_model?: string;
-    query_consensus?: boolean;
-    query_limit?: number;
-  }): Promise<CallToolResult> {
-    return this.logRun("report", async () => {
-    const action = args.action ?? "record";
-
-    if (action === "query_deliberation") {
-      if (!this.deliberationStore) {
-        return this.errorResult("Error: deliberation store not available");
-      }
-      try {
-        const results = await this.deliberationStore.query({
-          task: args.query_task,
-          model: args.query_model,
-          consensusReached: args.query_consensus,
-          limit: args.query_limit,
-        });
-        return this.textResult(JSON.stringify(results, null, 2));
-      } catch (error) {
-        return this.errorResult(
-          `Error: ${sanitizeError(error)}`,
-        );
-      }
-    }
-
-    if (action === "summary") {
-      if (!this.summaryFn) {
-        return this.errorResult("Error: summary not available");
-      }
-      try {
-        const summary = await this.summaryFn();
-        return this.textResult(JSON.stringify(summary, null, 2));
-      } catch (error) {
-        return this.errorResult(
-          `Error: ${sanitizeError(error)}`,
-        );
-      }
-    }
-
-    if (!args.model || !args.task_type || args.quality == null) {
-      return this.errorResult(
-        "Error: model, task_type, and quality are required",
-      );
-    }
-
-    try {
-      // P-1: Clamp quality to [0, 10] range
-      const clampedQuality = Math.max(0, Math.min(10, args.quality));
-      const record: CallRecord = {
-        model: args.model,
-        taskType: args.task_type,
-        quality: clampedQuality,
-        latencyMs: args.latency_ms ?? 0,
-        tokens: args.tokens ?? { input: 0, output: 0 },
-        context: args.context
-          ? {
-              windowSize: args.context.window_size,
-              utilization: args.context.utilization,
-              estimatedWaste: args.context.estimated_waste,
-            }
-          : undefined,
-        teamId: args.team_id,
-        leaderId: args.leader_id,
-      };
-      await this.reporter.record(record);
-      return this.textResult(JSON.stringify({ recorded: true }));
-    } catch (error) {
-      return this.errorResult(
-        `Error: ${sanitizeError(error)}`,
-      );
-    }
-    });
-  }
-
   async handleDeliberate(args: {
     task: string;
     domain?: string;
@@ -679,6 +460,7 @@ export class PyreezMcpServer {
     max_rounds?: number;
     consensus?: string;
     leader_contributes?: boolean;
+    models?: string[];
     protocol?: string;
     quality_weight?: number;
     cost_weight?: number;
@@ -688,8 +470,8 @@ export class PyreezMcpServer {
       return this.errorResult("Error: task is required");
     }
 
-    // auto_route: use the 3-stage pipeline
-    if (args.auto_route) {
+    // Explicit models bypass auto_route — always use manual deliberateFn path
+    if (args.auto_route && !args.models?.length) {
       if (!args.domain) {
         return this.errorResult(
           "Error: domain is required when auto_route=true",
@@ -712,7 +494,8 @@ export class PyreezMcpServer {
         };
         // Build deliberation overrides from user params
         const validProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
-        const hasOverrides = validProtocol != null || args.max_rounds != null || args.consensus != null || args.leader_contributes != null || args.worker_instructions != null || args.leader_instructions != null;
+        const taskNature = resolveTaskNature(args.domain, taskType);
+        const hasOverrides = validProtocol != null || args.max_rounds != null || args.consensus != null || args.leader_contributes != null || args.worker_instructions != null || args.leader_instructions != null || taskNature != null;
         const deliberationOverrides = hasOverrides ? {
           protocol: validProtocol,
           maxRounds: args.max_rounds,
@@ -720,6 +503,7 @@ export class PyreezMcpServer {
           leaderContributes: args.leader_contributes,
           workerInstructions: args.worker_instructions,
           leaderInstructions: args.leader_instructions,
+          taskNature,
         } : undefined;
 
         // D-2: Use runWithTrace to include routing info in response
@@ -774,6 +558,7 @@ export class PyreezMcpServer {
 
     try {
       const validProtocol = args.protocol === "debate" ? "debate" : args.protocol === "diverge-synth" ? "diverge-synth" : undefined;
+      const manualTaskNature = args.domain ? resolveTaskNature(args.domain, args.task_type) : undefined;
       const input: DeliberateInput = {
         task: args.task,
         workerInstructions: args.worker_instructions,
@@ -784,6 +569,8 @@ export class PyreezMcpServer {
         protocol: validProtocol,
         qualityWeight: args.quality_weight,
         costWeight: args.cost_weight,
+        ...(args.models?.length ? { models: args.models } : {}),
+        ...(manualTaskNature ? { taskNature: manualTaskNature } : {}),
       };
       const result = await this.deliberateFn(input);
       return this.textResult(JSON.stringify(result, null, 2));
@@ -792,84 +579,6 @@ export class PyreezMcpServer {
         `Error: ${sanitizeError(error)}`,
       );
     }
-    });
-  }
-
-  async handleCalibrate(): Promise<CallToolResult> {
-    return this.logRun("calibrate", async () => {
-      if (!this.calibrateFn) {
-        return this.errorResult("Error: calibration not available");
-      }
-      try {
-        const result = await this.calibrateFn();
-        // Summarize stale/converged arrays to reduce response size (C-1)
-        const summary = {
-          comparisonsProcessed: result.comparisonsProcessed,
-          anomalies: result.anomalies,
-          convergedCount: result.converged.length,
-          convergedSample: result.converged.slice(0, 5),
-          staleCount: result.stale.length,
-          staleSample: result.stale.slice(0, 5),
-        };
-        return this.textResult(JSON.stringify(summary, null, 2));
-      } catch (error) {
-        return this.errorResult(
-          `Error: ${sanitizeError(error)}`,
-        );
-      }
-    });
-  }
-
-  async handleFeedback(args: {
-    session_id?: string;
-    model?: string;
-    task_type?: string;
-    type: string;
-    value: boolean | number | string;
-  }): Promise<CallToolResult> {
-    return this.logRun("feedback", async () => {
-      if (!this.feedbackStore) {
-        return this.errorResult("Error: feedback store not available");
-      }
-
-      try {
-        const feedbackId = crypto.randomUUID();
-        const record = {
-          id: feedbackId,
-          timestamp: Date.now(),
-          sessionId: args.session_id,
-          modelId: args.model,
-          taskType: args.task_type,
-          type: args.type as "boolean" | "float" | "comment" | "demonstration",
-          value: args.value,
-        };
-
-        await this.feedbackStore.record(record);
-
-        // Convert boolean/float feedback to quality signal for BT calibration
-        if (args.model && args.task_type && (args.type === "boolean" || args.type === "float")) {
-          const quality =
-            args.type === "boolean"
-              ? (args.value ? 8 : 2)
-              : (typeof args.value === "number" ? Math.min(10, Math.max(0, args.value * 10)) : 5);
-
-          try {
-            await this.reporter.record({
-              model: args.model,
-              taskType: args.task_type,
-              quality,
-              latencyMs: 0,
-              tokens: { input: 0, output: 0 },
-            });
-          } catch {
-            // Best-effort — don't fail the feedback recording
-          }
-        }
-
-        return this.textResult(JSON.stringify({ recorded: true, feedbackId }));
-      } catch (error) {
-        return this.errorResult(`Error: ${sanitizeError(error)}`);
-      }
     });
   }
 

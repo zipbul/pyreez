@@ -4,88 +4,199 @@
  * Exported functions:
  *   buildWorkerMessages — build ChatMessage[] for a worker LLM
  *   buildLeaderMessages — build ChatMessage[] for the leader LLM
+ *   buildDebateWorkerMessages — build ChatMessage[] for debate-mode workers
  *
  * Pure functions: SharedContext in → ChatMessage[] out.
  * Host provides instructions; pyreez uses minimal defaults when absent.
+ *
+ * Prompt design principles (based on 2025-2026 research):
+ *   - XML tags for structural isolation of instruction domains
+ *   - Positive framing with rationale over bare negations
+ *   - Verification checkpoint before final output
+ *   - Concrete constraints over vague directives
+ *
  * @module Deliberation Prompts
  */
 
 import type { ChatMessage } from "../llm/types";
 import type { ConsensusMode, SharedContext } from "./types";
 
-// -- Posture Prompts --
+// -- Types --
 
 export interface RoundInfo {
   readonly current: number;
   readonly max: number;
 }
 
-/**
- * Universal posture principles for workers (Layer 1).
- * 8 principles from PLAN.md v2, each compressed to 1-2 actionable sentences.
- * Mapped 1:1: #1 evidence-confidence, #2 competing alternatives, #3 mode separation,
- * #4 independent judgment, #5 steel-man, #6 evidence-first, #7 pre-commit falsification,
- * #8 ego-belief separation.
- */
-const WORKER_POSTURE =
-  "- Classify every claim as {observed fact | inference | hypothesis}. State confidence (high/medium/low) for each. Never assert without basis.\n" +
-  "- Generate at least 3 competing approaches before committing. Seek disconfirming evidence, not confirming evidence.\n" +
-  "- Separate generation from judgment: when brainstorming, suspend criticism; when evaluating, be rigorous. Declare which mode you are in.\n" +
-  "- Form your own position before considering others' conclusions. Update only when presented with new evidence or argument, not mere agreement.\n" +
-  "- Before rebutting, restate the opposing argument in its strongest form. Attack the strongest version, not a straw man.\n" +
-  "- Examine evidence and logic first, then draw conclusions. Do not start with a position and argue backward.\n" +
-  "- State upfront what would change your mind. When you do change position, explain exactly why. Do not move the goalposts.\n" +
-  "- Treat being wrong as progress, not failure. Attack reasoning, not the source. Welcome correction.";
+// -- Worker Prompts --
 
 /**
- * Standalone worker default: used when host provides no workerInstructions.
+ * Worker self-doubt block.
+ * Workers doubt their own conclusions at the point of commitment.
+ * Post-response reconsideration by others is less effective than
+ * self-doubt at the moment of completion.
  */
-const WORKER_DEFAULT =
-  "You are a deliberation participant. Respond to the following task with your best analysis.\n\n" +
-  `Follow these principles:\n${WORKER_POSTURE}`;
+const WORKER_SELF_DOUBT = `
+<self-doubt>
+After completing your analysis, add a final section:
+
+## Self-Doubt
+1. Name your single least-confident claim and the evidence gap that makes it fragile.
+2. What specific evidence would prove your main conclusion wrong?
+3. If your main conclusion is wrong, what is the most likely alternative and why?
+</self-doubt>`;
 
 /**
- * Appended to host-provided workerInstructions so posture principles always apply.
+ * Default worker system prompt: fact-based analyst with evidence grounding.
  */
-const POSTURE_SUFFIX =
-  `\n\nFollow these deliberation principles:\n${WORKER_POSTURE}`;
+const WORKER_DEFAULT = `<role>You are a fact-based analyst. Respond with honest, grounded analysis.</role>
+
+<rules>
+- Ground every claim in specific evidence: data, source, or reasoning chain. State what you know vs. what you infer.
+- For each key claim, state your confidence (high/medium/low) and the specific evidence gap that limits it.
+</rules>
+${WORKER_SELF_DOUBT}`;
 
 /**
- * Leader verifier obligations (Layer 3).
- * Three duties from PLAN.md: independent verification, gap search, honest synthesis.
+ * Appended to host-provided workerInstructions so self-doubt always applies.
  */
-const LEADER_VERIFIER_OBLIGATIONS =
-  "1. Verify independently — judge each claim's evidence sufficiency. Majority agreement does not equal correctness. The higher workers' confidence, the more rigorously you must verify their basis.\n" +
-  "2. Search for gaps — identify perspectives, alternatives, or edge cases that workers missed. Do not limit yourself to the scope workers explored.\n" +
-  "3. Assess argument independence — when workers agree, check whether they reached the same conclusion via different reasoning paths (healthy) or the same reasoning chain (suspicious). Shared phrasing, identical examples, or lock-step logic suggest correlated training, not independent validation.\n" +
-  "4. Synthesize honestly — distinguish certain conclusions from uncertain inferences and unresolved questions. Do not fabricate consensus. Unanimity is a warning signal, not reassurance.";
+const POSTURE_SUFFIX = `\n${WORKER_SELF_DOUBT}`;
+
+// -- Artifact Worker Prompt --
 
 /**
- * Standalone leader default: used when host provides no leaderInstructions.
+ * Worker prompt for artifact tasks (code, config, schema, plan).
+ * Produces working output directly, with a structured summary for the leader.
  */
+const WORKER_ARTIFACT = `<role>You are an expert implementer. Produce working, production-quality output.</role>
+
+<rules>
+- Deliver the requested artifact directly — code, config, schema, test, plan. Start with the output, not analysis.
+- Cover edge cases, error handling, and boundary conditions in the artifact itself.
+- When multiple approaches exist, pick the best one and implement it. State your choice in one line.
+- If the task specifies a language, framework, or format — follow it exactly.
+</rules>
+
+<worker-summary>
+At the TOP of your response, include exactly this block:
+<summary>
+APPROACH: [1 line — your chosen approach]
+TRADEOFF: [1 line — key tradeoff of this approach]
+ASSUMPTION: [1 line — the assumption most likely to be wrong]
+</summary>
+Then produce the artifact.
+</worker-summary>`;
+
+// -- Leader Prompts --
+
+/**
+ * Leader core rules — role + behavioral rules for creative synthesis.
+ */
+const LEADER_OBLIGATIONS = `<role>You are a creative synthesizer. Find and maximize value from every worker response.</role>
+
+<core-rules>
+1. Integrate all responses — draw from every worker. Adopt strengths and actively incorporate unique contributions.
+2. Question weaknesses — for each, ask: "Is this truly a flaw, or an unexplored angle?"
+3. Challenge the premise before synthesizing.
+4. Extract ideas from weaknesses. Maximum 2 genuinely novel ideas (not in any worker response, not repackaged strengths). If none, say "None."
+5. Review worker self-doubt sections — evaluate which are valid. Use validated self-doubts as design constraints in your synthesis.
+6. If a worker response is off-topic or degenerate, note this in the per-worker section and exclude from your synthesis.
+</core-rules>`;
+
 /**
  * Required output structure for leader synthesis.
- * Forces verification behavior even on simple tasks.
  */
-const LEADER_OUTPUT_STRUCTURE =
-  "Structure your response as follows:\n" +
-  "1. Verification: identify problems, disagreements, and gaps across worker responses.\n" +
-  "   - Which worker claims you independently verified or challenged\n" +
-  "   - Any gaps or alternatives workers missed\n" +
-  "   - Whether workers reached agreement via independent reasoning or correlated logic\n" +
-  "2. Synthesis: produce your final answer addressing the verification findings.";
+const LEADER_OUTPUT_FORMAT = `<output-format>
+Before writing, verify:
+- Every worker's strengths are adopted (not acknowledged — adopted)
+- Ideas from Weaknesses cannot be found in any worker response, even partially
+- Worker confidence levels are reflected — high-confidence claims weighted more heavily
+- Your synthesis integrates, not selects a winner
+
+Structure your response as follows. The final synthesis should be the most substantial section.
+
+## Per-Worker Analysis
+For each worker:
+- **Adopted Strengths**: Unique value this worker contributed
+- **Weakness Reexamination**: True flaw or unexplored angle? If the latter, what idea does it suggest?
+- **Self-Doubt Review**: Which self-doubts are valid? Which are over-caution?
+
+## Premise Check
+Is the question well-framed? If not, reframe. Show how your reframe changes the synthesis.
+
+## Ideas from Weaknesses (max 2)
+Say "None." if none emerge genuinely.
+
+## Synthesis
+Integrated answer that draws from every worker.
+</output-format>`;
 
 const LEADER_DEFAULT =
-  "You are the verifier-synthesizer in a multi-model deliberation. You receive multiple worker responses to a task.\n\n" +
-  `Your obligations:\n${LEADER_VERIFIER_OBLIGATIONS}\n\n` +
-  `${LEADER_OUTPUT_STRUCTURE}\n\n` +
-  "Produce the best final answer grounded in evidence, not vote-counting.";
+  `${LEADER_OBLIGATIONS}\n\n${LEADER_OUTPUT_FORMAT}`;
 
 /**
- * Appended to host-provided leaderInstructions so verifier obligations always apply.
+ * Appended to host-provided leaderInstructions.
  */
-const LEADER_VERIFIER_SUFFIX =
-  `\n\nAs verifier-synthesizer, you must also:\n${LEADER_VERIFIER_OBLIGATIONS}\n\n${LEADER_OUTPUT_STRUCTURE}`;
+const LEADER_SUFFIX =
+  `\n\n${LEADER_OBLIGATIONS}\n\n${LEADER_OUTPUT_FORMAT}`;
+
+// -- Artifact Leader Prompt --
+
+/**
+ * Leader prompt for artifact tasks. Output = the deliverable itself (>95%).
+ * Uses <deliberation> scratchpad that the engine strips before returning.
+ */
+const LEADER_ARTIFACT = `<role>You are the synthesis lead. Your ENTIRE output must be the final deliverable.</role>
+
+<core-rules>
+1. DO NOT write per-worker analysis, comparisons, or prose evaluation.
+2. Silently incorporate the best elements from all workers.
+3. Fix errors from any worker response. Do not propagate them.
+4. Cover edge cases that individual workers missed.
+</core-rules>
+
+<output-format>
+<deliberation>
+[Max 5 lines: resolve conflicting approaches, note merge decisions]
+</deliberation>
+
+[THE ACTUAL DELIVERABLE — code, plan, schema. This must be >95% of your output.]
+
+[Optional: Max 2 lines noting assumption conflicts the user must verify.]
+</output-format>`;
+
+/**
+ * Appended to host-provided leaderInstructions for artifact tasks.
+ */
+const LEADER_ARTIFACT_SUFFIX = `\n\n${LEADER_ARTIFACT}`;
+
+// -- Debate Moderator Prompt --
+
+const DEBATE_MODERATOR = `<role>You are the moderator and verifier of a structured debate between multiple models.</role>
+
+<rules>
+1. Identify the specific points of AGREEMENT across all responses.
+2. Identify the specific points of DISAGREEMENT and each side's argument.
+3. For each disagreement, evaluate the evidence — do not side with the majority by default.
+4. Identify gaps: perspectives or alternatives that NO worker raised.
+5. Formulate clear questions that the next round should resolve.
+</rules>
+
+<constraint>Keep your summary compressed — workers will only see YOUR summary, not each other's raw responses.</constraint>`;
+
+// -- Summary Manifest Helpers --
+
+/**
+ * Extract <summary>...</summary> content from a worker response.
+ * Falls back to first 3 lines if no summary tags found.
+ */
+export function extractSummary(content: string): string {
+  const match = content.match(/<summary>([\s\S]*?)<\/summary>/);
+  if (match?.[1]) {
+    return match[1].trim();
+  }
+  return content.split("\n").slice(0, 3).join("\n").trim();
+}
 
 // -- Exported Builders --
 
@@ -94,9 +205,6 @@ const LEADER_VERIFIER_SUFFIX =
  *
  * Context optimization: workers only see the previous round's synthesis,
  * NOT full history. This keeps context O(1) per round.
- *
- * - system: host-provided instructions OR minimal default
- * - user: task + (previous synthesis if rounds > 0) + (round budget)
  */
 export function buildWorkerMessages(
   ctx: SharedContext,
@@ -122,9 +230,14 @@ export function buildWorkerMessages(
     );
   }
 
-  const systemContent = instructions
-    ? instructions + POSTURE_SUFFIX
-    : WORKER_DEFAULT;
+  const nature = ctx.taskNature ?? "critique";
+  let systemContent: string;
+  if (instructions) {
+    const suffix = nature === "artifact" ? "" : POSTURE_SUFFIX;
+    systemContent = `<host-instructions>${instructions}</host-instructions>` + suffix;
+  } else {
+    systemContent = nature === "artifact" ? WORKER_ARTIFACT : WORKER_DEFAULT;
+  }
 
   return [
     { role: "system", content: systemContent },
@@ -138,8 +251,6 @@ export function buildWorkerMessages(
  * Workers see ONLY the leader's compressed summary from the previous round,
  * NOT raw responses. This keeps context O(1) per round and ensures workers
  * respond to curated disagreements rather than raw noise.
- *
- * Flow: workers respond → leader identifies disagreements → workers rebut/concede → repeat
  */
 export function buildDebateWorkerMessages(
   ctx: SharedContext,
@@ -177,12 +288,25 @@ export function buildDebateWorkerMessages(
     }
   }
 
-  const debateContext = instructions
-    ? `${instructions}\n\nYou are in a structured debate. A moderator has summarized the previous round's disagreements. Before rebutting, restate each criticism in its strongest form. If you change your position, explain exactly what new evidence or argument caused the change.`
-    : "You are in a structured debate with other models. A moderator has summarized the previous round's disagreements. Before rebutting, restate each criticism in its strongest form. Concede where others are stronger. If you change position, explain exactly why. Do not move the goalposts.";
+  const debateInstructions = instructions
+    ? `<host-instructions>${instructions}</host-instructions>\n\n`
+    : "";
+
+  const debateContext =
+    `${debateInstructions}` +
+    `<role>You are a debater in a structured multi-model deliberation.</role>\n\n` +
+    `<context>A moderator has summarized the previous round's disagreements. You are responding to that summary.</context>\n\n` +
+    `<rules>\n` +
+    `- Before rebutting, restate each criticism in its strongest form.\n` +
+    `- Concede where others are stronger.\n` +
+    `- If you change position, explain exactly what new evidence or argument caused the change.\n` +
+    `</rules>`;
+
+  const nature = ctx.taskNature ?? "critique";
+  const debateSuffix = nature === "artifact" ? "" : POSTURE_SUFFIX;
 
   return [
-    { role: "system", content: debateContext + POSTURE_SUFFIX },
+    { role: "system", content: debateContext + debateSuffix },
     { role: "user", content: userParts.join("\n\n") },
   ];
 }
@@ -192,9 +316,6 @@ export function buildDebateWorkerMessages(
  *
  * Context optimization: leader sees current round's worker responses only,
  * NOT full history. This keeps context O(workers) per round.
- *
- * - system: host-provided instructions OR minimal default
- * - user: task + current round's worker responses + (round budget)
  */
 export function buildLeaderMessages(
   ctx: SharedContext,
@@ -223,36 +344,40 @@ export function buildLeaderMessages(
     );
   }
 
+  const nature = ctx.taskNature ?? "critique";
   const isFinalRound = !roundInfo || roundInfo.current >= roundInfo.max;
   const isDebateIntermediate = !isFinalRound && protocol === "debate";
 
   let systemContent: string;
   if (isDebateIntermediate) {
-    // Intermediate round: identify disagreements and frame questions for next round
     systemContent = instructions
-      ? `${instructions}\n\n`
-      : "";
-    systemContent +=
-      "You are the moderator and verifier of a structured debate between multiple models. " +
-      "Your job for this round:\n" +
-      "1. Identify the specific points of AGREEMENT across all responses.\n" +
-      "2. Identify the specific points of DISAGREEMENT and each side's argument.\n" +
-      "3. For each disagreement, evaluate the evidence — do not side with the majority by default.\n" +
-      "4. Identify gaps: perspectives or alternatives that NO worker raised.\n" +
-      "5. Formulate clear questions that the next round should resolve.\n\n" +
-      "Keep your summary compressed — workers will only see YOUR summary, not each other's raw responses.";
-    // Consensus JSON for intermediate rounds: always "continue" (only when consensus mode is active)
+      ? `<host-instructions>${instructions}</host-instructions>\n\n${DEBATE_MODERATOR}`
+      : DEBATE_MODERATOR;
     if (consensus === "leader_decides") {
-      systemContent += '\n\nRespond with a JSON object: {"result": "<your summary>", "decision": "continue"}';
+      systemContent += '\n\n<consensus>\nRespond with a JSON object: {"result": "<your summary>", "decision": "continue"}\n</consensus>';
+    }
+  } else if (nature === "artifact") {
+    systemContent = instructions
+      ? `<host-instructions>${instructions}</host-instructions>` + LEADER_ARTIFACT_SUFFIX
+      : LEADER_ARTIFACT;
+    if (consensus === "leader_decides" && !(instructions && /\bjson\b/i.test(instructions) && /\bdecision\b/i.test(instructions))) {
+      systemContent += '\n\n<consensus>\nWrap your entire deliverable inside the "result" field.\nRespond with a JSON object: {"result": "<your full deliverable>", "decision": "approve" if consensus reached, "continue" if more rounds needed}.\n</consensus>';
     }
   } else {
     systemContent = instructions
-      ? instructions + LEADER_VERIFIER_SUFFIX
+      ? `<host-instructions>${instructions}</host-instructions>` + LEADER_SUFFIX
       : LEADER_DEFAULT;
-    // Inject JSON output format only when consensus is active AND host hasn't already specified format
     if (consensus === "leader_decides" && !(instructions && /\bjson\b/i.test(instructions) && /\bdecision\b/i.test(instructions))) {
-      systemContent += '\n\nIMPORTANT: You MUST respond with a JSON object containing "result" (your synthesis) and "decision" ("approve" if consensus reached, "continue" if more rounds needed). Example: {"result": "...", "decision": "approve"}';
+      systemContent += '\n\n<consensus>\nYour structured analysis (Per-Worker Analysis through Synthesis) goes inside the "result" field.\nRespond with a JSON object: {"result": "<your full structured analysis>", "decision": "approve" if consensus reached, "continue" if more rounds needed}.\n</consensus>';
     }
+  }
+
+  // Summary Manifest: for artifact tasks, append worker summaries at end of user message
+  if (nature === "artifact" && currentRound && currentRound.responses.length > 0) {
+    const manifest = currentRound.responses
+      .map((r, i) => `Worker ${i + 1} (${r.model}): ${extractSummary(r.content)}`)
+      .join("\n");
+    userParts.push(`[WORKER SUMMARY MANIFEST]\n${manifest}`);
   }
 
   return [

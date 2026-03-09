@@ -2,7 +2,7 @@
  * Pyreez entry point.
  * Wires infrastructure modules and starts the MCP server over stdio.
  *
- * Architecture: pyreez = Infrastructure layer (5 MCP tools).
+ * Architecture: pyreez = Infrastructure layer (3 MCP tools).
  * Host (e.g., Copilot) = Orchestrator.
  */
 
@@ -15,18 +15,15 @@ import { ProviderRegistry } from "./llm/registry";
 import { AnthropicProvider } from "./llm/providers/anthropic";
 import { ClaudeCliProvider } from "./llm/providers/claude-cli";
 import { GoogleProvider } from "./llm/providers/google";
-import { OpenAIProvider } from "./llm/providers/openai";
+// import { OpenAIProvider } from "./llm/providers/openai";
 import { LocalProvider } from "./llm/providers/local";
 import { OpenAICompatibleProvider } from "./llm/providers/openai-compatible";
 import { XaiProvider } from "./llm/providers/xai";
 import type { LLMProvider, ProviderName } from "./llm/types";
 import { PyreezMcpServer } from "./mcp/server";
 import { ModelRegistry } from "./model/registry";
-import { calibrate, extractRatingsMap, persistRatings } from "./model/calibration";
 import { BunFileIO } from "./report/bun-file-io";
-import { FileReporter } from "./report/file-reporter";
 import { FileRunLogger } from "./report/run-logger";
-import { FileFeedbackStore } from "./report/feedback-store";
 import { PyreezEngine } from "./axis/engine";
 import {
   BtScoringSystem,
@@ -68,10 +65,8 @@ async function main(): Promise<void> {
   const config = loadConfigFromEnv(routing);
   const registry = new ModelRegistry();
   const fileIO = new BunFileIO();
-  const reporter = new FileReporter(".pyreez/reports", fileIO);
   const deliberationStore = new FileDeliberationStore(".pyreez/deliberations", fileIO);
   const runLogger = new FileRunLogger(".pyreez/runs", fileIO);
-  const feedbackStore = new FileFeedbackStore(".pyreez/feedback", fileIO);
 
   // Build providers from config
   const providers: LLMProvider[] = [];
@@ -83,9 +78,10 @@ async function main(): Promise<void> {
   if (config.providers.google) {
     providers.push(new GoogleProvider(config.providers.google));
   }
-  if (config.providers.openai) {
-    providers.push(new OpenAIProvider(config.providers.openai));
-  }
+  // OpenAI provider disabled — routing through other providers only
+  // if (config.providers.openai) {
+  //   providers.push(new OpenAIProvider(config.providers.openai));
+  // }
   if (config.providers.local) {
     providers.push(new LocalProvider(config.providers.local));
   }
@@ -135,7 +131,7 @@ async function main(): Promise<void> {
   // Build 3-stage pipeline directly (no factory)
   const { modelIds } = filterModelsByProviders(registry, providers);
 
-  const scoring = new BtScoringSystem();
+  const scoring = new BtScoringSystem({ persistIO: fileIO, scoresPath: "scores/models.json", registry });
   const profiler = new DomainOverrideProfiler();
   const deliberation = new DivergeSynthProtocol("leader_decides", 1);
 
@@ -184,46 +180,36 @@ async function main(): Promise<void> {
     learningLayer,
   );
 
+  // Filtered registry: only models from configured providers
+  const configuredModelIds = new Set(modelIds);
+  const filteredRegistry = {
+    getAll: () => registry.getAll().filter((m) => configuredModelIds.has(m.id)),
+    getAvailable: () => registry.getAvailable().filter((m) => configuredModelIds.has(m.id)),
+    getById: (id: string) => configuredModelIds.has(id) ? registry.getById(id) : undefined,
+  };
+
   const deliberateFn = createDeliberateFn({
-    registry,
+    registry: filteredRegistry,
     chat: (model, messages) => chatAdapter(model, messages),
     store: deliberationStore,
+    pollJudge: {
+      chatFn: (model, messages) => chatAdapter(model, messages),
+      getAvailableModels: () => filteredRegistry.getAvailable(),
+    },
+    scoring,
   });
 
   const mcpServer = new McpServer({ name: "pyreez", version: "1.0.0" });
   const server = new PyreezMcpServer({
     mcpServer,
     registry,
-    reporter,
-    summaryFn: () => reporter.summary(),
     deliberateFn,
     deliberationStore,
     runLogger,
     engine,
-    feedbackStore,
-    calibrateFn: async () => {
-      const records = await reporter.getAll();
-      const models = registry.getAll();
-      const ratings = extractRatingsMap(models);
-      const result = calibrate(ratings, [...records]);
-      await persistRatings("scores/models.json", ratings, fileIO);
-      return result;
-    },
   });
 
   const transport = new StdioServerTransport();
-
-  // Load latency data if latencyWeight is configured
-  if (config.routing.latencyWeight && config.routing.latencyWeight > 0 && selector instanceof TwoTrackCeSelector) {
-    try {
-      const latencyMap = await reporter.getLatencyMap();
-      if (latencyMap.size > 0) {
-        selector.setLatencyMap(latencyMap);
-      }
-    } catch {
-      // Latency data is optional — skip on error
-    }
-  }
 
   const shutdown = async () => {
     await learningLayer.flush();

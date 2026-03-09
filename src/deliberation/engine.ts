@@ -32,6 +32,10 @@ import {
 } from "./shared-context";
 import { selectTopModel, LEADER_DIMS } from "./team-composer";
 import type { CooldownManager } from "./cooldown";
+import {
+  validateSynthesisStructure,
+  buildRetryHint,
+} from "./synthesis-validator";
 
 import type { RoundInfo } from "./prompts";
 
@@ -115,6 +119,11 @@ export interface EngineConfig {
    * Default: false.
    */
   readonly leaderContributes?: boolean;
+  /**
+   * When true, validates leader synthesis against required structural sections
+   * and retries once on failure. Default: false.
+   */
+  readonly validateStructure?: boolean;
 }
 
 const DEFAULT_CONFIG: EngineConfig = {
@@ -165,6 +174,17 @@ function extractJsonObject(text: string): string | null {
   return null;
 }
 
+// -- Deliberation Block Stripping --
+
+/**
+ * Strip `<deliberation>...</deliberation>` scratchpad blocks from leader output.
+ * These blocks are used by artifact leaders for internal reasoning and should
+ * not appear in the final result returned to the user.
+ */
+function stripDeliberationBlock(text: string): string {
+  return text.replace(/<deliberation>[\s\S]*?<\/deliberation>/g, "").trim();
+}
+
 // -- Parsers --
 
 /**
@@ -178,7 +198,7 @@ export function parseSynthesis(
   consensus?: ConsensusMode,
 ): { content: string; decision?: "continue" | "approve" } {
   if (!consensus) {
-    return { content: response };
+    return { content: stripDeliberationBlock(response) };
   }
 
   const VALID_DECISIONS = ["continue", "approve"];
@@ -191,7 +211,7 @@ export function parseSynthesis(
       ? (parsed.decision as "continue" | "approve")
       : undefined;
     return {
-      content: parsed.result ?? parsed.content ?? response,
+      content: stripDeliberationBlock(parsed.result ?? parsed.content ?? response),
       decision,
     };
   } catch {
@@ -208,7 +228,7 @@ export function parseSynthesis(
         ? (parsed.decision as "continue" | "approve")
         : undefined;
       return {
-        content: parsed.result ?? parsed.content ?? response,
+        content: stripDeliberationBlock(parsed.result ?? parsed.content ?? response),
         decision,
       };
     } catch {
@@ -216,7 +236,7 @@ export function parseSynthesis(
     }
   }
 
-  return { content: response };
+  return { content: stripDeliberationBlock(response) };
 }
 
 // -- Round Execution --
@@ -359,9 +379,10 @@ export async function deliberate(
   const cfg = config ?? DEFAULT_CONFIG;
   const maxRetries = retryDeps?.maxRetries ?? 1;
   let currentTeam = team;
-  let ctx = createSharedContext(input.task, currentTeam);
+  let ctx = createSharedContext(input.task, currentTeam, input.taskNature);
   let consensusReached: boolean | null = false;
   let accTokens: TokenUsage = { input: 0, output: 0 };
+  const qualityFlags: string[] = [];
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
     let roundResult: { round: Round; tokens: TokenUsage };
@@ -420,7 +441,7 @@ export async function deliberate(
 
           // Rebuild context with updated team, preserving previous rounds
           const previousRounds = [...ctx.rounds];
-          ctx = createSharedContext(input.task, currentTeam);
+          ctx = createSharedContext(input.task, currentTeam, input.taskNature);
           for (const prevRound of previousRounds) {
             ctx = addRound(ctx, prevRound);
           }
@@ -439,6 +460,68 @@ export async function deliberate(
         if (!retried) throw error;
       } else {
         throw error;
+      }
+    }
+
+    // -- Stage 1: Structural Validation --
+    // Validate leader synthesis structure; retry leader once on failure.
+    // Only applies when validateStructure is enabled and not debate intermediate rounds.
+    const isFinalRound = i === cfg.maxRounds || (cfg.consensus && roundResult!.round.synthesis?.decision === "approve");
+    const isDebateIntermediate = cfg.protocol === "debate" && !isFinalRound;
+    if (cfg.validateStructure && roundResult!.round.synthesis && !isDebateIntermediate) {
+      const workerCount = roundResult!.round.responses.length;
+      const validation = validateSynthesisStructure(
+        roundResult!.round.synthesis.content,
+        workerCount,
+        ctx.taskNature,
+      );
+
+      if (!validation.valid) {
+        // Retry leader once with hint about missing sections
+        const retryHint = buildRetryHint(validation.missing);
+        const partialRound: Round = { number: i, responses: roundResult!.round.responses };
+        const ctxForRetry = addRound(ctx, partialRound);
+        const retryLeaderMessages = deps.buildLeaderMessages(
+          ctxForRetry,
+          (input.leaderInstructions ?? "") + retryHint,
+          { current: i, max: cfg.maxRounds },
+          cfg.consensus,
+          cfg.protocol,
+        );
+        try {
+          const retryResult = await deps.chat(ctx.team.leader.model, retryLeaderMessages);
+          accTokens = {
+            input: accTokens.input + retryResult.inputTokens,
+            output: accTokens.output + retryResult.outputTokens,
+          };
+          const retrySynth = parseSynthesis(
+            ctx.team.leader.model,
+            retryResult.content,
+            cfg.consensus,
+          );
+          const retryValidation = validateSynthesisStructure(retrySynth.content, workerCount, ctx.taskNature);
+
+          if (retryValidation.valid) {
+            // Use retried synthesis
+            roundResult = {
+              round: {
+                ...roundResult!.round,
+                synthesis: {
+                  model: ctx.team.leader.model,
+                  content: retrySynth.content,
+                  ...(retrySynth.decision ? { decision: retrySynth.decision } : {}),
+                },
+              },
+              tokens: roundResult!.tokens,
+            };
+          } else {
+            // 2nd failure — keep original, flag it
+            qualityFlags.push("missing_sections");
+          }
+        } catch {
+          // Retry failed — keep original synthesis, flag it
+          qualityFlags.push("missing_sections");
+        }
       }
     }
 
@@ -469,7 +552,7 @@ export async function deliberate(
       });
       currentTeam = { ...currentTeam, workers: newWorkers };
       const previousRounds = [...ctx.rounds];
-      ctx = createSharedContext(input.task, currentTeam);
+      ctx = createSharedContext(input.task, currentTeam, input.taskNature);
       for (const prevRound of previousRounds) {
         ctx = addRound(ctx, prevRound);
       }
@@ -511,5 +594,6 @@ export async function deliberate(
     totalLLMCalls: totalLLMCalls(ctx),
     modelsUsed: modelsUsed(ctx),
     rounds: roundsSummary,
+    ...(qualityFlags.length > 0 ? { qualityFlags } : {}),
   };
 }

@@ -7,7 +7,7 @@
  * - enhance(): boost scores based on preference win rates
  *
  * L1 BT is already owned by ScoringSystem — not duplicated here.
- * L3 (MoE weights) and L4 (MF) require T3 quality scores — deferred to Phase 6.
+ * L4 (MF) requires T3 quality scores — deferred to Phase 6.
  */
 
 import { join } from "node:path";
@@ -26,7 +26,6 @@ import {
   type PreferenceInput,
 } from "../router/preference";
 import type { LlmJudge } from "./judge";
-import type { MoeLearner } from "./moe-learner";
 import type { MfLearner } from "./mf-learner";
 import { buildTaskTypeIndex, buildModelIndex } from "./mf-index";
 
@@ -55,8 +54,6 @@ export interface LearningLayerOptions {
   preferenceTable?: PreferenceTable;
   /** Phase 6: LLM-as-Judge for quality evaluation (Tier 3) */
   judge?: LlmJudge;
-  /** Phase 6: MoE gating weight learner (L3) */
-  moeLearner?: MoeLearner;
   /** Phase 6: Matrix Factorization learner (L4) */
   mfLearner?: MfLearner;
   /** Model IDs for MF index building. Required when mfLearner is set. */
@@ -80,7 +77,6 @@ export class LocalLearningLayer implements LearningLayer {
   private readonly syncTimeoutMs: number;
   private readonly preferenceTable: PreferenceTable;
   private readonly judge?: LlmJudge;
-  private readonly moeLearner?: MoeLearner;
   private readonly mfLearner?: MfLearner;
   private readonly taskTypeIndex?: Map<string, number>;
   private readonly modelIndex?: Map<string, number>;
@@ -100,7 +96,6 @@ export class LocalLearningLayer implements LearningLayer {
     this.syncTimeoutMs = opts.syncTimeoutMs ?? DEFAULT_SYNC_TIMEOUT_MS;
     this.preferenceTable = opts.preferenceTable ?? new PreferenceTable();
     this.judge = opts.judge;
-    this.moeLearner = opts.moeLearner;
     this.mfLearner = opts.mfLearner;
     if (this.mfLearner && opts.modelIds) {
       this.taskTypeIndex = buildTaskTypeIndex();
@@ -185,15 +180,6 @@ export class LocalLearningLayer implements LearningLayer {
           classified.taskType,
           result.result,
         );
-        // Normalize quality 0-10 → reward -0.5 to +0.5
-        const reward = (quality - 5) / 10;
-
-        // L3: Update MoE expert weights
-        if (this.moeLearner) {
-          // Use first model index as expert hint (simplified)
-          this.moeLearner.update(0, reward);
-        }
-
         // L4: Train MF factors with proper indices
         if (this.mfLearner && this.taskTypeIndex && this.modelIndex) {
           const ctxIdx = this.taskTypeIndex.get(classified.taskType);

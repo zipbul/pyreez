@@ -7,6 +7,8 @@
  * @module Deliberation Types
  */
 
+import type { TaskNature } from "./task-nature";
+
 // -- Team Composition --
 
 /**
@@ -74,6 +76,7 @@ export interface SharedContext {
   readonly task: string;
   readonly team: TeamComposition;
   readonly rounds: readonly Round[];
+  readonly taskNature?: TaskNature;
 }
 
 // -- Consensus Mode --
@@ -120,6 +123,8 @@ export interface DeliberateInput {
    * before synthesizing. Default: false.
    */
   readonly leaderContributes?: boolean;
+  /** Task nature for prompt selection. Artifact = deliverable output, Critique = analysis. */
+  readonly taskNature?: TaskNature;
 }
 
 /**
@@ -139,4 +144,8 @@ export interface DeliberateOutput {
     synthesis?: string;
     failedWorkers?: readonly { model: string; error: string }[];
   }[];
+  /** Quality flags from structural validation. */
+  readonly qualityFlags?: readonly string[];
+  /** PoLL judge scores per worker model. */
+  readonly pollScores?: readonly { model: string; score: number }[];
 }

@@ -9,7 +9,6 @@ import type { ScoringSystem } from "./interfaces";
 import type { FileIO } from "../report/types";
 import { LocalLearningLayer } from "./learning";
 import type { LlmJudge } from "./judge";
-import type { MoeLearner } from "./moe-learner";
 import type { MfLearner } from "./mf-learner";
 
 // -- Helpers --
@@ -85,19 +84,6 @@ function makeFakeJudge(score: number = 7): LlmJudge {
   } as any;
 }
 
-function makeFakeMoeLearner(): MoeLearner & { updateCalls: Array<{ expertIdx: number; reward: number }> } {
-  const calls: Array<{ expertIdx: number; reward: number }> = [];
-  return {
-    updateCalls: calls,
-    update: mock((expertIdx: number, reward: number) => {
-      calls.push({ expertIdx, reward });
-    }),
-    getWeights: mock(() => [0.5, 0.5]),
-    flush: mock(async () => {}),
-    load: mock(async () => {}),
-  } as any;
-}
-
 function makeFakeMfLearner(): MfLearner & { trainCalls: Array<{ ctx: number; model: number; actual: number }> } {
   const calls: Array<{ ctx: number; model: number; actual: number }> = [];
   return {
@@ -112,30 +98,6 @@ function makeFakeMfLearner(): MfLearner & { trainCalls: Array<{ ctx: number; mod
 }
 
 describe("LocalLearningLayer Phase 6 enhancements", () => {
-  // 36. [HP] record with judge → L3 updated
-  it("should update MoE learner with judge quality score", async () => {
-    const io = makeFakeIO();
-    const scoring = makeFakeScoring();
-    const judge = makeFakeJudge(8);
-    const moeLearner = makeFakeMoeLearner();
-
-    const layer = new LocalLearningLayer({
-      scoring,
-      io,
-      syncInterval: 100,
-      judge,
-      moeLearner,
-    });
-
-    await layer.record(
-      makeClassified(),
-      makePlan("a", "b"),
-      makeResult(["a", "b"]),
-    );
-
-    expect(moeLearner.update).toHaveBeenCalled();
-  });
-
   // 37. [HP] record with judge → L4 trained
   it("should train MF learner with judge quality score", async () => {
     const io = makeFakeIO();
@@ -193,14 +155,11 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
         throw new Error("judge failed");
       }),
     } as any;
-    const moeLearner = makeFakeMoeLearner();
-
     const layer = new LocalLearningLayer({
       scoring,
       io,
       syncInterval: 100,
       judge,
-      moeLearner,
     });
 
     await expect(
@@ -208,17 +167,15 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
     ).resolves.toBeUndefined();
   });
 
-  // 40. [NE] no judge configured → L3/L4 still work
+  // 40. [NE] no judge configured → L4 still works
   it("should work without judge configured", async () => {
     const io = makeFakeIO();
     const scoring = makeFakeScoring();
-    const moeLearner = makeFakeMoeLearner();
 
     const layer = new LocalLearningLayer({
       scoring,
       io,
       syncInterval: 100,
-      moeLearner,
     });
 
     await layer.record(
@@ -227,17 +184,15 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
       makeResult(["a", "b"]),
     );
 
-    // MoE should still receive updates (with default quality)
-    // Without judge, no quality-based updates to MoE
+    // Without judge, no quality-based updates
     // record still succeeds
   });
 
-  // 41. [ED] judge returns quality=0 → L3/L4 still update
-  it("should update L3/L4 even when judge returns quality 0", async () => {
+  // 41. [ED] judge returns quality=0 → L4 still updates
+  it("should update L4 even when judge returns quality 0", async () => {
     const io = makeFakeIO();
     const scoring = makeFakeScoring();
     const judge = makeFakeJudge(0);
-    const moeLearner = makeFakeMoeLearner();
     const mfLearner = makeFakeMfLearner();
 
     const layer = new LocalLearningLayer({
@@ -245,7 +200,6 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
       io,
       syncInterval: 100,
       judge,
-      moeLearner,
       mfLearner,
       modelIds: ["a", "b"],
     });
@@ -256,16 +210,14 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
       makeResult(["a", "b"]),
     );
 
-    expect(moeLearner.update).toHaveBeenCalled();
     expect(mfLearner.train).toHaveBeenCalled();
   });
 
-  // 42. [CO] judge + L3 flush + L4 all trigger same record
-  it("should handle judge + MoE + MF all triggering in same record", async () => {
+  // 42. [CO] judge + L4 all trigger same record
+  it("should handle judge + MF all triggering in same record", async () => {
     const io = makeFakeIO();
     const scoring = makeFakeScoring();
     const judge = makeFakeJudge(8);
-    const moeLearner = makeFakeMoeLearner();
     const mfLearner = makeFakeMfLearner();
 
     const layer = new LocalLearningLayer({
@@ -273,7 +225,6 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
       io,
       syncInterval: 1,
       judge,
-      moeLearner,
       mfLearner,
       modelIds: ["a", "b"],
     });
@@ -285,31 +236,8 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
     );
 
     expect(judge.evaluate).toHaveBeenCalled();
-    expect(moeLearner.update).toHaveBeenCalled();
     expect(mfLearner.train).toHaveBeenCalled();
     expect(io.writeFile).toHaveBeenCalled(); // sync triggered
-  });
-
-  // 43. [ST] multiple records → L3 weights evolve
-  it("should accumulate MoE updates across multiple records", async () => {
-    const io = makeFakeIO();
-    const scoring = makeFakeScoring();
-    const judge = makeFakeJudge(7);
-    const moeLearner = makeFakeMoeLearner();
-
-    const layer = new LocalLearningLayer({
-      scoring,
-      io,
-      syncInterval: 100,
-      judge,
-      moeLearner,
-    });
-
-    for (let i = 0; i < 5; i++) {
-      await layer.record(makeClassified(), makePlan("a", "b"), makeResult(["a", "b"]));
-    }
-
-    expect(moeLearner.updateCalls.length).toBeGreaterThanOrEqual(5);
   });
 
   // 44. [ID] repeated identical records → consistent state
@@ -344,14 +272,14 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
     }
   });
 
-  // 45. [OR] different order → different L3/L4 state
-  it("should produce different state for different record orders", async () => {
+  // 45. [OR] different judge scores → different L4 state
+  it("should produce different state for different judge scores", async () => {
     const io1 = makeFakeIO();
     const io2 = makeFakeIO();
     const scoring = makeFakeScoring();
 
-    const moe1 = makeFakeMoeLearner();
-    const moe2 = makeFakeMoeLearner();
+    const mf1 = makeFakeMfLearner();
+    const mf2 = makeFakeMfLearner();
     const judge1 = makeFakeJudge(8);
     const judge2 = makeFakeJudge(3);
 
@@ -360,7 +288,8 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
       io: io1,
       syncInterval: 100,
       judge: judge1,
-      moeLearner: moe1,
+      mfLearner: mf1,
+      modelIds: ["a", "b"],
     });
 
     const layer2 = new LocalLearningLayer({
@@ -368,15 +297,16 @@ describe("LocalLearningLayer Phase 6 enhancements", () => {
       io: io2,
       syncInterval: 100,
       judge: judge2,
-      moeLearner: moe2,
+      mfLearner: mf2,
+      modelIds: ["a", "b"],
     });
 
     await layer1.record(makeClassified(), makePlan("a", "b"), makeResult(["a", "b"]));
     await layer2.record(makeClassified(), makePlan("a", "b"), makeResult(["a", "b"]));
 
-    // Different judge scores → different quality → different MoE rewards
-    if (moe1.updateCalls.length > 0 && moe2.updateCalls.length > 0) {
-      expect(moe1.updateCalls[0]!.reward).not.toBe(moe2.updateCalls[0]!.reward);
+    // Different judge scores → different quality → different MF training values
+    if (mf1.trainCalls.length > 0 && mf2.trainCalls.length > 0) {
+      expect(mf1.trainCalls[0]!.actual).not.toBe(mf2.trainCalls[0]!.actual);
     }
   });
 });

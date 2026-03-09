@@ -5,7 +5,7 @@
       "name": "Claude Opus 4.6",
       "contextWindow": 1000000,
       "supportsToolCalling": true,
-      "available": true,
+      "available": false,
       "cost": {
         "inputPer1M": 5,
         "outputPer1M": 25
@@ -37,9 +37,9 @@
           "comparisons": 3
         },
         "JUDGMENT": {
-          "mu": 1000,
-          "sigma": 341.1578947368421,
-          "comparisons": 1
+          "mu": 989.2506703882876,
+          "sigma": 332.7523821150017,
+          "comparisons": 2
         },
         "CODE_GENERATION": {
           "mu": 946.6666666666666,
@@ -123,7 +123,7 @@
       "name": "Claude Sonnet 4.6",
       "contextWindow": 1000000,
       "supportsToolCalling": true,
-      "available": true,
+      "available": false,
       "cost": {
         "inputPer1M": 3,
         "outputPer1M": 15
@@ -241,7 +241,7 @@
       "name": "Claude Haiku 4.5",
       "contextWindow": 200000,
       "supportsToolCalling": true,
-      "available": true,
+      "available": false,
       "cost": {
         "inputPer1M": 1,
         "outputPer1M": 5
@@ -391,9 +391,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 857,
-          "sigma": 100,
-          "comparisons": 0
+          "mu": 875.7907551371464,
+          "sigma": 94.99136718311458,
+          "comparisons": 2
         },
         "CODE_GENERATION": {
           "mu": 857,
@@ -827,6 +827,124 @@
       },
       "available": false
     },
+    "google/gemini-2.0-flash-lite": {
+      "name": "Gemini 2.0 Flash-Lite",
+      "provider": "google",
+      "contextWindow": 1048576,
+      "supportsToolCalling": true,
+      "available": false,
+      "cost": {
+        "inputPer1M": 0.075,
+        "outputPer1M": 0.3
+      },
+      "scores": {
+        "REASONING": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "MATH_REASONING": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "MULTI_STEP_DEPTH": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "CREATIVITY": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "ANALYSIS": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "JUDGMENT": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "CODE_GENERATION": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "CODE_UNDERSTANDING": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "DEBUGGING": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "SYSTEM_THINKING": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "TOOL_USE": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "HALLUCINATION_RESISTANCE": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "CONFIDENCE_CALIBRATION": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "SELF_CONSISTENCY": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "AMBIGUITY_HANDLING": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "INSTRUCTION_FOLLOWING": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "STRUCTURED_OUTPUT": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "LONG_CONTEXT": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "MULTILINGUAL": {
+          "mu": 286,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "SPEED": {
+          "mu": 964,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "COST_EFFICIENCY": {
+          "mu": 964,
+          "sigma": 150,
+          "comparisons": 0
+        }
+      }
+    },
     "google/gemini-3-flash-preview": {
       "name": "Gemini 3 Flash (Preview)",
       "provider": "google",
@@ -863,9 +981,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 686,
-          "sigma": 132,
-          "comparisons": 0
+          "mu": 700.660717028795,
+          "sigma": 125.35124477502944,
+          "comparisons": 2
         },
         "CODE_GENERATION": {
           "mu": 686,
@@ -1180,6 +1298,124 @@
         }
       },
       "available": true
+    },
+    "google/gemini-3.1-flash-lite-preview": {
+      "name": "Gemini 3.1 Flash-Lite (Preview)",
+      "provider": "google",
+      "contextWindow": 1048576,
+      "supportsToolCalling": true,
+      "available": true,
+      "cost": {
+        "inputPer1M": 0.25,
+        "outputPer1M": 1.5
+      },
+      "scores": {
+        "REASONING": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "MATH_REASONING": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "MULTI_STEP_DEPTH": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "CREATIVITY": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "ANALYSIS": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "JUDGMENT": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "CODE_GENERATION": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "CODE_UNDERSTANDING": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "DEBUGGING": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "SYSTEM_THINKING": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "TOOL_USE": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "HALLUCINATION_RESISTANCE": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "CONFIDENCE_CALIBRATION": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "SELF_CONSISTENCY": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "AMBIGUITY_HANDLING": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "INSTRUCTION_FOLLOWING": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "STRUCTURED_OUTPUT": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "LONG_CONTEXT": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "MULTILINGUAL": {
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "SPEED": {
+          "mu": 851,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "COST_EFFICIENCY": {
+          "mu": 851,
+          "sigma": 150,
+          "comparisons": 0
+        }
+      }
     },
     "anthropic/claude-sonnet-4.5": {
       "name": "Claude Sonnet 4.5",
@@ -2751,9 +2987,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 550,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 541.9585744745659,
+          "sigma": 340.8681592039801,
+          "comparisons": 1
         },
         "CODE_GENERATION": {
           "mu": 500,
@@ -2987,9 +3223,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 450,
-          "sigma": 350,
-          "comparisons": 0
+          "mu": 441.27162977867204,
+          "sigma": 340.8864436619718,
+          "comparisons": 1
         },
         "CODE_GENERATION": {
           "mu": 500,
@@ -4126,6 +4362,478 @@
         },
         "COST_EFFICIENCY": {
           "mu": 855,
+          "sigma": 150,
+          "comparisons": 0
+        }
+      }
+    },
+    "xai/grok-4-1-fast-reasoning": {
+      "name": "Grok 4.1 Fast Reasoning",
+      "provider": "xai",
+      "contextWindow": 2000000,
+      "supportsToolCalling": true,
+      "available": true,
+      "cost": {
+        "inputPer1M": 0.2,
+        "outputPer1M": 0.5
+      },
+      "scores": {
+        "REASONING": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "MATH_REASONING": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "MULTI_STEP_DEPTH": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "CREATIVITY": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "ANALYSIS": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "JUDGMENT": {
+          "mu": 694.0676531925329,
+          "sigma": 126.75245679332929,
+          "comparisons": 1
+        },
+        "CODE_GENERATION": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "CODE_UNDERSTANDING": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "DEBUGGING": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "SYSTEM_THINKING": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "TOOL_USE": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "HALLUCINATION_RESISTANCE": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "CONFIDENCE_CALIBRATION": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "SELF_CONSISTENCY": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "AMBIGUITY_HANDLING": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "INSTRUCTION_FOLLOWING": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "STRUCTURED_OUTPUT": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "LONG_CONTEXT": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "MULTILINGUAL": {
+          "mu": 700,
+          "sigma": 130,
+          "comparisons": 0
+        },
+        "SPEED": {
+          "mu": 935,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "COST_EFFICIENCY": {
+          "mu": 935,
+          "sigma": 150,
+          "comparisons": 0
+        }
+      }
+    },
+    "xai/grok-4-1-fast-non-reasoning": {
+      "name": "Grok 4.1 Fast Non-Reasoning",
+      "provider": "xai",
+      "contextWindow": 2000000,
+      "supportsToolCalling": true,
+      "available": true,
+      "cost": {
+        "inputPer1M": 0.2,
+        "outputPer1M": 0.5
+      },
+      "scores": {
+        "REASONING": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "MATH_REASONING": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "MULTI_STEP_DEPTH": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "CREATIVITY": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "ANALYSIS": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "JUDGMENT": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "CODE_GENERATION": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "CODE_UNDERSTANDING": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "DEBUGGING": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "SYSTEM_THINKING": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "TOOL_USE": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "HALLUCINATION_RESISTANCE": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "CONFIDENCE_CALIBRATION": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "SELF_CONSISTENCY": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "AMBIGUITY_HANDLING": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "INSTRUCTION_FOLLOWING": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "STRUCTURED_OUTPUT": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "LONG_CONTEXT": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "MULTILINGUAL": {
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
+        },
+        "SPEED": {
+          "mu": 935,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "COST_EFFICIENCY": {
+          "mu": 935,
+          "sigma": 150,
+          "comparisons": 0
+        }
+      }
+    },
+    "xai/grok-4-fast-reasoning": {
+      "name": "Grok 4 Fast Reasoning",
+      "provider": "xai",
+      "contextWindow": 2000000,
+      "supportsToolCalling": true,
+      "available": true,
+      "cost": {
+        "inputPer1M": 0.2,
+        "outputPer1M": 0.5
+      },
+      "scores": {
+        "REASONING": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "MATH_REASONING": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "MULTI_STEP_DEPTH": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "CREATIVITY": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "ANALYSIS": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "JUDGMENT": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "CODE_GENERATION": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "CODE_UNDERSTANDING": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "DEBUGGING": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "SYSTEM_THINKING": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "TOOL_USE": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "HALLUCINATION_RESISTANCE": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "CONFIDENCE_CALIBRATION": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "SELF_CONSISTENCY": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "AMBIGUITY_HANDLING": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "INSTRUCTION_FOLLOWING": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "STRUCTURED_OUTPUT": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "LONG_CONTEXT": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "MULTILINGUAL": {
+          "mu": 680,
+          "sigma": 135,
+          "comparisons": 0
+        },
+        "SPEED": {
+          "mu": 935,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "COST_EFFICIENCY": {
+          "mu": 935,
+          "sigma": 150,
+          "comparisons": 0
+        }
+      }
+    },
+    "xai/grok-4-fast-non-reasoning": {
+      "name": "Grok 4 Fast Non-Reasoning",
+      "provider": "xai",
+      "contextWindow": 2000000,
+      "supportsToolCalling": true,
+      "available": true,
+      "cost": {
+        "inputPer1M": 0.2,
+        "outputPer1M": 0.5
+      },
+      "scores": {
+        "REASONING": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "MATH_REASONING": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "MULTI_STEP_DEPTH": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "CREATIVITY": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "ANALYSIS": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "JUDGMENT": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "CODE_GENERATION": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "CODE_UNDERSTANDING": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "DEBUGGING": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "SYSTEM_THINKING": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "TOOL_USE": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "HALLUCINATION_RESISTANCE": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "CONFIDENCE_CALIBRATION": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "SELF_CONSISTENCY": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "AMBIGUITY_HANDLING": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "INSTRUCTION_FOLLOWING": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "STRUCTURED_OUTPUT": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "LONG_CONTEXT": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "MULTILINGUAL": {
+          "mu": 580,
+          "sigma": 143,
+          "comparisons": 0
+        },
+        "SPEED": {
+          "mu": 935,
+          "sigma": 150,
+          "comparisons": 0
+        },
+        "COST_EFFICIENCY": {
+          "mu": 935,
           "sigma": 150,
           "comparisons": 0
         }

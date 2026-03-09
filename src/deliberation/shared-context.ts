@@ -11,17 +11,20 @@ import type {
   Synthesis,
   TeamComposition,
 } from "./types";
+import type { TaskNature } from "./task-nature";
 
 /**
  * Create a new empty SharedContext.
  *
  * @param task - Task description (non-empty string required).
  * @param team - Team composition (must have ≥1 worker + leader).
+ * @param taskNature - Optional task nature for prompt selection.
  * @throws {Error} If task is empty or team is invalid.
  */
 export function createSharedContext(
   task: string,
   team: TeamComposition,
+  taskNature?: TaskNature,
 ): SharedContext {
   if (!task || task.trim().length === 0) {
     throw new Error("Task description must be a non-empty string");
@@ -32,7 +35,7 @@ export function createSharedContext(
   if (!team.leader) {
     throw new Error("Team must have a leader");
   }
-  return { task: task.trim(), team, rounds: [] };
+  return { task: task.trim(), team, rounds: [], ...(taskNature ? { taskNature } : {}) };
 }
 
 /**

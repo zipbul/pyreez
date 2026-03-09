@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { buildWorkerMessages, buildLeaderMessages, buildDebateWorkerMessages } from "./prompts";
+import { buildWorkerMessages, buildLeaderMessages, buildDebateWorkerMessages, extractSummary } from "./prompts";
 import type {
   SharedContext,
   Round,
@@ -32,8 +32,8 @@ function makeTeam(): TeamComposition {
   };
 }
 
-function makeCtx(rounds: readonly Round[] = []): SharedContext {
-  return { task: "Write a sorting function", team: makeTeam(), rounds };
+function makeCtx(rounds: readonly Round[] = [], taskNature?: "artifact" | "critique"): SharedContext {
+  return { task: "Write a sorting function", team: makeTeam(), rounds, ...(taskNature ? { taskNature } : {}) };
 }
 
 function makeResponse(model: string, content: string): WorkerResponse {
@@ -79,22 +79,22 @@ describe("buildWorkerMessages", () => {
     // Assert
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toContain("deliberation participant");
-    expect(messages[0]!.content).toContain("observed fact");
+    expect(messages[0]!.content).toContain("fact-based analyst");
+    expect(messages[0]!.content).toContain("Self-Doubt");
     expect(messages[1]!.role).toBe("user");
     expect(messages[1]!.content).toContain("Write a sorting function");
   });
 
-  it("should use host-provided instructions with posture suffix as system message when given", () => {
+  it("should use host-provided instructions with self-doubt suffix as system message when given", () => {
     // Arrange
     const ctx = makeCtx();
 
     // Act
     const messages = buildWorkerMessages(ctx, "Use TypeScript strict mode");
 
-    // Assert — host instructions present with posture appended
+    // Assert — host instructions present with self-doubt appended
     expect(messages[0]!.content).toContain("Use TypeScript strict mode");
-    expect(messages[0]!.content).toContain("observed fact");
+    expect(messages[0]!.content).toContain("Self-Doubt");
   });
 
   it("should include previous round synthesis in user message when rounds exist", () => {
@@ -119,9 +119,9 @@ describe("buildWorkerMessages", () => {
     // Act
     const messages = buildWorkerMessages(ctx, undefined);
 
-    // Assert — system should fall back to default with posture
-    expect(messages[0]!.content).toContain("deliberation participant");
-    expect(messages[0]!.content).toContain("observed fact");
+    // Assert — system should fall back to default with self-doubt
+    expect(messages[0]!.content).toContain("fact-based analyst");
+    expect(messages[0]!.content).toContain("Self-Doubt");
   });
 
   it("should omit instructions section when instructions is empty string", () => {
@@ -132,8 +132,8 @@ describe("buildWorkerMessages", () => {
     const messages = buildWorkerMessages(ctx, "");
 
     // Assert — empty string is falsy, so default is used
-    expect(messages[0]!.content).toContain("deliberation participant");
-    expect(messages[0]!.content).toContain("observed fact");
+    expect(messages[0]!.content).toContain("fact-based analyst");
+    expect(messages[0]!.content).toContain("Self-Doubt");
   });
 
   it("should include round budget when roundInfo is provided", () => {
@@ -241,11 +241,11 @@ describe("buildLeaderMessages", () => {
     // Assert
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toContain("verifier-synthesizer");
-    expect(messages[0]!.content).toContain("Verify independently");
-    expect(messages[0]!.content).toContain("Search for gaps");
-    expect(messages[0]!.content).toContain("argument independence");
-    expect(messages[0]!.content).toContain("Synthesize honestly");
+    expect(messages[0]!.content).toContain("creative synthesizer");
+    expect(messages[0]!.content).toContain("Adopt strengths");
+    expect(messages[0]!.content).toContain("Question weaknesses");
+    expect(messages[0]!.content).toContain("Extract ideas from weaknesses");
+    expect(messages[0]!.content).toContain("Integrate all responses");
     expect(messages[1]!.role).toBe("user");
     expect(messages[1]!.content).toContain("Write a sorting function");
   });
@@ -272,16 +272,16 @@ describe("buildLeaderMessages", () => {
     expect(user).toContain("Worker Responses");
   });
 
-  it("should use host-provided instructions with verifier suffix as system message when given", () => {
+  it("should use host-provided instructions with synthesizer suffix as system message when given", () => {
     // Arrange
     const ctx = makeCtx([makeRound(1)]);
 
     // Act
     const messages = buildLeaderMessages(ctx, "Be strict on security");
 
-    // Assert — host instructions present with verifier suffix appended
+    // Assert — host instructions present with synthesizer suffix appended
     expect(messages[0]!.content).toContain("Be strict on security");
-    expect(messages[0]!.content).toContain("Verify independently");
+    expect(messages[0]!.content).toContain("Adopt strengths");
   });
 
   it("should omit instructions section when instructions is undefined", () => {
@@ -291,9 +291,9 @@ describe("buildLeaderMessages", () => {
     // Act
     const messages = buildLeaderMessages(ctx, undefined);
 
-    // Assert — falls back to verifier default
-    expect(messages[0]!.content).toContain("verifier-synthesizer");
-    expect(messages[0]!.content).toContain("Verify independently");
+    // Assert — falls back to synthesizer default
+    expect(messages[0]!.content).toContain("creative synthesizer");
+    expect(messages[0]!.content).toContain("Adopt strengths");
   });
 
   it("should omit instructions section when instructions is empty string", () => {
@@ -303,9 +303,9 @@ describe("buildLeaderMessages", () => {
     // Act
     const messages = buildLeaderMessages(ctx, "");
 
-    // Assert — empty string is falsy, falls back to verifier default
-    expect(messages[0]!.content).toContain("verifier-synthesizer");
-    expect(messages[0]!.content).toContain("Verify independently");
+    // Assert — empty string is falsy, falls back to synthesizer default
+    expect(messages[0]!.content).toContain("creative synthesizer");
+    expect(messages[0]!.content).toContain("Adopt strengths");
   });
 
   it("should include round budget when roundInfo is provided", () => {
@@ -365,9 +365,9 @@ describe("buildLeaderMessages", () => {
     });
     const user = messages[1]!.content!;
 
-    // Assert — instructions + verifier suffix in system, round budget in user
+    // Assert — instructions + synthesizer suffix in system, round budget in user
     expect(messages[0]!.content).toContain("Be strict");
-    expect(messages[0]!.content).toContain("Verify independently");
+    expect(messages[0]!.content).toContain("Adopt strengths");
     expect(user).toContain("Round 2");
   });
 
@@ -477,7 +477,7 @@ describe("buildLeaderMessages", () => {
     const messages = buildLeaderMessages(ctx, undefined, { current: 3, max: 3 }, "leader_decides", "debate");
     const systemContent = messages.find(m => m.role === "system")!.content;
     expect(systemContent).toContain("approve");
-    expect(systemContent).toContain("verifier-synthesizer");
+    expect(systemContent).toContain("creative synthesizer");
     expect(systemContent).not.toContain("moderator and verifier of a structured debate");
   });
 
@@ -498,7 +498,7 @@ describe("buildLeaderMessages", () => {
     const systemContent = messages.find(m => m.role === "system")!.content;
     // Host already specified JSON+decision → should NOT double-inject
     expect(systemContent).toContain(hostInstructions);
-    expect(systemContent).toContain("Verify independently");
+    expect(systemContent).toContain("Adopt strengths");
     // Should NOT have pyreez's JSON injection
     expect(systemContent).not.toContain("IMPORTANT: You MUST respond");
   });
@@ -526,15 +526,15 @@ describe("buildLeaderMessages", () => {
     expect(systemContent).not.toContain('"decision"');
   });
 
-  it("should place verification section before synthesis section in output structure", () => {
+  it("should place per-worker analysis section before synthesis section in output structure", () => {
     const ctx = makeCtx([makeRound(1)]);
     const messages = buildLeaderMessages(ctx);
     const systemContent = messages.find(m => m.role === "system")!.content!;
-    const verificationIdx = systemContent.indexOf("Verification");
+    const perWorkerIdx = systemContent.indexOf("Per-Worker Analysis");
     const synthesisIdx = systemContent.indexOf("Synthesis");
-    expect(verificationIdx).toBeGreaterThan(-1);
+    expect(perWorkerIdx).toBeGreaterThan(-1);
     expect(synthesisIdx).toBeGreaterThan(-1);
-    expect(verificationIdx).toBeLessThan(synthesisIdx);
+    expect(perWorkerIdx).toBeLessThan(synthesisIdx);
   });
 });
 
@@ -581,11 +581,11 @@ describe("buildDebateWorkerMessages", () => {
     expect(user).not.toContain("Synth-1: disagreement on X");
   });
 
-  it("should include debate context and posture in system message", () => {
+  it("should include debate context and self-doubt in system message", () => {
     const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
     const messages = buildDebateWorkerMessages(ctx);
     expect(messages[0]!.content).toContain("debate");
-    expect(messages[0]!.content).toContain("observed fact");
+    expect(messages[0]!.content).toContain("Self-Doubt");
   });
 
   it("should include final round instruction on last round", () => {
@@ -595,12 +595,12 @@ describe("buildDebateWorkerMessages", () => {
     expect(user).toMatch(/final/i);
   });
 
-  it("should use host instructions combined with debate context and posture", () => {
+  it("should use host instructions combined with debate context and self-doubt", () => {
     const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
     const messages = buildDebateWorkerMessages(ctx, "Focus on performance");
     expect(messages[0]!.content).toContain("Focus on performance");
     expect(messages[0]!.content).toContain("debate");
-    expect(messages[0]!.content).toContain("observed fact");
+    expect(messages[0]!.content).toContain("Self-Doubt");
   });
 
   it("should include worker's own previous response when workerModel is provided", () => {
@@ -727,5 +727,89 @@ describe("cross-function", () => {
     expect(worker).toHaveLength(2);
     expect(leader).toHaveLength(2);
     expect(leader[1]!.content).not.toContain("Worker Responses");
+  });
+});
+
+// ================================================================
+// TaskNature-aware prompts
+// ================================================================
+
+describe("artifact worker prompts", () => {
+  it("should use artifact prompt when taskNature is artifact and no instructions", () => {
+    const ctx = makeCtx([], "artifact");
+    const messages = buildWorkerMessages(ctx);
+    expect(messages[0]!.content).toContain("expert implementer");
+    expect(messages[0]!.content).not.toContain("Self-Doubt");
+    expect(messages[0]!.content).toContain("worker-summary");
+  });
+
+  it("should skip self-doubt suffix when taskNature is artifact with host instructions", () => {
+    const ctx = makeCtx([], "artifact");
+    const messages = buildWorkerMessages(ctx, "Use TypeScript");
+    expect(messages[0]!.content).toContain("Use TypeScript");
+    expect(messages[0]!.content).not.toContain("Self-Doubt");
+  });
+
+  it("should use critique (default) prompt when taskNature is critique", () => {
+    const ctx = makeCtx([], "critique");
+    const messages = buildWorkerMessages(ctx);
+    expect(messages[0]!.content).toContain("fact-based analyst");
+    expect(messages[0]!.content).toContain("Self-Doubt");
+  });
+});
+
+describe("artifact leader prompts", () => {
+  it("should use artifact leader prompt when taskNature is artifact", () => {
+    const round = makeRound(1);
+    const ctx = makeCtx([round], "artifact");
+    const messages = buildLeaderMessages(ctx);
+    expect(messages[0]!.content).toContain("synthesis lead");
+    expect(messages[0]!.content).toContain("DO NOT write per-worker analysis");
+    expect(messages[0]!.content).not.toContain("creative synthesizer");
+  });
+
+  it("should include worker summary manifest for artifact tasks", () => {
+    const round = makeRound(1, {
+      responses: [
+        makeResponse("worker/a", "<summary>\nAPPROACH: quicksort\nTRADEOFF: memory\nASSUMPTION: fits in RAM\n</summary>\ncode here"),
+        makeResponse("worker/b", "No summary tag, just code"),
+      ],
+    });
+    const ctx = makeCtx([round], "artifact");
+    const messages = buildLeaderMessages(ctx);
+    const user = messages[1]!.content!;
+    expect(user).toContain("WORKER SUMMARY MANIFEST");
+    expect(user).toContain("APPROACH: quicksort");
+  });
+
+  it("should NOT include summary manifest for critique tasks", () => {
+    const round = makeRound(1);
+    const ctx = makeCtx([round], "critique");
+    const messages = buildLeaderMessages(ctx);
+    expect(messages[1]!.content).not.toContain("WORKER SUMMARY MANIFEST");
+  });
+});
+
+describe("artifact debate worker prompts", () => {
+  it("should skip self-doubt suffix for artifact tasks in debate mode", () => {
+    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })], "artifact");
+    const messages = buildDebateWorkerMessages(ctx);
+    expect(messages[0]!.content).not.toContain("Self-Doubt");
+  });
+});
+
+// ================================================================
+// extractSummary
+// ================================================================
+
+describe("extractSummary", () => {
+  it("should extract content from summary tags", () => {
+    const content = "<summary>\nAPPROACH: quicksort\nTRADEOFF: memory\nASSUMPTION: fits\n</summary>\ncode";
+    expect(extractSummary(content)).toBe("APPROACH: quicksort\nTRADEOFF: memory\nASSUMPTION: fits");
+  });
+
+  it("should fall back to first 3 lines when no summary tags", () => {
+    const content = "line 1\nline 2\nline 3\nline 4\nline 5";
+    expect(extractSummary(content)).toBe("line 1\nline 2\nline 3");
   });
 });

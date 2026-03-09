@@ -16,6 +16,7 @@ import type {
   PairwiseResult,
   ChatFn,
 } from "./types";
+import type { TaskNature } from "../deliberation/task-nature";
 
 // -- Scoring --
 
@@ -63,6 +64,7 @@ export interface DeliberationOverrides {
   readonly leaderContributes?: boolean;
   readonly workerInstructions?: string;
   readonly leaderInstructions?: string;
+  readonly taskNature?: TaskNature;
 }
 
 export interface DeliberationProtocol {
