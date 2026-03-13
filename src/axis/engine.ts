@@ -4,6 +4,7 @@
  * Orchestrates: Scoring → (LearningLayer.enhance) → Profile → Select → Deliberate
  * Classification is provided by the host agent (not done server-side).
  * LearningLayer is optional. When provided: enhance() before select, record() after deliberate (fire-and-forget).
+ * CooldownManager is optional. When provided: pre-filters unhealthy models before scoring.
  */
 
 import type {
@@ -22,6 +23,7 @@ import type {
   SlotTrace,
   RunTrace,
 } from "./types";
+import type { CooldownManager } from "../deliberation/cooldown";
 
 export class PyreezEngine {
   constructor(
@@ -32,6 +34,8 @@ export class PyreezEngine {
     private readonly chat: ChatFn,
     private readonly modelIds: string[],
     private readonly learner?: LearningLayer,
+    /** Shared CooldownManager for pre-filtering unhealthy models. */
+    private readonly cooldown?: CooldownManager,
   ) {}
 
   /** Run Stage 1-2 only (no LLM calls). For benchmark dry mode. */
@@ -40,8 +44,21 @@ export class PyreezEngine {
     budget: BudgetConfig,
     classification: TaskClassification,
   ): Promise<SlotTrace> {
+    // Pre-filter: exclude models currently on cooldown
+    let effectiveModelIds = this.modelIds;
+    if (this.cooldown) {
+      const cooled = this.cooldown.getCooledDownIds();
+      if (cooled.size > 0) {
+        const filtered = this.modelIds.filter((id) => !cooled.has(id));
+        // Only apply filter if at least 1 model remains (never filter all)
+        if (filtered.length > 0) {
+          effectiveModelIds = filtered;
+        }
+      }
+    }
+
     // Scoring: get BT ratings
-    let scores = await this.scoring.getScores(this.modelIds);
+    let scores = await this.scoring.getScores(effectiveModelIds);
 
     // Learning Layer: apply L2~L4 personal corrections (optional)
     if (this.learner) {

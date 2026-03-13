@@ -39,6 +39,7 @@ import { CascadeSelector } from "./router/cascade-selector";
 import type { Selector } from "./axis/interfaces";
 import type { ChatFn } from "./axis/types";
 import type { ChatMessage } from "./llm/types";
+import { createCooldownManager } from "./deliberation/cooldown";
 
 /**
  * Filter registry models to only those from configured providers.
@@ -119,21 +120,24 @@ async function main(): Promise<void> {
 
   const chatAdapter = createChatAdapter((req) => providerRegistry.chat(req));
 
-  // Axis ChatFn adapter: bridge (modelId, string | ChatMessage[]) → ChatResult
-  const axisChatFn: ChatFn = async (modelId, input) => {
+  // Axis ChatFn adapter: bridge (modelId, string | ChatMessage[], params?) → ChatResult
+  const axisChatFn: ChatFn = async (modelId, input, params) => {
     const messages: ChatMessage[] =
       typeof input === "string"
         ? [{ role: "user", content: input }]
         : input;
-    return chatAdapter(modelId, messages);
+    return chatAdapter(modelId, messages, params);
   };
 
   // Build 3-stage pipeline directly (no factory)
   const { modelIds } = filterModelsByProviders(registry, providers);
 
+  // Shared CooldownManager: process-scoped, persists across MCP calls
+  const sharedCooldown = createCooldownManager();
+
   const scoring = new BtScoringSystem({ persistIO: fileIO, scoresPath: "scores/models.json", registry });
   const profiler = new DomainOverrideProfiler();
-  const deliberation = new DivergeSynthProtocol("leader_decides", 1);
+  const deliberation = new DivergeSynthProtocol({ maxRounds: 1, registry, cooldown: sharedCooldown });
 
   // MF Learner: matrix factorization for task-type × model affinity
   const mfLearner = new MfLearner({
@@ -178,6 +182,7 @@ async function main(): Promise<void> {
     axisChatFn,
     modelIds,
     learningLayer,
+    sharedCooldown,
   );
 
   // Filtered registry: only models from configured providers
@@ -190,10 +195,11 @@ async function main(): Promise<void> {
 
   const deliberateFn = createDeliberateFn({
     registry: filteredRegistry,
-    chat: (model, messages) => chatAdapter(model, messages),
+    chat: (model, messages, params) => chatAdapter(model, messages, params),
     store: deliberationStore,
+    cooldown: sharedCooldown,
     pollJudge: {
-      chatFn: (model, messages) => chatAdapter(model, messages),
+      chatFn: (model, messages, params) => chatAdapter(model, messages, params),
       getAvailableModels: () => filteredRegistry.getAvailable(),
     },
     scoring,

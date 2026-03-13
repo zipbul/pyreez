@@ -11,6 +11,27 @@ import type { ModelInfo, CapabilityDimension } from "../model/types";
 import { SIGMA_BASE } from "../model/types";
 import type { TeamComposition, TeamMember } from "./types";
 
+// -- Error types --
+
+/**
+ * Thrown when no models are available for deliberation.
+ * Includes structured error code and remediation hints for host agents.
+ */
+export class NoModelsAvailableError extends Error {
+  readonly code = "NO_MODELS_AVAILABLE";
+  readonly remediation: string[];
+
+  constructor(reason: string, remediation?: string[]) {
+    super(reason);
+    this.name = "NoModelsAvailableError";
+    this.remediation = remediation ?? [
+      "Check that at least one provider API key is configured (PYREEZ_ANTHROPIC_KEY, PYREEZ_GOOGLE_API_KEY, etc.)",
+      "Verify models have 'available: true' in scores/models.json",
+      "If models were recently failing, they may be on cooldown — retry after a few minutes",
+    ];
+  }
+}
+
 // -- Public types --
 
 export interface ComposeTeamOptions {
@@ -65,6 +86,7 @@ export function scoreDimensions(
   let total = 0;
   for (const { dimension, weight } of dims) {
     const rating = model.capabilities[dimension];
+    if (!rating) continue; // skip missing dimensions gracefully
     const uncertaintyPenalty = 1 / (1 + rating.sigma / SIGMA_BASE);
     total += rating.mu * uncertaintyPenalty * weight;
   }
@@ -203,7 +225,9 @@ export function composeTeam(
     throw new Error("Task description must be a non-empty string");
   }
   if (options.modelIds.length === 0) {
-    throw new Error("At least one model is required");
+    throw new NoModelsAvailableError(
+      "No models available for deliberation. At least one model is required.",
+    );
   }
 
   const models = deps.getModels();
@@ -248,4 +272,66 @@ export function composeTeam(
   }));
 
   return { workers, leader };
+}
+
+// -- Capability-Based Role Ordering --
+
+/**
+ * Dimension weights for each deliberation role.
+ * advocate (index 0): values REASONING (strong arguments, evidence chains).
+ * critic (index 1): values ANALYSIS (finding flaws, decomposing assumptions).
+ * wildcard (index 2): values CREATIVITY (unconventional angles).
+ */
+const ROLE_DIMS: readonly { dimension: CapabilityDimension; weight: number }[][] = [
+  [{ dimension: "REASONING", weight: 0.5 }, { dimension: "CONFIDENCE_CALIBRATION", weight: 0.3 }, { dimension: "ANALYSIS", weight: 0.2 }],
+  [{ dimension: "ANALYSIS", weight: 0.5 }, { dimension: "HALLUCINATION_RESISTANCE", weight: 0.3 }, { dimension: "REASONING", weight: 0.2 }],
+  [{ dimension: "CREATIVITY", weight: 0.5 }, { dimension: "AMBIGUITY_HANDLING", weight: 0.3 }, { dimension: "REASONING", weight: 0.2 }],
+];
+
+/**
+ * Reorder workers so that each worker's capability profile best matches
+ * the deliberation role assigned to its index position.
+ *
+ * Index 0 = advocate (REASONING), Index 1 = critic (ANALYSIS), Index 2 = wildcard (CREATIVITY).
+ * Wraps for 4+ workers (index 3 = advocate, etc.).
+ *
+ * Uses greedy assignment: for each role slot, pick the best-scoring unassigned worker.
+ *
+ * @param workers - Worker team members to reorder.
+ * @param getById - Model lookup function.
+ * @returns Reordered workers array.
+ */
+export function orderWorkersByRole(
+  workers: readonly TeamMember[],
+  getById: (id: string) => ModelInfo | undefined,
+): TeamMember[] {
+  if (workers.length <= 1) return [...workers];
+
+  const infos = workers.map((w, i) => ({ member: w, info: getById(w.model), origIdx: i }));
+
+  // If registry can't resolve models, keep original order
+  if (infos.some((x) => !x.info)) return [...workers];
+
+  const assigned = new Set<number>();
+  const result: TeamMember[] = new Array(workers.length);
+
+  for (let slot = 0; slot < workers.length; slot++) {
+    const roleDims = ROLE_DIMS[slot % ROLE_DIMS.length]!;
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+
+    for (let i = 0; i < infos.length; i++) {
+      if (assigned.has(i)) continue;
+      const score = scoreDimensions(infos[i]!.info!, roleDims);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+
+    assigned.add(bestIdx);
+    result[slot] = infos[bestIdx]!.member;
+  }
+
+  return result;
 }

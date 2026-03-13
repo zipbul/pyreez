@@ -367,6 +367,21 @@ describe("totalLLMCalls", () => {
     expect(totalLLMCalls(ctx)).toBe(2);
   });
 
+  it("should count failed workers as LLM calls", () => {
+    // Arrange
+    let ctx = createSharedContext("task", makeTeam());
+    // 1 successful response + 1 failed worker + 1 synthesis = 3
+    ctx = addRound(ctx, {
+      number: 1,
+      responses: [makeResponse("openai/gpt-4.1")],
+      synthesis: makeSynthesis("continue"),
+      failedWorkers: [{ model: "deepseek/deepseek-r1", error: "degenerate response" }],
+    });
+
+    // Act / Assert
+    expect(totalLLMCalls(ctx)).toBe(3);
+  });
+
   it("should handle mixed rounds (some with synthesis, some without)", () => {
     // Arrange
     let ctx = createSharedContext("task", makeTeam());

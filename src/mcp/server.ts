@@ -19,7 +19,8 @@ import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 import type { DeliberationStore } from "../deliberation/store-types";
 import type { PyreezEngine } from "../axis/engine";
 import type { TaskClassification } from "../axis/types";
-import { resolveTaskNature } from "../deliberation/task-nature";
+import { resolveTaskNature, shouldAutoDebate } from "../deliberation/task-nature";
+import { NoModelsAvailableError } from "../deliberation/team-composer";
 
 /** Domain → default task_type mapping. Used when host omits task_type. */
 const DOMAIN_DEFAULTS: Record<string, string> = {
@@ -493,13 +494,19 @@ export class PyreezMcpServer {
           costWeight: args.cost_weight,
         };
         // Build deliberation overrides from user params
-        const validProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
+        const userProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
         const taskNature = resolveTaskNature(args.domain, taskType);
-        const hasOverrides = validProtocol != null || args.max_rounds != null || args.consensus != null || args.leader_contributes != null || args.worker_instructions != null || args.leader_instructions != null || taskNature != null;
+        // Auto-select debate for complex critique/review tasks (only when user didn't specify protocol)
+        const autoDebate = !userProtocol && shouldAutoDebate(args.domain, taskType, complexity);
+        const effectiveProtocol = userProtocol ?? (autoDebate ? "debate" as const : undefined);
+        // Auto-debate implies consensus for adaptive stopping
+        const effectiveConsensus = args.consensus === "leader_decides" ? "leader_decides" as const
+          : (autoDebate ? "leader_decides" as const : undefined);
+        const hasOverrides = effectiveProtocol != null || args.max_rounds != null || effectiveConsensus != null || args.leader_contributes != null || args.worker_instructions != null || args.leader_instructions != null || taskNature != null;
         const deliberationOverrides = hasOverrides ? {
-          protocol: validProtocol,
+          protocol: effectiveProtocol,
           maxRounds: args.max_rounds,
-          consensus: args.consensus === "leader_decides" ? "leader_decides" as const : undefined,
+          consensus: effectiveConsensus,
           leaderContributes: args.leader_contributes,
           workerInstructions: args.worker_instructions,
           leaderInstructions: args.leader_instructions,
@@ -545,6 +552,13 @@ export class PyreezMcpServer {
         };
         return this.textResult(JSON.stringify(response, null, 2));
       } catch (error) {
+        if (error instanceof NoModelsAvailableError) {
+          return this.errorResult(JSON.stringify({
+            error: error.message,
+            code: error.code,
+            remediation: error.remediation,
+          }));
+        }
         return this.errorResult(
           `Error: ${sanitizeError(error)}`,
         );
@@ -557,16 +571,22 @@ export class PyreezMcpServer {
     }
 
     try {
-      const validProtocol = args.protocol === "debate" ? "debate" : args.protocol === "diverge-synth" ? "diverge-synth" : undefined;
+      const manualUserProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
       const manualTaskNature = args.domain ? resolveTaskNature(args.domain, args.task_type) : undefined;
+      const manualComplexity = (args.complexity ?? inferComplexity(args.task)) as string;
+      // Auto-select debate for complex critique/review tasks
+      const manualAutoDebate = !manualUserProtocol && args.domain && shouldAutoDebate(args.domain, args.task_type, manualComplexity);
+      const manualEffectiveProtocol = manualUserProtocol ?? (manualAutoDebate ? "debate" as const : undefined);
+      const manualEffectiveConsensus = args.consensus === "leader_decides" ? "leader_decides" as const
+        : (manualAutoDebate ? "leader_decides" as const : undefined);
       const input: DeliberateInput = {
         task: args.task,
         workerInstructions: args.worker_instructions,
         leaderInstructions: args.leader_instructions,
         maxRounds: args.max_rounds,
-        consensus: args.consensus === "leader_decides" ? "leader_decides" : undefined,
+        consensus: manualEffectiveConsensus,
         leaderContributes: args.leader_contributes,
-        protocol: validProtocol,
+        protocol: manualEffectiveProtocol,
         qualityWeight: args.quality_weight,
         costWeight: args.cost_weight,
         ...(args.models?.length ? { models: args.models } : {}),
@@ -575,6 +595,13 @@ export class PyreezMcpServer {
       const result = await this.deliberateFn(input);
       return this.textResult(JSON.stringify(result, null, 2));
     } catch (error) {
+      if (error instanceof NoModelsAvailableError) {
+        return this.errorResult(JSON.stringify({
+          error: error.message,
+          code: error.code,
+          remediation: error.remediation,
+        }));
+      }
       return this.errorResult(
         `Error: ${sanitizeError(error)}`,
       );

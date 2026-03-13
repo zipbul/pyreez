@@ -82,12 +82,16 @@ export function isConsensusReached(ctx: SharedContext): boolean {
 
 /**
  * Count total LLM calls across all rounds.
- * Each round: N worker responses + 1 synthesis = N + 1 calls.
+ * Includes successful responses, failed workers (API calls were still made), and synthesis.
  */
 export function totalLLMCalls(ctx: SharedContext): number {
   let count = 0;
   for (const round of ctx.rounds) {
     count += round.responses.length;
+    // Failed workers still consumed API calls (degenerate responses, network errors, etc.)
+    if (round.failedWorkers?.length) {
+      count += round.failedWorkers.length;
+    }
     if (round.synthesis) {
       count += 1;
     }
@@ -96,7 +100,10 @@ export function totalLLMCalls(ctx: SharedContext): number {
 }
 
 /**
- * Get all unique models used across all rounds.
+ * Get all unique models that contributed to the deliberation result.
+ * Only includes models with successful responses or synthesis.
+ * Failed workers (degenerate, network error) are excluded — they did not contribute
+ * to the output. Use totalLLMCalls() for API cost tracking including failed attempts.
  */
 export function modelsUsed(ctx: SharedContext): string[] {
   const models = new Set<string>();

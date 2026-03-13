@@ -13,6 +13,7 @@ import { createDeliberateFn } from "../src/deliberation/wire";
 import type { DeliberateInput } from "../src/deliberation/types";
 import type { ChatMessage } from "../src/llm/types";
 import type { ChatResult } from "../src/deliberation/engine";
+import { MIN_WORKER_RESPONSE_LENGTH } from "../src/deliberation/engine";
 import type {
   ModelInfo,
   ModelCapabilities,
@@ -107,12 +108,26 @@ function fixtureRegistry() {
 function detectRole(messages: ChatMessage[]): "worker" | "leader" {
   const system = messages.find((m) => m.role === "system");
   if (!system?.content) return "worker";
-  if (system.content.includes("creative synthesizer") || system.content.includes("moderator and verifier")) return "leader";
+  if (
+    system.content.includes("verification-first synthesizer") ||
+    system.content.includes("Intermediate synthesis lead") ||
+    system.content.includes("synthesis lead")
+  ) return "leader";
   return "worker";
 }
 
 function chatResult(content: string, input = 10, output = 20): ChatResult {
   return { content, inputTokens: input, outputTokens: output };
+}
+
+/** Pad worker content above MIN_WORKER_RESPONSE_LENGTH to avoid degenerate-response filtering. */
+function validWorker(label: string): string {
+  return label.padEnd(MIN_WORKER_RESPONSE_LENGTH, ".");
+}
+
+/** Wrap leader content in required XML structural tags to pass synthesis validation. */
+function validLeader(content: string): string {
+  return `<verification>verified</verification><adopted>adopted</adopted><novel>none</novel><result>${content}</result>`;
 }
 
 // ============================================================
@@ -128,9 +143,9 @@ describe("Deliberation E2E", () => {
     const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
       const role = detectRole(messages);
       if (role === "leader") {
-        return chatResult("Leader synthesis of all responses");
+        return chatResult(validLeader("Leader synthesis of all responses"));
       }
-      return chatResult("Worker response content");
+      return chatResult(validWorker("Worker response content"));
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
@@ -144,7 +159,7 @@ describe("Deliberation E2E", () => {
     // Assert
     expect(result.consensusReached).toBeNull(); // no consensus mode = null
     expect(result.roundsExecuted).toBe(1);
-    expect(result.result).toBe("Leader synthesis of all responses");
+    expect(result.result).toContain("Leader synthesis of all responses");
     expect(result.modelsUsed.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -161,17 +176,17 @@ describe("Deliberation E2E", () => {
         if (roundCount === 1) {
           // Round 1: continue
           return chatResult(JSON.stringify({
-            result: "Draft v1",
+            result: validLeader("Draft v1"),
             decision: "continue",
           }));
         }
         // Round 2: approve
         return chatResult(JSON.stringify({
-          result: "Revised v2",
+          result: validLeader("Revised v2"),
           decision: "approve",
         }));
       }
-      return chatResult("Worker response");
+      return chatResult(validWorker("Worker response"));
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
@@ -186,7 +201,7 @@ describe("Deliberation E2E", () => {
     // Assert
     expect(result.roundsExecuted).toBe(2);
     expect(result.consensusReached).toBe(true);
-    expect(result.result).toBe("Revised v2");
+    expect(result.result).toContain("Revised v2");
   });
 
   // ----------------------------------------------------------
@@ -197,9 +212,9 @@ describe("Deliberation E2E", () => {
     const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
       const role = detectRole(messages);
       if (role === "leader") {
-        return chatResult("Leader synthesis");
+        return chatResult(validLeader("Leader synthesis"));
       }
-      return chatResult("Worker attempt");
+      return chatResult(validWorker("Worker attempt"));
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
@@ -226,9 +241,9 @@ describe("Deliberation E2E", () => {
       capturedSystemMessages.push(systemMsg);
       const role = detectRole(messages);
       if (role === "leader") {
-        return chatResult("Leader output");
+        return chatResult(validLeader("Leader output"));
       }
-      return chatResult("Worker output");
+      return chatResult(validWorker("Worker output"));
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
@@ -240,14 +255,14 @@ describe("Deliberation E2E", () => {
       leaderInstructions: "Prioritize security",
     });
 
-    // Assert — worker instructions appear in worker calls (with self-doubt suffix appended),
-    // leader instructions in leader call (with synthesizer suffix appended).
+    // Assert — worker instructions appear in worker calls (with role-specific prompt),
+    // leader instructions in leader call (with verification-first synthesizer suffix).
     // Note: structural validation may retry the leader call (up to 2 total).
     const workerMsgs = capturedSystemMessages.filter(
-      (msg) => msg.includes("Use TypeScript strictly") && msg.includes("Self-Doubt"),
+      (msg) => msg.includes("Use TypeScript strictly") && msg.includes("analyst"),
     );
     const leaderMsgs = capturedSystemMessages.filter(
-      (msg) => msg.includes("Prioritize security") && msg.includes("Adopt strengths"),
+      (msg) => msg.includes("Prioritize security") && msg.includes("Verify first"),
     );
     expect(workerMsgs.length).toBeGreaterThanOrEqual(1);
     expect(leaderMsgs.length).toBeGreaterThanOrEqual(1);
@@ -262,13 +277,13 @@ describe("Deliberation E2E", () => {
     const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
       const role = detectRole(messages);
       if (role === "leader") {
-        return chatResult("Leader synthesis despite partial failure");
+        return chatResult(validLeader("Leader synthesis despite partial failure"));
       }
       workerCallCount++;
       if (workerCallCount === 1) {
         throw new Error("Network timeout");
       }
-      return chatResult("Surviving worker response");
+      return chatResult(validWorker("Surviving worker response"));
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
@@ -305,9 +320,9 @@ describe("Deliberation E2E", () => {
     const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
       const role = detectRole(messages);
       if (role === "leader") {
-        return chatResult("Here is my plain text synthesis without JSON");
+        return chatResult(validLeader("Here is my plain text synthesis without JSON"));
       }
-      return chatResult("Worker plain text answer");
+      return chatResult(validWorker("Worker plain text answer"));
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
@@ -320,7 +335,7 @@ describe("Deliberation E2E", () => {
 
     // Assert — no JSON parsing attempted without consensus mode
     expect(result.roundsExecuted).toBe(1);
-    expect(result.result).toBe("Here is my plain text synthesis without JSON");
+    expect(result.result).toContain("Here is my plain text synthesis without JSON");
     expect(result.consensusReached).toBeNull();
   });
 
@@ -332,9 +347,9 @@ describe("Deliberation E2E", () => {
     const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
       const role = detectRole(messages);
       if (role === "leader") {
-        return chatResult("Final leader output", 50, 100);
+        return chatResult(validLeader("Final leader output"), 50, 100);
       }
-      return chatResult("Worker output", 30, 60);
+      return chatResult(validWorker("Worker output"), 30, 60);
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
@@ -345,7 +360,7 @@ describe("Deliberation E2E", () => {
     });
 
     // Assert — every field in DeliberateOutput
-    expect(result.result).toBe("Final leader output");
+    expect(result.result).toContain("Final leader output");
     expect(result.roundsExecuted).toBe(1);
     expect(result.consensusReached).toBeNull();
     expect(result.totalTokens.input).toBeGreaterThan(0);
@@ -370,9 +385,9 @@ describe("Deliberation E2E", () => {
       globalCallCount++;
       const role = detectRole(messages);
       if (role === "leader") {
-        return chatResult(`Leader-${globalCallCount}`);
+        return chatResult(validLeader(`Leader-${globalCallCount}`));
       }
-      return chatResult(`Worker-${globalCallCount}`);
+      return chatResult(validWorker(`Worker-${globalCallCount}`));
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
@@ -404,18 +419,18 @@ describe("Deliberation E2E", () => {
         leaderRound++;
         if (leaderRound < 3) {
           return chatResult(
-            JSON.stringify({ result: `Round ${leaderRound}`, decision: "continue" }),
+            JSON.stringify({ result: validLeader(`Round ${leaderRound}`), decision: "continue" }),
             50,
             100,
           );
         }
         return chatResult(
-          JSON.stringify({ result: "Final", decision: "approve" }),
+          JSON.stringify({ result: validLeader("Final"), decision: "approve" }),
           50,
           100,
         );
       }
-      return chatResult("Worker response", 30, 60);
+      return chatResult(validWorker("Worker response"), 30, 60);
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });

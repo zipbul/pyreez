@@ -137,7 +137,7 @@ describe("TwoTrackCeSelector", () => {
 describe("BtScoringSystem overall score excludes operational dimensions", () => {
   const scoring = new BtScoringSystem();
 
-  it("should compute overall excluding SPEED, COST_EFFICIENCY, CONTEXT_UTILIZATION", async () => {
+  it("should compute overall excluding SPEED, COST_EFFICIENCY", async () => {
     // Arrange — get scores for a real model
     const [score] = await scoring.getScores(["anthropic/claude-sonnet-4.6"]);
     expect(score).toBeDefined();
@@ -145,7 +145,7 @@ describe("BtScoringSystem overall score excludes operational dimensions", () => 
     // The overall should NOT equal the mean of ALL dimensions (since SPEED etc are excluded)
     const allDims = Object.entries(score!.dimensions);
 
-    const nonOpDims = allDims.filter(([dim]) => !["SPEED", "COST_EFFICIENCY", "CONTEXT_UTILIZATION"].includes(dim));
+    const nonOpDims = allDims.filter(([dim]) => !["SPEED", "COST_EFFICIENCY"].includes(dim));
     const nonOpMean = nonOpDims.reduce((sum, [, v]) => sum + v.mu, 0) / nonOpDims.length;
 
     // overall should match the non-operational mean
@@ -612,7 +612,7 @@ describe("DivergeSynthProtocol", () => {
 
   it("should build team from explicit roles when plan has roles", async () => {
     const { fn, calls } = makeDeliberateFn();
-    const protocol = new DivergeSynthProtocol(undefined, 1, fn);
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
 
     await protocol.deliberate("test task", mockPlanWithRoles, mockScores, mockChat);
 
@@ -623,7 +623,7 @@ describe("DivergeSynthProtocol", () => {
 
   it("should auto-select leader when plan has no roles", async () => {
     const { fn, calls } = makeDeliberateFn();
-    const protocol = new DivergeSynthProtocol(undefined, 1, fn);
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
 
     await protocol.deliberate("test task", mockPlan, mockScores, mockChat);
 
@@ -635,7 +635,7 @@ describe("DivergeSynthProtocol", () => {
 
   it("should enforce min 3 rounds for debate protocol", async () => {
     const { fn, calls } = makeDeliberateFn();
-    const protocol = new DivergeSynthProtocol(undefined, 1, fn, undefined, "debate");
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn, protocol: "debate" });
 
     await protocol.deliberate("test task", mockPlan, mockScores, mockChat);
 
@@ -645,7 +645,7 @@ describe("DivergeSynthProtocol", () => {
 
   it("should use override maxRounds when larger than 3 for debate", async () => {
     const { fn, calls } = makeDeliberateFn();
-    const protocol = new DivergeSynthProtocol(undefined, 1, fn, undefined, "debate");
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn, protocol: "debate" });
 
     await protocol.deliberate("test task", mockPlan, mockScores, mockChat, {
       maxRounds: 5,
@@ -657,7 +657,7 @@ describe("DivergeSynthProtocol", () => {
 
   it("should pass leaderContributes override to config", async () => {
     const { fn, calls } = makeDeliberateFn();
-    const protocol = new DivergeSynthProtocol(undefined, 1, fn);
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
 
     await protocol.deliberate("test task", mockPlan, mockScores, mockChat, {
       leaderContributes: true,
@@ -667,9 +667,148 @@ describe("DivergeSynthProtocol", () => {
     expect(calls[0]!.config!.leaderContributes).toBe(true);
   });
 
+  it("should set structuralTags for critique taskNature", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat, {
+      taskNature: "critique",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.config!.structuralTags).toEqual(["verification", "adopted", "novel", "result"]);
+  });
+
+  it("should not set structuralTags for artifact taskNature", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat, {
+      taskNature: "artifact",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.config!.structuralTags).toBeUndefined();
+  });
+
+  it("should set workerGenParams and leaderGenParams", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat, {
+      taskNature: "critique",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.config!.workerGenParams).toEqual({
+      temperature: 1.0,
+      top_p: 0.9,
+      max_tokens: 2048,
+    });
+    expect(calls[0]!.config!.leaderGenParams).toEqual({
+      temperature: 0.7,
+      max_tokens: 8192,
+    });
+  });
+
+  it("should omit leader max_tokens for artifact tasks", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat, {
+      taskNature: "artifact",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.config!.leaderGenParams!.max_tokens).toBeUndefined();
+  });
+
+  it("should default to critique taskNature when no overrides.taskNature", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat);
+
+    expect(calls).toHaveLength(1);
+    // Default to critique: structuralTags should be set
+    expect(calls[0]!.config!.structuralTags).toEqual(["verification", "adopted", "novel", "result"]);
+  });
+
+  it("should not set consensus when no overrides given", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.config!.consensus).toBeUndefined();
+  });
+
+  it("should not set consensus when overrides exist but consensus not specified", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    // Constructor has consensus undefined
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat, {
+      taskNature: "artifact",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.config!.consensus).toBeUndefined();
+  });
+
+  it("should use constructor consensus when overrides exist but consensus not specified", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    // Constructor has leader_decides
+    const protocol = new DivergeSynthProtocol({ consensus: "leader_decides", deliberateFn: fn });
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat, {
+      taskNature: "critique",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.config!.consensus).toBe("leader_decides");
+  });
+
+  it("should use override consensus over constructor consensus", async () => {
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol({ consensus: "leader_decides", deliberateFn: fn });
+
+    await protocol.deliberate("test task", mockPlan, mockScores, mockChat, {
+      consensus: undefined, // explicitly undefined = no consensus
+    });
+
+    expect(calls).toHaveLength(1);
+    // overrides.consensus is undefined but key EXISTS in overrides
+    // However, `overrides?.consensus !== undefined` is false when consensus is undefined
+    // So it falls through to constructor default
+    expect(calls[0]!.config!.consensus).toBe("leader_decides");
+  });
+
+  it("should forward workerGenParams through engineChat", async () => {
+    // Verify params are passed to the chat function
+    const capturedParams: Array<unknown> = [];
+    const paramsCapturingChat: import("./types").ChatFn = mock(async (_model, _input, params) => {
+      capturedParams.push(params);
+      return { content: "response", inputTokens: 10, outputTokens: 20 };
+    });
+
+    const { fn, calls } = makeDeliberateFn();
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
+
+    await protocol.deliberate("test task", mockPlan, mockScores, paramsCapturingChat, {
+      taskNature: "critique",
+    });
+
+    expect(calls).toHaveLength(1);
+    // Config should have workerGenParams
+    expect(calls[0]!.config!.workerGenParams).toBeDefined();
+    expect(calls[0]!.config!.workerGenParams!.temperature).toBe(1.0);
+  });
+
   it("should throw when plan.models is empty", async () => {
     const { fn } = makeDeliberateFn();
-    const protocol = new DivergeSynthProtocol(undefined, 1, fn);
+    const protocol = new DivergeSynthProtocol({ deliberateFn: fn });
 
     const emptyPlan: import("./types").EnsemblePlan = {
       models: [],

@@ -245,6 +245,87 @@ describe("createChatAdapter", () => {
     // Assert
     expect(result.content).toBe("Clean answer");
   });
+
+  it("should forward GenerationParams to rawChatFn when provided", async () => {
+    // Arrange
+    const rawChat = mock((_req: any) =>
+      Promise.resolve(makeChatResponse("ok", 10, 20)),
+    );
+    const adapter = createChatAdapter(rawChat);
+
+    // Act
+    await adapter(
+      "openai/gpt-4.1",
+      [{ role: "user", content: "test" }],
+      { temperature: 0.5, max_tokens: 1024, top_p: 0.9 },
+    );
+
+    // Assert
+    expect(rawChat).toHaveBeenCalledTimes(1);
+    const req = rawChat.mock.calls[0]![0] as any;
+    expect(req.temperature).toBe(0.5);
+    expect(req.max_tokens).toBe(1024);
+    expect(req.top_p).toBe(0.9);
+  });
+
+  it("should set truncated=true when finish_reason is 'length'", async () => {
+    // Arrange
+    const rawChat = mock(() =>
+      Promise.resolve({
+        ...makeChatResponse("partial content", 30, 60),
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant" as const, content: "partial content" },
+            finish_reason: "length" as const,
+          },
+        ],
+      }),
+    );
+    const adapter = createChatAdapter(rawChat);
+
+    // Act
+    const result = await adapter("openai/gpt-4.1", [
+      { role: "user", content: "Generate a long essay" },
+    ]);
+
+    // Assert
+    expect(result.truncated).toBe(true);
+    expect(result.content).toBe("partial content");
+  });
+
+  it("should not set truncated when finish_reason is 'stop'", async () => {
+    // Arrange
+    const rawChat = mock(() =>
+      Promise.resolve(makeChatResponse("complete content", 30, 60)),
+    );
+    const adapter = createChatAdapter(rawChat);
+
+    // Act
+    const result = await adapter("openai/gpt-4.1", [
+      { role: "user", content: "Say hello" },
+    ]);
+
+    // Assert
+    expect(result.truncated).toBeUndefined();
+  });
+
+  it("should NOT include generation params keys when params is undefined", async () => {
+    // Arrange
+    const rawChat = mock((_req: any) =>
+      Promise.resolve(makeChatResponse("ok", 10, 20)),
+    );
+    const adapter = createChatAdapter(rawChat);
+
+    // Act
+    await adapter("openai/gpt-4.1", [{ role: "user", content: "test" }]);
+
+    // Assert
+    const req = rawChat.mock.calls[0]![0] as any;
+    expect(req.temperature).toBeUndefined();
+    expect(req.max_tokens).toBeUndefined();
+    expect(req.top_p).toBeUndefined();
+  });
 });
 
 // ================================================================
@@ -321,7 +402,9 @@ describe("createDeliberateFn", () => {
     expect(typeof engineDeps.chat).toBe("function");
     expect(typeof engineDeps.buildWorkerMessages).toBe("function");
     expect(typeof engineDeps.buildLeaderMessages).toBe("function");
-    expect(config).toMatchObject({ maxRounds: 2, consensus: "leader_decides", validateStructure: true });
+    expect(config).toMatchObject({ maxRounds: 2, consensus: "leader_decides" });
+    // Default taskNature is "critique" → structuralTags should be set
+    expect(config.structuralTags).toEqual(["verification", "adopted", "novel", "result"]);
   });
 
   it("should return deliberation output", async () => {
@@ -383,5 +466,77 @@ describe("createDeliberateFn", () => {
     expect(savedRecord.consensus).toBe("leader_decides");
     expect(savedRecord.id).toBeDefined();
     expect(savedRecord.timestamp).toBeGreaterThan(0);
+  });
+
+  it("should set worker max_tokens to 2048", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({ task: "Analyze this code" });
+
+    const [, , , config] = mockDeliberate.mock.calls[0]!;
+    expect(config.workerGenParams.max_tokens).toBe(2048);
+  });
+
+  it("should set artifact worker max_tokens to 2048", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({ task: "Write code", taskNature: "artifact" });
+
+    const [, , , config] = mockDeliberate.mock.calls[0]!;
+    expect(config.workerGenParams.max_tokens).toBe(2048);
+  });
+
+  it("should not set max_tokens for artifact leader (unconstrained output)", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({ task: "Write code", taskNature: "artifact" });
+
+    const [, , , config] = mockDeliberate.mock.calls[0]!;
+    expect(config.leaderGenParams.max_tokens).toBeUndefined();
+  });
+
+  it("should set critique leader max_tokens to 8192", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({ task: "Review code", taskNature: "critique" });
+
+    const [, , , config] = mockDeliberate.mock.calls[0]!;
+    expect(config.leaderGenParams.max_tokens).toBe(8192);
+  });
+
+  it("should set structuralTags to undefined for artifact tasks", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({ task: "Write code", taskNature: "artifact" });
+
+    const [, , , config] = mockDeliberate.mock.calls[0]!;
+    expect(config.structuralTags).toBeUndefined();
+  });
+
+  it("should set structuralTags to critique tags for critique tasks", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({ task: "Review code", taskNature: "critique" });
+
+    const [, , , config] = mockDeliberate.mock.calls[0]!;
+    expect(config.structuralTags).toEqual(["verification", "adopted", "novel", "result"]);
   });
 });

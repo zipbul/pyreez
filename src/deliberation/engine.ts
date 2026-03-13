@@ -17,6 +17,7 @@ import type {
   ConsensusMode,
   DeliberateInput,
   DeliberateOutput,
+  GenerationParams,
   Round,
   SharedContext,
   TeamComposition,
@@ -24,6 +25,7 @@ import type {
   TokenUsage,
   WorkerResponse,
 } from "./types";
+import { assignWorkerRole } from "./prompts";
 import {
   createSharedContext,
   addRound,
@@ -31,7 +33,7 @@ import {
   modelsUsed,
 } from "./shared-context";
 import { selectTopModel, LEADER_DIMS } from "./team-composer";
-import type { CooldownManager } from "./cooldown";
+import { classifyError, type CooldownManager } from "./cooldown";
 import {
   validateSynthesisStructure,
   buildRetryHint,
@@ -39,16 +41,20 @@ import {
 
 import type { RoundInfo } from "./prompts";
 
-// -- Public Interfaces --
+// Re-export ChatResult from canonical location for backward compatibility
+export type { ChatResult } from "../axis/types";
+import type { ChatResult } from "../axis/types";
+
+// -- Constants --
 
 /**
- * Result of a single LLM call, including token usage.
+ * Minimum character length for a valid worker response.
+ * Responses shorter than this are treated as degenerate (empty, provider failure, etc.)
+ * and excluded from leader synthesis. Workers are instructed of this requirement in their prompts.
  */
-export interface ChatResult {
-  readonly content: string;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-}
+export const MIN_WORKER_RESPONSE_LENGTH = 200;
+
+// -- Public Interfaces --
 
 /**
  * Error thrown by executeRound when a specific role's LLM call fails.
@@ -58,6 +64,8 @@ export class RoundExecutionError extends Error {
     public readonly role: "worker" | "leader",
     public readonly modelId: string,
     public override readonly cause: unknown,
+    /** Tokens consumed before the error occurred. */
+    public readonly tokensConsumed?: TokenUsage,
   ) {
     super(
       `${role} (${modelId}) failed: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -83,11 +91,13 @@ export interface EngineDeps {
   readonly chat: (
     model: string,
     messages: ChatMessage[],
+    params?: GenerationParams,
   ) => Promise<ChatResult>;
   readonly buildWorkerMessages: (
     ctx: SharedContext,
     instructions?: string,
     roundInfo?: RoundInfo,
+    workerIndex?: number,
   ) => ChatMessage[];
   readonly buildLeaderMessages: (
     ctx: SharedContext,
@@ -102,6 +112,7 @@ export interface EngineDeps {
     instructions?: string,
     roundInfo?: RoundInfo,
     workerModel?: string,
+    workerIndex?: number,
   ) => ChatMessage[];
 }
 
@@ -120,10 +131,14 @@ export interface EngineConfig {
    */
   readonly leaderContributes?: boolean;
   /**
-   * When true, validates leader synthesis against required structural sections
-   * and retries once on failure. Default: false.
+   * XML tags to validate in leader synthesis output.
+   * Undefined = no structural validation. Non-empty array = validate and retry once on failure.
    */
-  readonly validateStructure?: boolean;
+  readonly structuralTags?: readonly string[];
+  /** Generation params for worker LLM calls. */
+  readonly workerGenParams?: GenerationParams;
+  /** Generation params for leader LLM calls. */
+  readonly leaderGenParams?: GenerationParams;
 }
 
 const DEFAULT_CONFIG: EngineConfig = {
@@ -239,12 +254,56 @@ export function parseSynthesis(
   return { content: stripDeliberationBlock(response) };
 }
 
+// -- Internal: leader retry helper --
+
+/**
+ * Retry leader once with a hint appended to instructions.
+ * Returns parsed content, optional decision, and extra tokens consumed.
+ */
+async function retryLeaderOnce(
+  ctx: SharedContext,
+  roundNumber: number,
+  responses: readonly WorkerResponse[],
+  deps: EngineDeps,
+  config: EngineConfig,
+  hint: string,
+  leaderInstructions?: string,
+): Promise<{ content: string; decision?: "continue" | "approve"; extraTokens: TokenUsage }> {
+  const partialRound: Round = { number: roundNumber, responses };
+  const ctxForRetry = addRound(ctx, partialRound);
+  const retryMessages = deps.buildLeaderMessages(
+    ctxForRetry,
+    (leaderInstructions ?? "") + hint,
+    { current: roundNumber, max: config.maxRounds },
+    config.consensus,
+    config.protocol,
+  );
+  const retryResult = await deps.chat(ctx.team.leader.model, retryMessages, config.leaderGenParams);
+  const retryTokens: TokenUsage = { input: retryResult.inputTokens, output: retryResult.outputTokens };
+  if (retryResult.truncated) {
+    throw new RoundExecutionError(
+      "leader",
+      ctx.team.leader.model,
+      new Error("Leader response truncated (max_tokens reached). Output is incomplete."),
+      retryTokens,
+    );
+  }
+  const parsed = parseSynthesis(ctx.team.leader.model, retryResult.content, config.consensus);
+  return {
+    content: parsed.content,
+    decision: parsed.decision,
+    extraTokens: retryTokens,
+  };
+}
+
 // -- Round Execution --
 
 /**
  * Execute a single deliberation round:
  *   1. Workers respond independently in parallel (Promise.allSettled)
  *   2. Leader synthesizes all worker responses
+ *   3. Truncation guard (always throws)
+ *   4. Structural validation (if structuralTags configured) with one retry
  *
  * Worker errors produce fallback exclusion. Leader errors propagate.
  */
@@ -269,19 +328,16 @@ export async function executeRound(
     ? [...ctx.team.workers, ctx.team.leader]
     : [...ctx.team.workers];
 
-  // Non-debate: shared messages built once. Debate: per-worker messages with identity.
-  const sharedMessages = useDebateBuilder
-    ? null
-    : deps.buildWorkerMessages(ctx, input.workerInstructions, roundInfo);
-
-  const workerPromises = divergeParticipants.map(async (participant) => {
+  // Per-worker messages: each worker gets role-specific prompts via workerIndex.
+  const workerPromises = divergeParticipants.map(async (participant, index) => {
     const messages = useDebateBuilder
-      ? deps.buildDebateWorkerMessages!(ctx, input.workerInstructions, roundInfo, participant.model)
-      : sharedMessages!;
-    const result = await deps.chat(participant.model, messages);
+      ? deps.buildDebateWorkerMessages!(ctx, input.workerInstructions, roundInfo, participant.model, index)
+      : deps.buildWorkerMessages(ctx, input.workerInstructions, roundInfo, index);
+    const result = await deps.chat(participant.model, messages, config.workerGenParams);
     totalInput += result.inputTokens;
     totalOutput += result.outputTokens;
-    return { model: participant.model, content: result.content } as WorkerResponse;
+    const role = assignWorkerRole(index);
+    return { model: participant.model, content: result.content, role, workerIndex: index } as WorkerResponse;
   });
 
   const settled = await Promise.allSettled(workerPromises);
@@ -302,12 +358,29 @@ export async function executeRound(
   for (let idx = 0; idx < settled.length; idx++) {
     const result = settled[idx]!;
     if (result.status === "fulfilled") {
-      responses.push(result.value);
+      // Filter degenerate responses (empty, whitespace-only, below minimum length).
+      // Workers are instructed to produce at least MIN_WORKER_RESPONSE_LENGTH chars.
+      if (result.value.content.trim().length < MIN_WORKER_RESPONSE_LENGTH) {
+        const model = divergeParticipants[idx]!.model;
+        failedWorkers.push({ model, error: "degenerate response (below minimum length)" });
+      } else {
+        responses.push(result.value);
+      }
     } else {
       const model = divergeParticipants[idx]!.model;
       const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
       failedWorkers.push({ model, error: reason });
     }
+  }
+
+  // Guard: all workers produced degenerate responses — no point running leader with empty input
+  if (responses.length === 0 && failedWorkers.length > 0) {
+    throw new RoundExecutionError(
+      "worker",
+      failedWorkers[0]!.model,
+      new Error(`All ${failedWorkers.length} worker(s) produced degenerate responses (below ${MIN_WORKER_RESPONSE_LENGTH} chars)`),
+      { input: totalInput, output: totalOutput },
+    );
   }
 
   // 2. Leader — sees current round's worker responses
@@ -322,18 +395,84 @@ export async function executeRound(
   );
   let leaderResult: ChatResult;
   try {
-    leaderResult = await deps.chat(ctx.team.leader.model, leaderMessages);
+    leaderResult = await deps.chat(ctx.team.leader.model, leaderMessages, config.leaderGenParams);
   } catch (error) {
-    throw new RoundExecutionError("leader", ctx.team.leader.model, error);
+    throw new RoundExecutionError("leader", ctx.team.leader.model, error,
+      { input: totalInput, output: totalOutput });
   }
   totalInput += leaderResult.inputTokens;
   totalOutput += leaderResult.outputTokens;
 
-  const { content, decision } = parseSynthesis(
+  // Truncation guard: finish_reason === "length" means max_tokens was hit.
+  // Always throw — truncated output is incomplete regardless of task nature.
+  // deliberate()'s team recomposition retry will handle recovery.
+  if (leaderResult.truncated) {
+    throw new RoundExecutionError(
+      "leader",
+      ctx.team.leader.model,
+      new Error("Leader response truncated (max_tokens reached). Output is incomplete."),
+      { input: totalInput, output: totalOutput },
+    );
+  }
+
+  let { content, decision } = parseSynthesis(
     ctx.team.leader.model,
     leaderResult.content,
     config.consensus,
   );
+
+  // Structural validation: check required XML tags and retry leader once if missing
+  if (config.structuralTags?.length) {
+    const isDebateIntermediate = config.protocol === "debate"
+      && roundNumber < config.maxRounds
+      && decision !== "approve";
+    if (!isDebateIntermediate) {
+      const validation = validateSynthesisStructure(content, config.structuralTags);
+      if (!validation.valid) {
+        try {
+          const retry = await retryLeaderOnce(
+            ctx, roundNumber, responses, deps, config,
+            buildRetryHint(validation.missing), input.leaderInstructions,
+          );
+          // Check retry result structure too
+          const retryValidation = validateSynthesisStructure(retry.content, config.structuralTags);
+          if (retryValidation.valid) {
+            content = retry.content;
+            decision = retry.decision;
+            totalInput += retry.extraTokens.input;
+            totalOutput += retry.extraTokens.output;
+          } else {
+            totalInput += retry.extraTokens.input;
+            totalOutput += retry.extraTokens.output;
+            throw new RoundExecutionError(
+              "leader",
+              ctx.team.leader.model,
+              new Error(`Leader synthesis missing required sections after retry: ${retryValidation.missing.join(", ")}`),
+              { input: totalInput, output: totalOutput },
+            );
+          }
+        } catch (error) {
+          if (error instanceof RoundExecutionError) {
+            // Merge retry tokens from retryLeaderOnce into our accumulated total
+            if (error.tokensConsumed) {
+              const merged: TokenUsage = {
+                input: totalInput + error.tokensConsumed.input,
+                output: totalOutput + error.tokensConsumed.output,
+              };
+              throw new RoundExecutionError(error.role, error.modelId, error.cause, merged);
+            }
+            throw error;
+          }
+          throw new RoundExecutionError(
+            "leader",
+            ctx.team.leader.model,
+            error instanceof Error ? error : new Error(String(error)),
+            { input: totalInput, output: totalOutput },
+          );
+        }
+      }
+    }
+  }
 
   // For debate protocol, force "continue" on round 1: workers haven't exchanged views yet,
   // so the leader can't meaningfully approve consensus. Round 2+ may approve early.
@@ -382,7 +521,6 @@ export async function deliberate(
   let ctx = createSharedContext(input.task, currentTeam, input.taskNature);
   let consensusReached: boolean | null = false;
   let accTokens: TokenUsage = { input: 0, output: 0 };
-  const qualityFlags: string[] = [];
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
     let roundResult: { round: Round; tokens: TokenUsage };
@@ -391,8 +529,20 @@ export async function deliberate(
       roundResult = await executeRound(ctx, i, deps, cfg, input);
     } catch (error) {
       if (retryDeps && error instanceof RoundExecutionError) {
-        // Cooldown the failed model
-        retryDeps.cooldown.add(error.modelId, error.message);
+        // Accumulate tokens consumed before the failure
+        if (error.tokensConsumed) {
+          accTokens = {
+            input: accTokens.input + error.tokensConsumed.input,
+            output: accTokens.output + error.tokensConsumed.output,
+          };
+        }
+        // Cooldown the failed model with error-type-aware TTL
+        const errorType = classifyError(error.cause);
+        retryDeps.cooldown.add(error.modelId, error.message, errorType);
+        // For rate limits, propagate cooldown to all models from the same provider
+        if (errorType === "rate_limit") {
+          retryDeps.cooldown.addProvider(error.modelId, error.message);
+        }
         const cooledIds = retryDeps.cooldown.getCooledDownIds();
 
         const teamMemberIds = new Set<string>([
@@ -407,7 +557,7 @@ export async function deliberate(
             // All workers failed (RoundExecutionError is only thrown on total worker failure).
             // Cool down all current workers and replace the entire worker set.
             for (const w of currentTeam.workers) {
-              retryDeps.cooldown.add(w.model, "worker-failure");
+              retryDeps.cooldown.add(w.model, "worker-failure", errorType);
             }
             const usedIds = new Set([
               ...retryDeps.cooldown.getCooledDownIds(),
@@ -452,7 +602,8 @@ export async function deliberate(
             break;
           } catch (retryError) {
             if (retryError instanceof RoundExecutionError) {
-              retryDeps.cooldown.add(retryError.modelId, retryError.message);
+              const retryErrorType = classifyError(retryError.cause);
+              retryDeps.cooldown.add(retryError.modelId, retryError.message, retryErrorType);
             }
           }
         }
@@ -460,68 +611,6 @@ export async function deliberate(
         if (!retried) throw error;
       } else {
         throw error;
-      }
-    }
-
-    // -- Stage 1: Structural Validation --
-    // Validate leader synthesis structure; retry leader once on failure.
-    // Only applies when validateStructure is enabled and not debate intermediate rounds.
-    const isFinalRound = i === cfg.maxRounds || (cfg.consensus && roundResult!.round.synthesis?.decision === "approve");
-    const isDebateIntermediate = cfg.protocol === "debate" && !isFinalRound;
-    if (cfg.validateStructure && roundResult!.round.synthesis && !isDebateIntermediate) {
-      const workerCount = roundResult!.round.responses.length;
-      const validation = validateSynthesisStructure(
-        roundResult!.round.synthesis.content,
-        workerCount,
-        ctx.taskNature,
-      );
-
-      if (!validation.valid) {
-        // Retry leader once with hint about missing sections
-        const retryHint = buildRetryHint(validation.missing);
-        const partialRound: Round = { number: i, responses: roundResult!.round.responses };
-        const ctxForRetry = addRound(ctx, partialRound);
-        const retryLeaderMessages = deps.buildLeaderMessages(
-          ctxForRetry,
-          (input.leaderInstructions ?? "") + retryHint,
-          { current: i, max: cfg.maxRounds },
-          cfg.consensus,
-          cfg.protocol,
-        );
-        try {
-          const retryResult = await deps.chat(ctx.team.leader.model, retryLeaderMessages);
-          accTokens = {
-            input: accTokens.input + retryResult.inputTokens,
-            output: accTokens.output + retryResult.outputTokens,
-          };
-          const retrySynth = parseSynthesis(
-            ctx.team.leader.model,
-            retryResult.content,
-            cfg.consensus,
-          );
-          const retryValidation = validateSynthesisStructure(retrySynth.content, workerCount, ctx.taskNature);
-
-          if (retryValidation.valid) {
-            // Use retried synthesis
-            roundResult = {
-              round: {
-                ...roundResult!.round,
-                synthesis: {
-                  model: ctx.team.leader.model,
-                  content: retrySynth.content,
-                  ...(retrySynth.decision ? { decision: retrySynth.decision } : {}),
-                },
-              },
-              tokens: roundResult!.tokens,
-            };
-          } else {
-            // 2nd failure — keep original, flag it
-            qualityFlags.push("missing_sections");
-          }
-        } catch {
-          // Retry failed — keep original synthesis, flag it
-          qualityFlags.push("missing_sections");
-        }
       }
     }
 
@@ -536,7 +625,7 @@ export async function deliberate(
     if (retryDeps && roundResult!.round.failedWorkers?.length && i < cfg.maxRounds) {
       const failedIds = new Set(roundResult!.round.failedWorkers.map((f) => f.model));
       for (const fid of failedIds) {
-        retryDeps.cooldown.add(fid, "partial-failure");
+        retryDeps.cooldown.add(fid, "partial-failure", "degenerate");
       }
       const usedIds = new Set([
         ...retryDeps.cooldown.getCooledDownIds(),
@@ -594,6 +683,5 @@ export async function deliberate(
     totalLLMCalls: totalLLMCalls(ctx),
     modelsUsed: modelsUsed(ctx),
     rounds: roundsSummary,
-    ...(qualityFlags.length > 0 ? { qualityFlags } : {}),
   };
 }

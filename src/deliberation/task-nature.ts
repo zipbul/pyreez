@@ -77,3 +77,44 @@ export function resolveTaskNature(
   }
   return "critique";
 }
+
+// -- Debate Auto-Selection --
+
+/**
+ * Task types where debate protocol improves output quality.
+ * These are complex critique/review tasks where multiple rounds of
+ * argument exchange lead to more rigorous analysis.
+ */
+const DEBATE_TASK_TYPES = new Set([
+  "CODE_REVIEW",
+  "DESIGN_REVIEW",
+  "SECURITY_REVIEW",
+  "PERFORMANCE_REVIEW",
+  "CRITIQUE",
+  "COMPARISON",
+]);
+
+/**
+ * Determine whether debate protocol should be auto-selected.
+ *
+ * Rules:
+ * - Only for critique tasks (never artifact — debate suppresses creative output)
+ * - Only for complex tasks with specific review/critique task types
+ * - Returns false if task type is not in the debate-eligible set
+ *
+ * @returns true if debate should be auto-selected
+ */
+export function shouldAutoDebate(
+  domain?: string,
+  taskType?: string,
+  complexity?: string,
+): boolean {
+  // Only debate on complex tasks
+  if (complexity !== "complex") return false;
+  // Must have a task type in the debate set
+  if (!taskType) return false;
+  // Never for artifact tasks
+  const nature = resolveTaskNature(domain, taskType);
+  if (nature === "artifact") return false;
+  return DEBATE_TASK_TYPES.has(taskType);
+}

@@ -289,4 +289,32 @@ describe("evaluateWithPoll", () => {
     expect(result.pairwise[0]!.modelAId).toBe("anthropic/claude-sonnet-4.6");
     expect(result.pairwise[0]!.modelBId).toBe("google/gemini-2.5-pro");
   });
+
+  it("should pass temperature=0 and max_tokens=1024 to judge chatFn", async () => {
+    // Arrange
+    const chatCalls: { model: string; params: any }[] = [];
+    const chatFn = mock(async (_model: string, _messages: any, params?: any) => {
+      chatCalls.push({ model: _model, params });
+      return {
+        content: makeJudgeResponse([
+          { id: 0, score: 7 },
+          { id: 1, score: 5 },
+        ]),
+        inputTokens: 100,
+        outputTokens: 50,
+      };
+    });
+
+    const teamIds = new Set(["anthropic/claude-sonnet-4.6", "google/gemini-2.5-pro"]);
+    const config = makeConfig({ chatFn });
+
+    // Act
+    await evaluateWithPoll("Test task", WORKER_RESPONSES, teamIds, config);
+
+    // Assert — every judge call should have T=0 and max_tokens=1024
+    expect(chatCalls.length).toBeGreaterThanOrEqual(2);
+    for (const call of chatCalls) {
+      expect(call.params).toEqual({ temperature: 0, max_tokens: 1024 });
+    }
+  });
 });

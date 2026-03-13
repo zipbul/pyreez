@@ -160,27 +160,27 @@ describe("ModelRegistry", () => {
     });
 
     it("should include model when context equals threshold exactly", () => {
-      // Arrange — Claude Haiku 4.5 has 200K context
-      const haiku = registry.getById("anthropic/claude-haiku-4.5")!;
-      const threshold = haiku.contextWindow;
+      // Arrange — pick an available model with known context
+      const target = registry.getAvailable().find((m) => m.contextWindow > 0)!;
+      const threshold = target.contextWindow;
 
       // Act
       const models = registry.filterByContext(threshold);
 
       // Assert
-      expect(models.some((m) => m.id === "anthropic/claude-haiku-4.5")).toBe(true);
+      expect(models.some((m) => m.id === target.id)).toBe(true);
     });
 
     it("should exclude model when context is below threshold", () => {
-      // Arrange — Claude Haiku 4.5 has 200K context
-      const haiku = registry.getById("anthropic/claude-haiku-4.5")!;
-      const threshold = haiku.contextWindow + 1;
+      // Arrange — pick an available model and set threshold above its context
+      const target = registry.getAvailable().find((m) => m.contextWindow > 0)!;
+      const threshold = target.contextWindow + 1;
 
       // Act
       const models = registry.filterByContext(threshold);
 
       // Assert
-      expect(models.some((m) => m.id === "anthropic/claude-haiku-4.5")).toBe(false);
+      expect(models.some((m) => m.id === target.id)).toBe(false);
     });
   });
 

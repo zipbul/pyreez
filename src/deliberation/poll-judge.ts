@@ -13,12 +13,12 @@
 
 import type { ChatMessage } from "../llm/types";
 import type { ModelInfo } from "../model/types";
-import type { WorkerResponse } from "./types";
+import type { GenerationParams, WorkerResponse } from "./types";
 
 // -- Public types --
 
 export interface PollJudgeConfig {
-  readonly chatFn: (model: string, messages: ChatMessage[]) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
+  readonly chatFn: (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
   readonly getAvailableModels: () => ModelInfo[];
 }
 
@@ -232,7 +232,7 @@ export async function evaluateWithPoll(
 
   // 3. Call judges in parallel
   const judgeResults = await Promise.allSettled(
-    judges.map((j) => config.chatFn(j.id, messages)),
+    judges.map((j) => config.chatFn(j.id, messages, { temperature: 0, max_tokens: 1024 })),
   );
 
   // 4. Parse responses

@@ -12,8 +12,10 @@ import {
   selectTopModel,
   selectDiverseModels,
   composeTeam,
+  orderWorkersByRole,
   type ComposeTeamDeps,
 } from "./team-composer";
+import type { TeamMember } from "./types";
 import type { ModelInfo, CapabilityDimension, DimensionRating } from "../model/types";
 import { ALL_DIMENSIONS, SIGMA_BASE } from "../model/types";
 
@@ -580,5 +582,78 @@ describe("composeTeam", () => {
 
       expect(team1.leader.model).toBe(team2.leader.model);
     });
+  });
+});
+
+// =============================================================================
+// orderWorkersByRole
+// =============================================================================
+
+describe("orderWorkersByRole", () => {
+  function makeWorkerMember(model: string): TeamMember {
+    return { model, role: "worker" };
+  }
+
+  it("should reorder 3 workers by capability fit (REASONING→0, ANALYSIS→1, CREATIVITY→2)", () => {
+    // Model A: strong CREATIVITY (best wildcard)
+    // Model B: strong REASONING (best advocate)
+    // Model C: strong ANALYSIS (best critic)
+    const modelA = makeModel({ id: "p/creativity", capabilities: { CREATIVITY: 9, REASONING: 3, ANALYSIS: 3 } });
+    const modelB = makeModel({ id: "p/reasoning", capabilities: { REASONING: 9, ANALYSIS: 3, CREATIVITY: 3 } });
+    const modelC = makeModel({ id: "p/analysis", capabilities: { ANALYSIS: 9, REASONING: 3, CREATIVITY: 3 } });
+
+    const workers = [makeWorkerMember("p/creativity"), makeWorkerMember("p/reasoning"), makeWorkerMember("p/analysis")];
+    const registry = new Map([["p/creativity", modelA], ["p/reasoning", modelB], ["p/analysis", modelC]]);
+
+    const ordered = orderWorkersByRole(workers, (id) => registry.get(id));
+
+    // Slot 0 (advocate = REASONING-heavy) → p/reasoning
+    expect(ordered[0]!.model).toBe("p/reasoning");
+    // Slot 1 (critic = ANALYSIS-heavy) → p/analysis
+    expect(ordered[1]!.model).toBe("p/analysis");
+    // Slot 2 (wildcard = CREATIVITY-heavy) → p/creativity
+    expect(ordered[2]!.model).toBe("p/creativity");
+  });
+
+  it("should return copy unchanged for single worker", () => {
+    const workers = [makeWorkerMember("p/solo")];
+    const model = makeModel({ id: "p/solo" });
+    const ordered = orderWorkersByRole(workers, () => model);
+
+    expect(ordered).toHaveLength(1);
+    expect(ordered[0]!.model).toBe("p/solo");
+    expect(ordered).not.toBe(workers); // new array
+  });
+
+  it("should return original order when registry cannot resolve models", () => {
+    const workers = [makeWorkerMember("p/a"), makeWorkerMember("p/b"), makeWorkerMember("p/c")];
+    const ordered = orderWorkersByRole(workers, () => undefined);
+
+    expect(ordered.map((w) => w.model)).toEqual(["p/a", "p/b", "p/c"]);
+  });
+
+  it("should wrap roles for 4+ workers (index 3 reuses advocate dimensions)", () => {
+    const modelA = makeModel({ id: "p/a", capabilities: { REASONING: 9 } });
+    const modelB = makeModel({ id: "p/b", capabilities: { ANALYSIS: 9 } });
+    const modelC = makeModel({ id: "p/c", capabilities: { CREATIVITY: 9 } });
+    const modelD = makeModel({ id: "p/d", capabilities: { REASONING: 8 } });
+
+    const workers = [
+      makeWorkerMember("p/a"), makeWorkerMember("p/b"),
+      makeWorkerMember("p/c"), makeWorkerMember("p/d"),
+    ];
+    const registry = new Map([["p/a", modelA], ["p/b", modelB], ["p/c", modelC], ["p/d", modelD]]);
+    const ordered = orderWorkersByRole(workers, (id) => registry.get(id));
+
+    expect(ordered).toHaveLength(4);
+    // Slot 0 (advocate=REASONING) → p/a (REASONING=9)
+    expect(ordered[0]!.model).toBe("p/a");
+    // Slot 3 (advocate wrap=REASONING) → p/d (REASONING=8, next best)
+    expect(ordered[3]!.model).toBe("p/d");
+  });
+
+  it("should return empty array for empty input", () => {
+    const ordered = orderWorkersByRole([], () => undefined);
+    expect(ordered).toEqual([]);
   });
 });

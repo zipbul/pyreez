@@ -122,9 +122,11 @@ export interface BudgetConfig {
  * Result of a single LLM call, including token usage.
  */
 export interface ChatResult {
-  content: string;
-  inputTokens: number;
-  outputTokens: number;
+  readonly content: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  /** True when the response was cut off by max_tokens (finish_reason === "length"). */
+  readonly truncated?: boolean;
 }
 
 /**
@@ -135,11 +137,15 @@ export interface ChatResult {
  * - string → wrap as [{ role: "user", content: input }]
  * - ChatMessage[] → pass directly to the LLM API
  *
+ * Optional GenerationParams (temperature, max_tokens, top_p) are forwarded
+ * to the LLM provider when provided.
+ *
  * Returns ChatResult with content + token usage for cost tracking.
  */
 export type ChatFn = (
   modelId: string,
   input: string | import("../llm/types").ChatMessage[],
+  params?: import("../deliberation/types").GenerationParams,
 ) => Promise<ChatResult>;
 
 /**

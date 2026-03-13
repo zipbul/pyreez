@@ -8,6 +8,7 @@ import {
   executeRound,
   deliberate,
   RoundExecutionError,
+  MIN_WORKER_RESPONSE_LENGTH,
   type EngineDeps,
   type EngineConfig,
   type ChatResult,
@@ -37,17 +38,22 @@ function makeInput(overrides?: Partial<DeliberateInput>): DeliberateInput {
   };
 }
 
+/** Pad content to satisfy MIN_WORKER_RESPONSE_LENGTH for worker responses. */
+function validWorkerContent(label: string): string {
+  return label.padEnd(MIN_WORKER_RESPONSE_LENGTH, ".");
+}
+
 function chatResult(content: string, inputTokens = 10, outputTokens = 20): ChatResult {
   return { content, inputTokens, outputTokens };
 }
 
 function makeDeps(overrides?: Partial<EngineDeps>): EngineDeps {
   return {
-    chat: mock(async () => chatResult("mock response")),
-    buildWorkerMessages: mock((_ctx, _instructions?, _roundInfo?) => [
+    chat: mock(async (_model: string, _messages: any, _params?: any) => chatResult(validWorkerContent("mock response"))),
+    buildWorkerMessages: mock((_ctx: any, _instructions?: any, _roundInfo?: any, _workerIndex?: any) => [
       { role: "user" as const, content: "work" },
     ]),
-    buildLeaderMessages: mock((_ctx, _instructions?, _roundInfo?) => [
+    buildLeaderMessages: mock((_ctx: any, _instructions?: any, _roundInfo?: any) => [
       { role: "user" as const, content: "lead" },
     ]),
     ...overrides,
@@ -199,6 +205,39 @@ describe("parseSynthesis", () => {
     expect(result.content).toBe(raw);
     expect(result.decision).toBe("approve");
   });
+
+  // -- stripDeliberationBlock tests (via parseSynthesis) --
+
+  it("should strip <deliberation> block from plain text response", () => {
+    const response = "<deliberation>\nMerge worker A quicksort with worker B error handling\n</deliberation>\n\nfunction sort(arr) { return arr.sort(); }";
+    const result = parseSynthesis("leader/model", response);
+    expect(result.content).toBe("function sort(arr) { return arr.sort(); }");
+    expect(result.content).not.toContain("<deliberation>");
+  });
+
+  it("should strip multiple <deliberation> blocks", () => {
+    const response = "<deliberation>block1</deliberation>\ncode here\n<deliberation>block2</deliberation>\nmore code";
+    const result = parseSynthesis("leader/model", response);
+    expect(result.content).not.toContain("<deliberation>");
+    expect(result.content).toContain("code here");
+    expect(result.content).toContain("more code");
+  });
+
+  it("should strip <deliberation> block from JSON result field in consensus mode", () => {
+    const json = JSON.stringify({
+      result: "<deliberation>internal reasoning</deliberation>\nfinal answer",
+      decision: "approve",
+    });
+    const result = parseSynthesis("leader/model", json, "leader_decides");
+    expect(result.content).toBe("final answer");
+    expect(result.decision).toBe("approve");
+  });
+
+  it("should return content unchanged when no <deliberation> block present", () => {
+    const response = "Just a normal response with no blocks.";
+    const result = parseSynthesis("leader/model", response);
+    expect(result.content).toBe("Just a normal response with no blocks.");
+  });
 });
 
 // =============================================================================
@@ -206,7 +245,7 @@ describe("parseSynthesis", () => {
 // =============================================================================
 
 describe("executeRound", () => {
-  it("should execute a successful round with 2 workers and a leader", async () => {
+  it("should execute a successful round with 2 workers and a leader, assigning roles", async () => {
     const team = makeTeam(2);
     const input = makeInput();
     const config = makeConfig();
@@ -216,7 +255,7 @@ describe("executeRound", () => {
       chat: mock(async (model: string) => {
         callIndex++;
         if (model.startsWith("worker/")) {
-          return chatResult(`worker-response-${callIndex}`, 10, 20);
+          return chatResult(validWorkerContent(`worker-response-${callIndex}`), 10, 20);
         }
         return chatResult("leader-synthesis", 15, 25);
       }),
@@ -231,7 +270,9 @@ describe("executeRound", () => {
     expect(round.number).toBe(1);
     expect(round.responses).toHaveLength(2);
     expect(round.responses[0]!.model).toBe("worker/model-0");
+    expect(round.responses[0]!.role).toBe("advocate");
     expect(round.responses[1]!.model).toBe("worker/model-1");
+    expect(round.responses[1]!.role).toBe("critic");
     expect(round.synthesis).toBeDefined();
     expect(round.synthesis!.model).toBe("leader/model");
     expect(round.synthesis!.content).toBe("leader-synthesis");
@@ -240,8 +281,8 @@ describe("executeRound", () => {
     expect(tokens.input).toBe(35);
     expect(tokens.output).toBe(65);
 
-    // buildWorkerMessages called once (shared messages), chat called for each worker + leader
-    expect(deps.buildWorkerMessages).toHaveBeenCalledTimes(1);
+    // buildWorkerMessages called per-worker (not shared)
+    expect(deps.buildWorkerMessages).toHaveBeenCalledTimes(2);
     expect(deps.buildLeaderMessages).toHaveBeenCalledTimes(1);
     expect(deps.chat).toHaveBeenCalledTimes(3); // 2 workers + 1 leader
   });
@@ -257,7 +298,7 @@ describe("executeRound", () => {
           throw new Error("provider timeout");
         }
         if (model === "worker/model-1") {
-          return chatResult("worker-1-ok", 10, 20);
+          return chatResult(validWorkerContent("worker-1-ok"), 10, 20);
         }
         return chatResult("leader-synthesis", 15, 25);
       }),
@@ -271,6 +312,7 @@ describe("executeRound", () => {
     // Only worker-1 succeeded
     expect(round.responses).toHaveLength(1);
     expect(round.responses[0]!.model).toBe("worker/model-1");
+    expect(round.responses[0]!.role).toBe("critic");
     expect(round.synthesis!.content).toBe("leader-synthesis");
 
     // Tokens: 1 successful worker (10 input, 20 output) + leader (15 input, 25 output)
@@ -314,7 +356,7 @@ describe("executeRound", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker-ok", 10, 20);
+          return chatResult(validWorkerContent("worker-ok"), 10, 20);
         }
         throw new Error("leader exploded");
       }),
@@ -342,7 +384,7 @@ describe("executeRound", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("w", 100, 200);
+          return chatResult(validWorkerContent("w"), 100, 200);
         }
         return chatResult("leader", 50, 75);
       }),
@@ -367,7 +409,7 @@ describe("executeRound", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker-ok");
+          return chatResult(validWorkerContent("worker-ok"));
         }
         return chatResult(leaderJson);
       }),
@@ -391,7 +433,7 @@ describe("executeRound", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker-ok");
+          return chatResult(validWorkerContent("worker-ok"));
         }
         return chatResult(leaderJson);
       }),
@@ -405,6 +447,28 @@ describe("executeRound", () => {
     // Without consensus mode, parseSynthesis returns raw text, no decision
     expect(round.synthesis!.content).toBe(leaderJson);
     expect(round.synthesis!.decision).toBeUndefined();
+  });
+
+  it("should pass workerIndex to buildWorkerMessages for each worker", async () => {
+    const team = makeTeam(3);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const workerIndices: number[] = [];
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(validWorkerContent("response"))),
+      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, workerIndex?: any) => {
+        if (workerIndex !== undefined) workerIndices.push(workerIndex);
+        return [{ role: "user" as const, content: "work" }];
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    await executeRound(ctx, 1, deps, config, input);
+
+    expect(workerIndices).toEqual([0, 1, 2]);
   });
 });
 
@@ -421,7 +485,7 @@ describe("deliberate", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker-response", 10, 20);
+          return chatResult(validWorkerContent("worker-response"), 10, 20);
         }
         return chatResult("final-synthesis", 15, 25);
       }),
@@ -449,7 +513,7 @@ describe("deliberate", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker", 5, 10);
+          return chatResult(validWorkerContent("worker"), 5, 10);
         }
         roundCount++;
         return chatResult(`synthesis-round-${roundCount}`, 8, 12);
@@ -473,7 +537,7 @@ describe("deliberate", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker", 5, 10);
+          return chatResult(validWorkerContent("worker"), 5, 10);
         }
         roundCount++;
         // Approve on round 2
@@ -505,7 +569,7 @@ describe("deliberate", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker", 5, 10);
+          return chatResult(validWorkerContent("worker"), 5, 10);
         }
         return chatResult(
           JSON.stringify({ result: "still thinking", decision: "continue" }),
@@ -529,7 +593,7 @@ describe("deliberate", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("w", 100, 200);
+          return chatResult(validWorkerContent("w"), 100, 200);
         }
         return chatResult("leader", 50, 75);
       }),
@@ -554,7 +618,7 @@ describe("deliberate", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker-response", 5, 10);
+          return chatResult(validWorkerContent("worker-response"), 5, 10);
         }
         roundCount++;
         return chatResult(`synthesis-${roundCount}`, 8, 12);
@@ -578,7 +642,7 @@ describe("deliberate", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker");
+          return chatResult(validWorkerContent("worker"));
         }
         return chatResult("default-config-result");
       }),
@@ -604,7 +668,7 @@ describe("deliberate", () => {
           throw new Error("worker down");
         }
         if (model.startsWith("replacement/")) {
-          return chatResult("replacement-ok", 10, 20);
+          return chatResult(validWorkerContent("replacement-ok"), 10, 20);
         }
         // leader
         return chatResult("leader-ok", 15, 25);
@@ -633,7 +697,7 @@ describe("deliberate", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker-ok", 10, 20);
+          return chatResult(validWorkerContent("worker-ok"), 10, 20);
         }
         if (model === "leader/model") {
           throw new Error("leader down");
@@ -727,7 +791,7 @@ describe("failedWorkers propagation in deliberate output", () => {
           throw new Error("o3 rate limit");
         }
         if (model.startsWith("worker/")) {
-          return chatResult("ok", 10, 20);
+          return chatResult(validWorkerContent("ok"), 10, 20);
         }
         return chatResult("synthesis", 15, 25);
       }),
@@ -754,13 +818,178 @@ describe("failedWorkers propagation in deliberate output", () => {
     const input = makeInput();
     const config = makeConfig();
     const deps = makeDeps({
-      chat: mock(async () => chatResult("ok", 10, 20)),
+      chat: mock(async () => chatResult(validWorkerContent("ok"), 10, 20)),
     });
 
     const output = await deliberate(team, input, deps, config);
 
     expect(output.rounds).toBeDefined();
     expect(output.rounds![0]!.failedWorkers).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// Leader truncation (always throws, regardless of taskNature)
+// =============================================================================
+
+describe("leader truncation", () => {
+  it("should throw RoundExecutionError when leader is truncated (no taskNature)", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        return { content: "partial...", inputTokens: 10, outputTokens: 20, truncated: true };
+      }),
+    });
+
+    await expect(deliberate(team, input, deps, config)).rejects.toThrow(
+      /truncated/i,
+    );
+  });
+
+  it("should throw RoundExecutionError when critique leader is truncated", async () => {
+    const team = makeTeam(2);
+    const input = makeInput({ taskNature: "critique" });
+    const config = makeConfig();
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        return { content: "partial analysis", inputTokens: 10, outputTokens: 20, truncated: true };
+      }),
+    });
+
+    await expect(deliberate(team, input, deps, config)).rejects.toThrow(
+      /truncated/i,
+    );
+  });
+
+  it("should throw RoundExecutionError when artifact leader is truncated", async () => {
+    const team = makeTeam(2);
+    const input = makeInput({ taskNature: "artifact" });
+    const config = makeConfig();
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        return { content: "partial code...", inputTokens: 10, outputTokens: 20, truncated: true };
+      }),
+    });
+
+    await expect(deliberate(team, input, deps, config)).rejects.toThrow(
+      /truncated/i,
+    );
+  });
+
+  it("should not throw when leader is not truncated", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        return chatResult("complete synthesis");
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+    expect(output.result).toBe("complete synthesis");
+  });
+});
+
+// =============================================================================
+// MIN_WORKER_RESPONSE_LENGTH boundary tests
+// =============================================================================
+
+describe("degenerate response filtering", () => {
+  it("should filter response of 199 chars as degenerate", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const shortContent = "x".repeat(MIN_WORKER_RESPONSE_LENGTH - 1); // 199 chars
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") return chatResult(shortContent, 10, 20);
+        if (model.startsWith("worker/")) return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult("synthesis", 15, 25);
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    expect(output.rounds![0]!.failedWorkers).toHaveLength(1);
+    expect(output.rounds![0]!.failedWorkers![0]!.model).toBe("worker/model-0");
+    expect(output.rounds![0]!.failedWorkers![0]!.error).toContain("degenerate");
+  });
+
+  it("should accept response of exactly 200 chars", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const exactContent = "x".repeat(MIN_WORKER_RESPONSE_LENGTH); // 200 chars
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) return chatResult(exactContent, 10, 20);
+        return chatResult("synthesis", 15, 25);
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    expect(output.rounds![0]!.failedWorkers).toBeUndefined();
+    expect(output.rounds![0]!.responses).toHaveLength(2);
+  });
+
+  it("should filter whitespace-padded response that trims below minimum", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+
+    // 250 chars total, but only 150 non-whitespace after trim
+    const paddedContent = " ".repeat(50) + "x".repeat(150) + " ".repeat(50);
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") return chatResult(paddedContent, 10, 20);
+        if (model.startsWith("worker/")) return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult("synthesis", 15, 25);
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    expect(output.rounds![0]!.failedWorkers).toHaveLength(1);
+    expect(output.rounds![0]!.failedWorkers![0]!.model).toBe("worker/model-0");
+  });
+
+  it("should throw RoundExecutionError when ALL workers produce degenerate responses", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) return chatResult("too short", 10, 20);
+        return chatResult("synthesis", 15, 25);
+      }),
+    });
+
+    await expect(deliberate(team, input, deps, config)).rejects.toThrow(
+      /degenerate responses/,
+    );
   });
 });
 
@@ -780,13 +1009,13 @@ describe("leaderContributes", () => {
         calledModels.push(model);
         if (model === "leader/model" && calledModels.filter((m) => m === "leader/model").length === 1) {
           // First call: leader as worker
-          return chatResult("leader-independent-opinion", 12, 18);
+          return chatResult(validWorkerContent("leader-independent-opinion"), 12, 18);
         }
         if (model === "leader/model") {
           // Second call: leader as synthesizer
           return chatResult("leader-synthesis", 15, 25);
         }
-        return chatResult(`${model}-response`, 10, 20);
+        return chatResult(validWorkerContent(`${model}-response`), 10, 20);
       }),
     });
 
@@ -810,11 +1039,11 @@ describe("leaderContributes", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model === "leader/model") {
-          return chatResult("leader-opinion", 10, 20);
+          return chatResult(validWorkerContent("leader-opinion"), 10, 20);
         }
-        return chatResult("worker-response", 10, 20);
+        return chatResult(validWorkerContent("worker-response"), 10, 20);
       }),
-      buildLeaderMessages: mock((ctx) => {
+      buildLeaderMessages: mock((ctx: any) => {
         // Leader should see responses from both worker AND itself
         const lastRound = ctx.rounds[ctx.rounds.length - 1];
         if (lastRound) {
@@ -839,7 +1068,7 @@ describe("leaderContributes", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         calledModels.push(model);
-        return chatResult("response", 10, 20);
+        return chatResult(validWorkerContent("response"), 10, 20);
       }),
     });
 
@@ -860,7 +1089,7 @@ describe("leaderContributes", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         calledModels.push(model);
-        return chatResult("response", 10, 20);
+        return chatResult(validWorkerContent("response"), 10, 20);
       }),
     });
 
@@ -880,7 +1109,7 @@ describe("leaderContributes", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         calledModels.push(model);
-        return chatResult("response", 10, 20);
+        return chatResult(validWorkerContent("response"), 10, 20);
       }),
     });
 
@@ -907,7 +1136,7 @@ describe("leaderContributes", () => {
           // Leader succeeds as synthesizer
           return chatResult("synthesis", 15, 25);
         }
-        return chatResult("worker-ok", 10, 20);
+        return chatResult(validWorkerContent("worker-ok"), 10, 20);
       }),
     });
 
@@ -936,12 +1165,12 @@ describe("debate protocol", () => {
     let normalBuilderCalls = 0;
 
     const deps = makeDeps({
-      chat: mock(async (_model: string) => chatResult("response")),
-      buildWorkerMessages: mock((_ctx, _instructions?, _roundInfo?) => {
+      chat: mock(async (_model: string) => chatResult(validWorkerContent("response"))),
+      buildWorkerMessages: mock((_ctx: any, _instructions?: any, _roundInfo?: any, _idx?: any) => {
         normalBuilderCalls++;
         return [{ role: "user" as const, content: "work" }];
       }),
-      buildDebateWorkerMessages: mock((_ctx, _instructions?, _roundInfo?) => {
+      buildDebateWorkerMessages: mock((_ctx: any, _instructions?: any, _roundInfo?: any, _model?: any, _idx?: any) => {
         debateBuilderCalls++;
         return [{ role: "user" as const, content: "debate" }];
       }),
@@ -949,7 +1178,7 @@ describe("debate protocol", () => {
 
     await deliberate(team, input, deps, config);
 
-    // Round 1: normal builder, Round 2: debate builder
+    // Round 1: normal builder (1 worker), Round 2: debate builder (1 worker)
     expect(normalBuilderCalls).toBe(1);
     expect(debateBuilderCalls).toBe(1);
   });
@@ -967,7 +1196,7 @@ describe("debate protocol", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker-debate", 5, 10);
+          return chatResult(validWorkerContent("worker-debate"), 5, 10);
         }
         roundCount++;
         if (roundCount === 2) {
@@ -981,7 +1210,7 @@ describe("debate protocol", () => {
           8, 12,
         );
       }),
-      buildDebateWorkerMessages: mock((_ctx, _instructions?, _roundInfo?) => [
+      buildDebateWorkerMessages: mock((_ctx: any, _instructions?: any, _roundInfo?: any, _model?: any, _idx?: any) => [
         { role: "user" as const, content: "debate round" },
       ]),
     });
@@ -1003,11 +1232,11 @@ describe("debate protocol", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult(`response-from-${model}`, 10, 20);
+          return chatResult(validWorkerContent(`response-from-${model}`), 10, 20);
         }
         return chatResult("synthesis", 15, 25);
       }),
-      buildDebateWorkerMessages: mock((ctx, _instructions?, _roundInfo?) => {
+      buildDebateWorkerMessages: mock((ctx: any, _instructions?: any, _roundInfo?: any, _model?: any, _idx?: any) => {
         // Capture the number of previous rounds visible to debate builder
         debateContexts.push(`rounds=${ctx.rounds.length}`);
         return [{ role: "user" as const, content: "debate" }];
@@ -1035,7 +1264,7 @@ describe("debate protocol", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model.startsWith("worker/")) {
-          return chatResult("worker-opinion", 5, 10);
+          return chatResult(validWorkerContent("worker-opinion"), 5, 10);
         }
         leaderCalls++;
         // Leader tries to "approve" on every round
@@ -1044,7 +1273,7 @@ describe("debate protocol", () => {
           8, 12,
         );
       }),
-      buildDebateWorkerMessages: mock((_ctx, _instructions?, _roundInfo?) => [
+      buildDebateWorkerMessages: mock((_ctx: any, _instructions?: any, _roundInfo?: any, _model?: any, _idx?: any) => [
         { role: "user" as const, content: "debate round" },
       ]),
     });
@@ -1064,8 +1293,8 @@ describe("debate protocol", () => {
 
     let normalCalls = 0;
     const deps = makeDeps({
-      chat: mock(async () => chatResult("response")),
-      buildWorkerMessages: mock(() => {
+      chat: mock(async () => chatResult(validWorkerContent("response"))),
+      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any) => {
         normalCalls++;
         return [{ role: "user" as const, content: "normal" }];
       }),
@@ -1102,5 +1331,336 @@ describe("RoundExecutionError", () => {
 
     expect(error.role).toBe("leader");
     expect(error.message).toContain("string cause");
+  });
+});
+
+// =============================================================================
+// GenerationParams forwarding
+// =============================================================================
+
+describe("GenerationParams forwarding", () => {
+  it("should pass workerGenParams and leaderGenParams to chat calls", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({
+      workerGenParams: { temperature: 1.0, max_tokens: 2048, top_p: 0.9 },
+      leaderGenParams: { temperature: 0.7, max_tokens: 4096 },
+    });
+
+    const chatCalls: { model: string; params: any }[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string, _messages: any, params?: any) => {
+        chatCalls.push({ model, params });
+        return chatResult(validWorkerContent("response"));
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    await executeRound(ctx, 1, deps, config, input);
+
+    // Worker call should have workerGenParams
+    const workerCall = chatCalls.find((c) => c.model.startsWith("worker/"));
+    expect(workerCall).toBeDefined();
+    expect(workerCall!.params).toEqual({ temperature: 1.0, max_tokens: 2048, top_p: 0.9 });
+
+    // Leader call should have leaderGenParams
+    const leaderCall = chatCalls.find((c) => c.model === "leader/model");
+    expect(leaderCall).toBeDefined();
+    expect(leaderCall!.params).toEqual({ temperature: 0.7, max_tokens: 4096 });
+  });
+
+  it("should pass undefined params when genParams are not configured", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig(); // no genParams
+
+    const chatCalls: { model: string; params: any }[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string, _messages: any, params?: any) => {
+        chatCalls.push({ model, params });
+        return chatResult(validWorkerContent("response"));
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    await executeRound(ctx, 1, deps, config, input);
+
+    // Both calls should have undefined params
+    for (const call of chatCalls) {
+      expect(call.params).toBeUndefined();
+    }
+  });
+
+  it("should throw RoundExecutionError when leader response is truncated", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        return { content: "partial code...", inputTokens: 10, outputTokens: 20, truncated: true };
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    await expect(executeRound(ctx, 1, deps, config, input)).rejects.toThrow(
+      /truncated.*max_tokens/i,
+    );
+  });
+
+  it("should not throw when leader response is not truncated", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        return chatResult("complete leader response");
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    const result = await executeRound(ctx, 1, deps, config, input);
+    expect(result.round.synthesis?.content).toBe("complete leader response");
+  });
+
+  it("should validate structure and retry once when tags missing", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const tags = ["verification", "result"];
+    const config = makeConfig({ structuralTags: tags });
+
+    let leaderCallCount = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        leaderCallCount++;
+        if (leaderCallCount === 1) {
+          // First attempt: missing tags
+          return chatResult("no tags here");
+        }
+        // Retry: valid structure
+        return chatResult("<verification>ok</verification><result>done</result>");
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    const result = await executeRound(ctx, 1, deps, config, input);
+    expect(leaderCallCount).toBe(2);
+    expect(result.round.synthesis?.content).toBe("<verification>ok</verification><result>done</result>");
+  });
+
+  it("should throw when structural retry also fails", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({ structuralTags: ["verification", "result"] });
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        // Both attempts: missing tags
+        return chatResult("still no tags");
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    await expect(executeRound(ctx, 1, deps, config, input)).rejects.toThrow(
+      /missing required sections/i,
+    );
+  });
+
+  it("should skip structural validation when structuralTags is undefined", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig(); // no structuralTags
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        return chatResult("no tags needed");
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    const result = await executeRound(ctx, 1, deps, config, input);
+    expect(result.round.synthesis?.content).toBe("no tags needed");
+    // Only worker + leader call, no retry
+    expect(deps.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it("should skip structural validation on debate intermediate round", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({
+      maxRounds: 3,
+      protocol: "debate",
+      structuralTags: ["verification", "result"],
+    });
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        // No structural tags — should be fine for intermediate rounds
+        return chatResult("intermediate synthesis without tags");
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    // Round 1 of 3 = intermediate → skip validation
+    const result = await executeRound(ctx, 1, deps, config, input);
+    expect(result.round.synthesis?.content).toBe("intermediate synthesis without tags");
+    expect(deps.chat).toHaveBeenCalledTimes(2); // no retry
+  });
+
+  it("should validate structure on debate round with approve decision (early consensus = final output)", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({
+      maxRounds: 3,
+      protocol: "debate",
+      consensus: "leader_decides",
+      structuralTags: ["verification", "result"],
+    });
+
+    let leaderCalls = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        leaderCalls++;
+        if (leaderCalls === 1) {
+          // Round 1: continue (intermediate → no structural validation)
+          return chatResult(JSON.stringify({ result: "no tags round 1", decision: "continue" }));
+        }
+        // Round 2: approve with missing tags → structural validation should apply → retry → throw
+        return chatResult(JSON.stringify({ result: "no tags approved", decision: "approve" }));
+      }),
+      buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _model?: any, _idx?: any) => [
+        { role: "user" as const, content: "debate" },
+      ]),
+    });
+
+    // deliberate level: round 2 of 3 with approve = final output → structural validation applies
+    await expect(deliberate(team, input, deps, config)).rejects.toThrow(
+      /missing required sections/i,
+    );
+  });
+
+  it("should accumulate retry tokens when structural retry succeeds", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({ structuralTags: ["result"] });
+
+    let leaderCallCount = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"), 10, 20);
+        }
+        leaderCallCount++;
+        if (leaderCallCount === 1) {
+          return chatResult("no tags", 100, 200);
+        }
+        return chatResult("<result>retried</result>", 150, 300);
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    const result = await executeRound(ctx, 1, deps, config, input);
+    // Worker(10,20) + first leader(100,200) + retry leader(150,300)
+    expect(result.tokens.input).toBe(260);
+    expect(result.tokens.output).toBe(520);
+  });
+
+  it("should throw RoundExecutionError when structural retry encounters a network error", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({ structuralTags: ["result"] });
+
+    let leaderCallCount = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-output"));
+        }
+        leaderCallCount++;
+        if (leaderCallCount === 1) {
+          return chatResult("no tags"); // triggers retry
+        }
+        throw new Error("network timeout on retry");
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    try {
+      await executeRound(ctx, 1, deps, config, input);
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(RoundExecutionError);
+      const re = error as RoundExecutionError;
+      expect(re.role).toBe("leader");
+      expect(re.modelId).toBe("leader/model");
+      expect(re.message).toContain("network timeout on retry");
+    }
+  });
+
+  it("should assign 3 distinct roles (advocate/critic/wildcard) when team has 3 workers", async () => {
+    const team = makeTeam(3);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model.startsWith("worker/")) {
+          return chatResult(validWorkerContent("worker-response"));
+        }
+        return chatResult("leader-synthesis");
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+
+    const { round } = await executeRound(ctx, 1, deps, config, input);
+
+    expect(round.responses).toHaveLength(3);
+    const roles = round.responses.map((r) => r.role);
+    expect(roles).toEqual(["advocate", "critic", "wildcard"]);
+    expect(new Set(roles).size).toBe(3); // all distinct
   });
 });

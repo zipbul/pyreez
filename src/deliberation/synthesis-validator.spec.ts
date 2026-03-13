@@ -1,149 +1,111 @@
 /**
- * Unit tests — Synthesis Structural Validator.
+ * Unit tests — Synthesis Structural Validator (XML tag-based).
  *
  * SUT: validateSynthesisStructure, buildRetryHint
  */
 
 import { describe, it, expect } from "bun:test";
-import { validateSynthesisStructure, buildRetryHint } from "./synthesis-validator";
+import { validateSynthesisStructure, buildRetryHint, REQUIRED_XML_TAGS } from "./synthesis-validator";
 
-// -- Fixture: well-formed synthesis --
+// -- Fixture: well-formed XML synthesis --
 
-const VALID_SYNTHESIS = `## Premise Check
-The question is well-framed. We are solving the right problem.
-
-## Per-Worker Analysis
-
-### Worker 1
-**Adopted Strengths**: Strong architectural reasoning.
-**Weakness Reexamination**: The concern about scalability is actually an unexplored angle worth investigating.
-**Self-Doubt Review**: Valid concern about edge cases.
-
-### Worker 2
-**Adopted Strengths**: Excellent security analysis.
-**Weakness Reexamination**: The performance trade-off is a real flaw, not an unexplored angle.
-**Self-Doubt Review**: Over-cautious about backward compatibility.
-
-## Ideas from Weaknesses (max 2)
-1. Use worker 1's scalability concern to design a progressive loading strategy.
-2. Combine the performance trade-off with a lazy evaluation approach.
-
-## Synthesis
-The integrated solution combines worker 1's architecture with worker 2's security model, enhanced by progressive loading.`;
+const VALID_SYNTHESIS = `<synthesis>
+  <verification>
+  Worker 1 claims O(n log n) is optimal — substantiated by comparison-based lower bound theorem.
+  Worker 2 claims hash map approach is O(n) — speculative, depends on hash collision rate.
+  </verification>
+  <adopted>
+  Adopted Worker 1's comparison sort analysis and improved by adding amortized analysis.
+  Adopted Worker 2's practical API design and improved by adding type safety.
+  </adopted>
+  <novel>
+  1. Hybrid approach: use hash-based pre-filter then comparison sort for remaining elements.
+  None.
+  </novel>
+  <result>
+  The integrated solution uses a comparison-based sort with hash pre-filtering for near-sorted inputs.
+  </result>
+</synthesis>`;
 
 describe("validateSynthesisStructure", () => {
-  it("should return valid for a well-formed synthesis", () => {
-    const result = validateSynthesisStructure(VALID_SYNTHESIS, 2);
+  it("should return valid for a well-formed XML synthesis", () => {
+    const result = validateSynthesisStructure(VALID_SYNTHESIS);
     expect(result.valid).toBe(true);
     expect(result.missing).toEqual([]);
   });
 
-  it("should detect missing Premise Check section", () => {
-    const content = VALID_SYNTHESIS.replace("## Premise Check", "## Something Else");
-    const result = validateSynthesisStructure(content, 2);
+  it("should detect missing <verification> tag", () => {
+    const content = VALID_SYNTHESIS.replace("<verification>", "<verify>").replace("</verification>", "</verify>");
+    const result = validateSynthesisStructure(content);
     expect(result.valid).toBe(false);
-    expect(result.missing).toContain("## Premise Check");
+    expect(result.missing).toContain("<verification>");
   });
 
-  it("should detect missing Per-Worker Analysis section", () => {
-    const content = VALID_SYNTHESIS.replace("## Per-Worker Analysis", "## Worker Notes");
-    const result = validateSynthesisStructure(content, 2);
+  it("should detect missing <adopted> tag", () => {
+    const content = VALID_SYNTHESIS.replace("<adopted>", "<strengths>").replace("</adopted>", "</strengths>");
+    const result = validateSynthesisStructure(content);
     expect(result.valid).toBe(false);
-    expect(result.missing).toContain("## Per-Worker Analysis");
+    expect(result.missing).toContain("<adopted>");
   });
 
-  it("should detect missing Ideas from Weaknesses section", () => {
-    const content = VALID_SYNTHESIS.replace("## Ideas from Weaknesses", "## Extra Ideas");
-    const result = validateSynthesisStructure(content, 2);
+  it("should detect missing <result> tag", () => {
+    const content = VALID_SYNTHESIS.replace("<result>", "<conclusion>").replace("</result>", "</conclusion>");
+    const result = validateSynthesisStructure(content);
     expect(result.valid).toBe(false);
-    expect(result.missing).toContain("## Ideas from Weaknesses");
+    expect(result.missing).toContain("<result>");
   });
 
-  it("should detect missing Synthesis section", () => {
-    const content = VALID_SYNTHESIS.replace("## Synthesis", "## Conclusion");
-    const result = validateSynthesisStructure(content, 2);
+  it("should detect missing <novel> tag", () => {
+    const content = VALID_SYNTHESIS.replace("<novel>", "<ideas>").replace("</novel>", "</ideas>");
+    const result = validateSynthesisStructure(content);
     expect(result.valid).toBe(false);
-    expect(result.missing).toContain("## Synthesis");
-  });
-
-  it("should detect insufficient per-worker Adopted Strengths", () => {
-    // Remove one worker's Adopted Strengths
-    const content = VALID_SYNTHESIS.replace(
-      "**Adopted Strengths**: Excellent security analysis.",
-      "**Key Points**: Excellent security analysis.",
-    );
-    const result = validateSynthesisStructure(content, 2);
-    expect(result.valid).toBe(false);
-    expect(result.missing.some((m) => m.includes("Adopted Strengths") && m.includes("1/2"))).toBe(true);
-  });
-
-  it("should detect insufficient per-worker Weakness Reexamination", () => {
-    // Remove both Weakness Reexamination entries
-    const content = VALID_SYNTHESIS
-      .replace("**Weakness Reexamination**: The concern about scalability", "**Issues**: The concern about scalability")
-      .replace("**Weakness Reexamination**: The performance trade-off", "**Issues**: The performance trade-off");
-    const result = validateSynthesisStructure(content, 2);
-    expect(result.valid).toBe(false);
-    expect(result.missing.some((m) => m.includes("Weakness Reexamination") && m.includes("0/2"))).toBe(true);
-  });
-
-  it("should warn on more than 2 ideas from weaknesses (padding)", () => {
-    const padded = VALID_SYNTHESIS.replace(
-      "## Ideas from Weaknesses (max 2)\n" +
-      "1. Use worker 1's scalability concern to design a progressive loading strategy.\n" +
-      "2. Combine the performance trade-off with a lazy evaluation approach.",
-      "## Ideas from Weaknesses (max 2)\n" +
-      "1. Idea one.\n" +
-      "2. Idea two.\n" +
-      "3. Idea three.",
-    );
-    const result = validateSynthesisStructure(padded, 2);
-    expect(result.warnings.length).toBeGreaterThanOrEqual(1);
-    expect(result.warnings[0]).toContain("padding");
-  });
-
-  it("should not warn when ideas count is at or below 2", () => {
-    const result = validateSynthesisStructure(VALID_SYNTHESIS, 2);
-    expect(result.warnings).toEqual([]);
+    expect(result.missing).toContain("<novel>");
   });
 
   it("should handle empty content gracefully", () => {
-    const result = validateSynthesisStructure("", 2);
+    const result = validateSynthesisStructure("");
     expect(result.valid).toBe(false);
-    expect(result.missing.length).toBeGreaterThanOrEqual(4);
+    expect(result.missing.length).toBe(4); // verification, adopted, novel, result
   });
 
-  it("should report multiple missing sections simultaneously", () => {
-    const result = validateSynthesisStructure("Just some text with no sections.", 3);
+  it("should report multiple missing tags simultaneously", () => {
+    const result = validateSynthesisStructure("Just some text with no XML tags.");
     expect(result.valid).toBe(false);
-    expect(result.missing.length).toBe(4); // all 4 top-level sections
+    expect(result.missing.length).toBe(4);
   });
 
-  it("should skip validation and return valid for artifact taskNature", () => {
-    const result = validateSynthesisStructure("Just raw code output", 2, "artifact");
+  it("should return valid for empty tags array (skip validation)", () => {
+    const result = validateSynthesisStructure("Just raw code output", []);
     expect(result.valid).toBe(true);
     expect(result.missing).toEqual([]);
     expect(result.warnings).toEqual([]);
   });
 
-  it("should still validate for critique taskNature", () => {
-    const result = validateSynthesisStructure("No sections here", 2, "critique");
+  it("should validate against provided tags", () => {
+    const result = validateSynthesisStructure("No tags here", ["verification", "adopted", "novel", "result"]);
     expect(result.valid).toBe(false);
-    expect(result.missing.length).toBeGreaterThanOrEqual(4);
+    expect(result.missing.length).toBe(4);
   });
 
-  it("should still validate when taskNature is undefined (backward compat)", () => {
-    const result = validateSynthesisStructure("No sections here", 2);
+  it("should use default REQUIRED_XML_TAGS when tags is undefined", () => {
+    const result = validateSynthesisStructure("No tags here");
     expect(result.valid).toBe(false);
-    expect(result.missing.length).toBeGreaterThanOrEqual(4);
+    expect(result.missing.length).toBe(REQUIRED_XML_TAGS.length);
+  });
+
+  it("should validate against custom subset of tags", () => {
+    const content = "<foo>bar</foo>";
+    const result = validateSynthesisStructure(content, ["foo"]);
+    expect(result.valid).toBe(true);
+    expect(result.missing).toEqual([]);
   });
 });
 
 describe("buildRetryHint", () => {
-  it("should include all missing section names in the hint", () => {
-    const hint = buildRetryHint(["## Premise Check", "## Synthesis"]);
-    expect(hint).toContain("## Premise Check");
-    expect(hint).toContain("## Synthesis");
+  it("should include all missing tag names in the hint", () => {
+    const hint = buildRetryHint(["<verification>", "<result>"]);
+    expect(hint).toContain("<verification>");
+    expect(hint).toContain("<result>");
     expect(hint).toContain("STRUCTURAL REQUIREMENT");
   });
 });

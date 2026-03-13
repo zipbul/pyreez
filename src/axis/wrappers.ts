@@ -29,7 +29,9 @@ import {
 import type { PairwiseOutcome } from "../evaluation/types";
 import type { ChatMessage } from "../llm/types";
 import { deliberate as defaultDeliberateFn } from "../deliberation/engine";
-import type { ChatResult, EngineDeps, EngineConfig, RetryDeps } from "../deliberation/engine";
+import type { EngineDeps, EngineConfig, RetryDeps } from "../deliberation/engine";
+import type { ChatResult } from "../axis/types";
+import { selectDiverseModels } from "../deliberation/team-composer";
 import type { DeliberateOutput } from "../deliberation/types";
 import {
   buildWorkerMessages,
@@ -41,7 +43,9 @@ import type {
   TeamMember,
   ConsensusMode,
   DeliberateInput,
+  GenerationParams,
 } from "../deliberation/types";
+import { createCooldownManager } from "../deliberation/cooldown";
 import {
   estimateStaticCost,
   estimateEffectiveCost,
@@ -456,11 +460,31 @@ export class TwoTrackCeSelector implements Selector {
 // DivergeSynthProtocol — Workers (parallel) → Leader (synthesis)
 // ============================================================
 
+/** Options for DivergeSynthProtocol constructor. */
+export interface DivergeSynthProtocolOptions {
+  readonly consensus?: ConsensusMode | string;
+  readonly maxRounds?: number;
+  readonly deliberateFn?: (
+    team: TeamComposition,
+    input: DeliberateInput,
+    deps: EngineDeps,
+    config?: EngineConfig,
+    retryDeps?: RetryDeps,
+  ) => Promise<DeliberateOutput>;
+  readonly retryDeps?: RetryDeps;
+  readonly protocol?: "diverge-synth" | "debate";
+  readonly registry?: ModelRegistry;
+  /** Shared CooldownManager (process-scoped). When omitted, per-call instance is created. */
+  readonly cooldown?: import("../deliberation/cooldown").CooldownManager;
+}
+
 export class DivergeSynthProtocol implements DeliberationProtocol {
   private readonly consensus?: ConsensusMode;
   private readonly maxRounds: number;
   private readonly protocol?: "diverge-synth" | "debate";
   private readonly retryDeps?: RetryDeps;
+  private readonly registry?: ModelRegistry;
+  private readonly sharedCooldown?: import("../deliberation/cooldown").CooldownManager;
   private readonly runDeliberation: (
     team: TeamComposition,
     input: DeliberateInput,
@@ -469,24 +493,14 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
     retryDeps?: RetryDeps,
   ) => Promise<DeliberateOutput>;
 
-  constructor(
-    consensus?: ConsensusMode | string,
-    maxRounds?: number,
-    deliberateFn?: (
-      team: TeamComposition,
-      input: DeliberateInput,
-      deps: EngineDeps,
-      config?: EngineConfig,
-      retryDeps?: RetryDeps,
-    ) => Promise<DeliberateOutput>,
-    retryDeps?: RetryDeps,
-    protocol?: "diverge-synth" | "debate",
-  ) {
-    this.consensus = consensus === "leader_decides" ? "leader_decides" : undefined;
-    this.maxRounds = maxRounds ?? 1;
-    this.protocol = protocol;
-    this.runDeliberation = deliberateFn ?? defaultDeliberateFn;
-    this.retryDeps = retryDeps;
+  constructor(opts?: DivergeSynthProtocolOptions) {
+    this.consensus = opts?.consensus === "leader_decides" ? "leader_decides" : undefined;
+    this.maxRounds = opts?.maxRounds ?? 1;
+    this.protocol = opts?.protocol;
+    this.runDeliberation = opts?.deliberateFn ?? defaultDeliberateFn;
+    this.retryDeps = opts?.retryDeps;
+    this.registry = opts?.registry;
+    this.sharedCooldown = opts?.cooldown;
   }
 
   async deliberate(
@@ -500,7 +514,22 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
       throw new Error("DivergeSynthProtocol: plan.models must not be empty");
     }
 
-    const team = this.buildTeam(plan, scores);
+    let team = this.buildTeam(plan, scores);
+
+    // Critique tasks need more workers for perspective diversity (4 workers + 1 leader = 5).
+    // Selector may return fewer models — augment from registry if available.
+    const nature = overrides?.taskNature ?? "critique";
+    const minTeamSize = nature === "critique" ? 5 : 3;
+    if (this.registry && team.workers.length + 1 < minTeamSize) {
+      const currentIds = new Set([...team.workers.map((w) => w.model), team.leader.model]);
+      const available = this.registry.getAvailable().filter((m) => !currentIds.has(m.id));
+      const needed = minTeamSize - (team.workers.length + 1);
+      const extra = selectDiverseModels(available, needed);
+      if (extra.length > 0) {
+        const extraWorkers: TeamMember[] = extra.map((m) => ({ model: m.id, role: "worker" as const }));
+        team = { ...team, workers: [...team.workers, ...extraWorkers] };
+      }
+    }
 
     const input: DeliberateInput = {
       task,
@@ -512,15 +541,21 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
     const engineChat = async (
       model: string,
       messages: ChatMessage[],
+      params?: GenerationParams,
     ): Promise<ChatResult> => {
-      const result = await chat(model, messages);
-      return result;
+      return chat(model, messages, params);
     };
 
     const effectiveProtocol = overrides?.protocol ?? this.protocol;
-    const effectiveMaxRounds = overrides?.maxRounds ?? this.maxRounds;
-    const effectiveConsensus = overrides?.consensus ?? this.consensus;
+    // Only use constructor consensus as default when overrides exist but didn't specify consensus.
+    // When user provides NO overrides at all, don't force consensus mode.
+    const effectiveConsensus = overrides?.consensus !== undefined
+      ? overrides.consensus
+      : (overrides ? this.consensus : undefined);
     const isDebate = effectiveProtocol === "debate";
+    // For debate: default to 3 rounds, but respect explicit user input
+    const effectiveMaxRounds = overrides?.maxRounds
+      ?? (isDebate ? 3 : this.maxRounds);
 
     const deps: EngineDeps = {
       chat: engineChat,
@@ -529,14 +564,36 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
       ...(isDebate ? { buildDebateWorkerMessages } : {}),
     };
 
+    // Derive generation params and structural tags from taskNature (parity with wire.ts)
+    const workerGenParams: GenerationParams = {
+      temperature: 1.0,
+      top_p: 0.9,
+      max_tokens: 2048,
+    };
+    const leaderGenParams: GenerationParams = {
+      temperature: 0.7,
+      ...(nature === "artifact" ? {} : { max_tokens: 8192 }),
+    };
+
     const config: EngineConfig = {
-      maxRounds: isDebate ? Math.max(effectiveMaxRounds, 3) : effectiveMaxRounds,
+      maxRounds: effectiveMaxRounds,
       consensus: effectiveConsensus,
       leaderContributes: overrides?.leaderContributes,
       protocol: effectiveProtocol,
+      structuralTags: nature === "critique"
+        ? ["verification", "adopted", "novel", "result"]
+        : undefined,
+      workerGenParams,
+      leaderGenParams,
     };
 
-    const output = await this.runDeliberation(team, input, deps, config, this.retryDeps);
+    // Build retryDeps: prefer shared cooldown from constructor, create per-call fallback
+    const effectiveRetryDeps = this.retryDeps ?? (this.registry ? {
+      cooldown: this.sharedCooldown ?? createCooldownManager(),
+      getModels: () => this.registry!.getAvailable(),
+    } : undefined);
+
+    const output = await this.runDeliberation(team, input, deps, config, effectiveRetryDeps);
 
     return {
       result: output.result,

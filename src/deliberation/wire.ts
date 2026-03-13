@@ -13,12 +13,12 @@
 import type { ChatMessage, ChatCompletionResponse } from "../llm/types";
 import { LLMClientError } from "../llm/errors";
 import type { ModelInfo } from "../model/types";
-import type { DeliberateInput, DeliberateOutput } from "./types";
+import type { DeliberateInput, DeliberateOutput, GenerationParams } from "./types";
 import type { ChatResult, EngineDeps, EngineConfig, RetryDeps } from "./engine";
 import type { DeliberationStore } from "./store-types";
 import type { ScoringSystem } from "../axis/interfaces";
 import type { PollJudgeConfig } from "./poll-judge";
-import { composeTeam, selectDiverseModels } from "./team-composer";
+import { composeTeam, selectDiverseModels, orderWorkersByRole } from "./team-composer";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
 import { evaluateWithPoll } from "./poll-judge";
@@ -39,10 +39,12 @@ export interface WireDeps {
     getAvailable(): ModelInfo[];
     getById(id: string): ModelInfo | undefined;
   };
-  readonly chat: (model: string, messages: ChatMessage[]) => Promise<ChatResult>;
+  readonly chat: (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<ChatResult>;
   readonly store?: DeliberationStore;
   readonly pollJudge?: PollJudgeConfig;
   readonly scoring?: ScoringSystem;
+  /** Shared CooldownManager (process-scoped). When omitted, a per-call instance is created. */
+  readonly cooldown?: import("./cooldown").CooldownManager;
 }
 
 // -- Think Tag Stripping --
@@ -67,7 +69,7 @@ export function stripThinkTags(text: string): string {
 // -- Chat Adapter --
 
 type RawChatFn = (
-  request: { model: string; messages: ChatMessage[] },
+  request: { model: string; messages: ChatMessage[]; temperature?: number; max_tokens?: number; top_p?: number },
 ) => Promise<ChatCompletionResponse>;
 
 /**
@@ -128,21 +130,29 @@ const DEFAULT_ADAPTER_OPTIONS = {
 export function createChatAdapter(
   chatFn: RawChatFn,
   options?: ChatAdapterOptions,
-): (model: string, messages: ChatMessage[]) => Promise<ChatResult> {
+): (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<ChatResult> {
   const opts = { ...DEFAULT_ADAPTER_OPTIONS, ...options };
 
-  return async (model, messages) => {
+  return async (model, messages, params) => {
     let lastError: unknown;
 
     for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
       try {
-        const response = await chatFn({ model, messages });
+        const response = await chatFn({
+          model,
+          messages,
+          ...(params?.temperature != null ? { temperature: params.temperature } : {}),
+          ...(params?.max_tokens != null ? { max_tokens: params.max_tokens } : {}),
+          ...(params?.top_p != null ? { top_p: params.top_p } : {}),
+        });
         const choice = response.choices[0];
         const raw = choice?.message?.content ?? "";
+        const truncated = choice?.finish_reason === "length";
         return {
           content: stripThinkTags(raw),
           inputTokens: response.usage?.prompt_tokens ?? 0,
           outputTokens: response.usage?.completion_tokens ?? 0,
+          ...(truncated ? { truncated } : {}),
         };
       } catch (error) {
         lastError = error;
@@ -235,6 +245,11 @@ export function createDeliberateFn(
       );
     }
 
+    // 2.5. Reorder workers by capability → role fit
+    //       advocate(idx 0)=REASONING, critic(idx 1)=ANALYSIS, wildcard(idx 2)=CREATIVITY
+    const orderedWorkers = orderWorkersByRole(team.workers, (id) => deps.registry.getById(id));
+    team = { ...team, workers: orderedWorkers };
+
     // 3. Assemble engine deps — deps.chat already returns ChatResult
     const engineDeps: EngineDeps = {
       chat: deps.chat,
@@ -243,20 +258,38 @@ export function createDeliberateFn(
       buildDebateWorkerMessages,
     };
 
-    // 4. Build engine config (always set validateStructure: true for quality gate)
-    const effectiveMaxRounds = input.maxRounds ?? 1;
+    // 4. Build engine config
     const isDebate = input.protocol === "debate";
+    // For debate: default to 3 rounds, but respect explicit user input
+    const effectiveMaxRounds = input.maxRounds
+      ?? (isDebate ? 3 : 1);
+    const nature = input.taskNature ?? "critique";
+    const workerGenParams: GenerationParams = {
+      temperature: 1.0,
+      top_p: 0.9,
+      max_tokens: 2048,
+    };
+    // Artifact leader output IS the deliverable — no max_tokens constraint.
+    // Critique leader has a cap since analysis output is bounded.
+    const leaderGenParams: GenerationParams = {
+      temperature: 0.7,
+      ...(nature === "artifact" ? {} : { max_tokens: 8192 }),
+    };
     const config: EngineConfig = {
-      maxRounds: isDebate ? Math.max(effectiveMaxRounds, 3) : effectiveMaxRounds,
+      maxRounds: effectiveMaxRounds,
       consensus: input.consensus,
       leaderContributes: input.leaderContributes,
       protocol: input.protocol,
-      validateStructure: true,
+      structuralTags: nature === "critique"
+        ? ["verification", "adopted", "novel", "result"]
+        : undefined,
+      workerGenParams,
+      leaderGenParams,
     };
 
     // 5. Build retryDeps for automatic team recomposition on failure
     const retryDeps: RetryDeps = {
-      cooldown: createCooldownManager(),
+      cooldown: deps.cooldown ?? createCooldownManager(),
       getModels: () => deps.registry.getAvailable(),
     };
 

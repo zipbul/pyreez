@@ -5,7 +5,7 @@
       "name": "Claude Opus 4.6",
       "contextWindow": 1000000,
       "supportsToolCalling": true,
-      "available": false,
+      "available": true,
       "cost": {
         "inputPer1M": 5,
         "outputPer1M": 25
@@ -37,9 +37,9 @@
           "comparisons": 3
         },
         "JUDGMENT": {
-          "mu": 989.2506703882876,
-          "sigma": 332.7523821150017,
-          "comparisons": 2
+          "mu": 1000,
+          "sigma": 316.0069861070801,
+          "comparisons": 4
         },
         "CODE_GENERATION": {
           "mu": 946.6666666666666,
@@ -391,9 +391,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 875.7907551371464,
-          "sigma": 94.99136718311458,
-          "comparisons": 2
+          "mu": 864.6742967476173,
+          "sigma": 90.41812012985012,
+          "comparisons": 4
         },
         "CODE_GENERATION": {
           "mu": 857,
@@ -981,9 +981,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 700.660717028795,
-          "sigma": 125.35124477502944,
-          "comparisons": 2
+          "mu": 688.5106042018506,
+          "sigma": 122.28865511976532,
+          "comparisons": 3
         },
         "CODE_GENERATION": {
           "mu": 686,
@@ -1217,9 +1217,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 914,
-          "sigma": 157,
-          "comparisons": 0
+          "mu": 901.7696494675239,
+          "sigma": 145.52107085891083,
+          "comparisons": 3
         },
         "CODE_GENERATION": {
           "mu": 914,
@@ -1336,9 +1336,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 600,
-          "sigma": 130,
-          "comparisons": 0
+          "mu": 616.2433767349837,
+          "sigma": 123.61133524397209,
+          "comparisons": 2
         },
         "CODE_GENERATION": {
           "mu": 600,
@@ -2987,9 +2987,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 541.9585744745659,
-          "sigma": 340.8681592039801,
-          "comparisons": 1
+          "mu": 555.7307078697307,
+          "sigma": 316.2448156977992,
+          "comparisons": 4
         },
         "CODE_GENERATION": {
           "mu": 500,
@@ -3223,9 +3223,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 441.27162977867204,
-          "sigma": 340.8864436619718,
-          "comparisons": 1
+          "mu": 432.76231465543856,
+          "sigma": 332.0303959183402,
+          "comparisons": 2
         },
         "CODE_GENERATION": {
           "mu": 500,
@@ -4168,9 +4168,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 743,
-          "sigma": 124,
-          "comparisons": 0
+          "mu": 720.4261461709062,
+          "sigma": 109.15328754395028,
+          "comparisons": 5
         },
         "CODE_GENERATION": {
           "mu": 743,
@@ -4404,9 +4404,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 694.0676531925329,
-          "sigma": 126.75245679332929,
-          "comparisons": 1
+          "mu": 705.4362499044255,
+          "sigma": 120.56853099721468,
+          "comparisons": 3
         },
         "CODE_GENERATION": {
           "mu": 700,
@@ -4640,9 +4640,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 680,
-          "sigma": 135,
-          "comparisons": 0
+          "mu": 694.4442451967136,
+          "sigma": 113.26189612896542,
+          "comparisons": 7
         },
         "CODE_GENERATION": {
           "mu": 680,

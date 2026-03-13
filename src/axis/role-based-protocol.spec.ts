@@ -134,7 +134,7 @@ describe("DivergeSynthProtocol", () => {
 
   beforeEach(() => {
     fakeDelib = makeFakeDeliberate();
-    protocol = new DivergeSynthProtocol("leader_decides", 3, fakeDelib.fn);
+    protocol = new DivergeSynthProtocol({ consensus: "leader_decides", maxRounds: 3, deliberateFn: fakeDelib.fn });
   });
 
   // 1. Auto-assign roles from scores (leader=JUDGMENT highest, rest=workers)
@@ -213,7 +213,7 @@ describe("DivergeSynthProtocol", () => {
     ]);
     const chat = makeChatFn();
     const noConsensus = makeFakeDeliberate({ consensusReached: false });
-    const proto = new DivergeSynthProtocol("leader_decides", 1, noConsensus.fn);
+    const proto = new DivergeSynthProtocol({ consensus: "leader_decides", deliberateFn: noConsensus.fn });
 
     const result = await proto.deliberate("Hard task", plan, scores, chat);
 
@@ -313,7 +313,7 @@ describe("DivergeSynthProtocol", () => {
     ]);
     const chat = makeChatFn();
     const errDelib = makeFakeDeliberate({ throwError: "LLM service unavailable" });
-    const proto = new DivergeSynthProtocol("leader_decides", 3, errDelib.fn);
+    const proto = new DivergeSynthProtocol({ consensus: "leader_decides", maxRounds: 3, deliberateFn: errDelib.fn });
 
     await expect(
       proto.deliberate("Task", plan, scores, chat),
@@ -387,7 +387,7 @@ describe("DivergeSynthProtocol", () => {
   it("should run deliberation even for 1-model plan", async () => {
     const scores = makeScores({ id: "only", judgment: 700, codeGen: 700 });
     const plan = makePlan([{ modelId: "only" }]);
-    const proto = new DivergeSynthProtocol("leader_decides", 3, fakeDelib.fn);
+    const proto = new DivergeSynthProtocol({ consensus: "leader_decides", maxRounds: 3, deliberateFn: fakeDelib.fn });
     const chat = makeChatFn();
 
     const result = await proto.deliberate("Task", plan, scores, chat);

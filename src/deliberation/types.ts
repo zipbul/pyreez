@@ -9,6 +9,18 @@
 
 import type { TaskNature } from "./task-nature";
 
+// -- Generation Parameters --
+
+/**
+ * Optional LLM generation parameters passed through to providers.
+ * Controls temperature, response length, and sampling.
+ */
+export interface GenerationParams {
+  readonly temperature?: number;
+  readonly max_tokens?: number;
+  readonly top_p?: number;
+}
+
 // -- Team Composition --
 
 /**
@@ -16,6 +28,14 @@ import type { TaskNature } from "./task-nature";
  * Worker = independent responder, Leader = synthesizer.
  */
 export type TeamRole = "worker" | "leader";
+
+/**
+ * Deliberation role assigned to workers for diversity of perspective.
+ * advocate: champions the best solution with evidence.
+ * critic: attacks weaknesses, focuses on failure modes.
+ * wildcard: explores unconventional angles and cross-domain ideas.
+ */
+export type DeliberationRole = "advocate" | "critic" | "wildcard";
 
 /**
  * A single team member assignment.
@@ -43,6 +63,9 @@ export interface TeamComposition {
 export interface WorkerResponse {
   readonly model: string;
   readonly content: string;
+  readonly role?: DeliberationRole;
+  /** Positional index in the diverge phase. Used for identity in debates (role can collide with 4+ workers). */
+  readonly workerIndex?: number;
 }
 
 /**
@@ -144,8 +167,6 @@ export interface DeliberateOutput {
     synthesis?: string;
     failedWorkers?: readonly { model: string; error: string }[];
   }[];
-  /** Quality flags from structural validation. */
-  readonly qualityFlags?: readonly string[];
   /** PoLL judge scores per worker model. */
   readonly pollScores?: readonly { model: string; score: number }[];
 }
