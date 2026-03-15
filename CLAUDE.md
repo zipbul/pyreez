@@ -18,15 +18,11 @@ bun run index.ts         # Start MCP server (stdio)
 
 ## Communication
 
-Language: Korean (한국어).
+Language: Korean
 
 ## Bun-First
 
 Bun built-in API 우선. Node.js API나 npm 패키지 사용 전 Bun 대안 확인 필수.
-
-## Write Gate
-
-파일 수정 전 승인 필요. 승인 토큰: `ㅇㅇ`. Targets, Risks, Alternatives 제시 후 `ㅇㅇ` 받을 것. 승인 범위 밖 수정 시 재승인.
 
 ## Search Policy
 

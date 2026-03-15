@@ -66,7 +66,7 @@ const ERROR_TYPE_TTL: Record<CooldownErrorType, number> = {
 /** Maximum escalation multiplier cap (prevents absurd cooldowns). */
 const MAX_ESCALATION_FACTOR = 8; // 2^3 — after 4 failures, TTL stops growing
 
-const DEFAULT_TTL_MS = 300_000; // 5 minutes (fallback)
+const DEFAULT_TTL_MS = 600_000; // 10 minutes (fallback)
 
 /**
  * Extract provider prefix from a model ID (e.g., "anthropic" from "anthropic/claude-opus-4.6").
@@ -78,7 +78,7 @@ function extractProvider(modelId: string): string {
 /**
  * Create a CooldownManager instance.
  *
- * @param defaultTtlMs - Default TTL in milliseconds (default: 300,000 = 5 minutes).
+ * @param defaultTtlMs - Default TTL in milliseconds (default: 600,000 = 10 minutes).
  *                       Used when no error type is provided.
  */
 export function createCooldownManager(

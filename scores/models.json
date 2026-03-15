@@ -37,9 +37,9 @@
           "comparisons": 3
         },
         "JUDGMENT": {
-          "mu": 1000,
-          "sigma": 316.0069861070801,
-          "comparisons": 4
+          "mu": 988.4187866396793,
+          "sigma": 308.39173600543734,
+          "comparisons": 5
         },
         "CODE_GENERATION": {
           "mu": 946.6666666666666,
@@ -391,9 +391,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 864.6742967476173,
-          "sigma": 90.41812012985012,
-          "comparisons": 4
+          "mu": 859.7058226737671,
+          "sigma": 88.20125877906646,
+          "comparisons": 5
         },
         "CODE_GENERATION": {
           "mu": 857,
@@ -1217,9 +1217,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 901.7696494675239,
-          "sigma": 145.52107085891083,
-          "comparisons": 3
+          "mu": 895.2044543790804,
+          "sigma": 141.97162783835736,
+          "comparisons": 4
         },
         "CODE_GENERATION": {
           "mu": 914,
@@ -4640,9 +4640,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 694.4442451967136,
-          "sigma": 113.26189612896542,
-          "comparisons": 7
+          "mu": 717.559127719328,
+          "sigma": 105.19252154941313,
+          "comparisons": 10
         },
         "CODE_GENERATION": {
           "mu": 680,
