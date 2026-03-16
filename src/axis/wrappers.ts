@@ -441,6 +441,12 @@ export class TwoTrackCeSelector implements Selector {
 // DivergeSynthProtocol — Workers (parallel) → Host (synthesis)
 // ============================================================
 
+/** Minimal registry interface for DivergeSynthProtocol (accepts both ModelRegistry and filtered subsets). */
+export interface DspRegistryLike {
+  getAvailable(): ModelInfo[];
+  getById(id: string): ModelInfo | undefined;
+}
+
 /** Options for DivergeSynthProtocol constructor. */
 export interface DivergeSynthProtocolOptions {
   readonly maxRounds?: number;
@@ -453,7 +459,7 @@ export interface DivergeSynthProtocolOptions {
   ) => Promise<DeliberateOutput>;
   readonly retryDeps?: RetryDeps;
   readonly protocol?: "diverge-synth" | "debate";
-  readonly registry?: ModelRegistry;
+  readonly registry?: DspRegistryLike;
   /** Shared CooldownManager (process-scoped). When omitted, per-call instance is created. */
   readonly cooldown?: import("../deliberation/cooldown").CooldownManager;
 }
@@ -462,7 +468,7 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
   private readonly maxRounds: number;
   private readonly protocol?: "diverge-synth" | "debate";
   private readonly retryDeps?: RetryDeps;
-  private readonly registry?: ModelRegistry;
+  private readonly registry?: DspRegistryLike;
   private readonly sharedCooldown?: import("../deliberation/cooldown").CooldownManager;
   private readonly runDeliberation: (
     team: TeamComposition,

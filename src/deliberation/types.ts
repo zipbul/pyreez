@@ -137,4 +137,6 @@ export interface DeliberateOutput {
   }[];
   /** PoLL judge scores per worker model. */
   readonly pollScores?: readonly { model: string; score: number }[];
+  /** Warnings about deliberation quality (e.g., low provider diversity). */
+  readonly warnings?: readonly string[];
 }

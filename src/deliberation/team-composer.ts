@@ -59,17 +59,9 @@ export const SELECTION_DIMS: WeightedDimension[] = [
 
 // -- Helper functions --
 
-/**
- * Extract provider prefix from model ID.
- * "openai/gpt-5" → "openai", "gpt-5" → "gpt-5"
- */
-export function extractProvider(modelId: string): string {
-  const slashIndex = modelId.indexOf("/");
-  if (slashIndex === -1) {
-    return modelId;
-  }
-  return modelId.slice(0, slashIndex);
-}
+import { extractProvider } from "./provider-util";
+// Re-export for downstream consumers
+export { extractProvider };
 
 /**
  * Score a model against weighted dimensions.

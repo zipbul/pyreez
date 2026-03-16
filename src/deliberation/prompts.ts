@@ -166,9 +166,20 @@ export function assignWorkerRole(workerIndex: number): DeliberationRole {
 // -- Debate Digest Helpers --
 
 /**
- * Extract debate-relevant digest from a worker response.
- * Pulls <position> and <evidence> tags for compact cross-worker sharing.
+ * Escape XML special characters to prevent structure injection.
+ */
+function escapeXmlContent(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Extract debate-relevant digest from a worker response as plain text.
+ * Pulls <position> and <evidence> tag contents for compact cross-worker sharing.
  * Falls back to first 3 lines if neither tag is found.
+ * Returns plain text (no XML tags) — caller wraps in safe outer tags.
  */
 export function extractDebateDigest(content: string): string {
   const position = content.match(/<position>([\s\S]*?)<\/position>/);
@@ -176,8 +187,8 @@ export function extractDebateDigest(content: string): string {
 
   if (position?.[1] || evidence?.[1]) {
     const parts: string[] = [];
-    if (position?.[1]) parts.push(`<position>${position[1].trim()}</position>`);
-    if (evidence?.[1]) parts.push(`<evidence>${evidence[1].trim()}</evidence>`);
+    if (position?.[1]) parts.push(`Position: ${position[1].trim()}`);
+    if (evidence?.[1]) parts.push(`Evidence: ${evidence[1].trim()}`);
     return parts.join("\n");
   }
 
@@ -253,7 +264,7 @@ export function buildDebateWorkerMessages(
   if (lastRound && lastRound.responses.length > 0) {
     const others = lastRound.responses
       .filter((r) => workerIndex == null || r.workerIndex !== workerIndex)
-      .map((r) => `<worker role="${r.role ?? "worker"}">\n${extractDebateDigest(r.content)}\n</worker>`)
+      .map((r) => `<worker role="${r.role ?? "worker"}">\n${escapeXmlContent(extractDebateDigest(r.content))}\n</worker>`)
       .join("\n\n");
     if (others) {
       userParts.push(`## Other Workers' Positions\n${others}`);

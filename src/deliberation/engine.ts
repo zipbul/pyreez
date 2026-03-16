@@ -31,6 +31,7 @@ import {
   modelsUsed,
 } from "./shared-context";
 import { selectTopModel, SELECTION_DIMS } from "./team-composer";
+import { extractProvider } from "./provider-util";
 import { classifyError, type CooldownManager } from "./cooldown";
 
 import type { RoundInfo } from "./prompts";
@@ -274,15 +275,20 @@ export async function deliberate(
           if (newWorkers.length === 0) break;
           currentTeam = { workers: newWorkers };
 
-          // Rebuild context with updated team, preserving previous rounds
-          const previousRounds = [...ctx.rounds];
+          // Rebuild context with updated team.
+          // In debate mode, drop previous rounds: new workers haven't seen them
+          // and would reference responses from retired models.
+          // In diverge-synth, previous rounds don't affect prompts, so preserve for diagnostics.
+          const previousRounds = cfg.protocol === "debate" ? [] : [...ctx.rounds];
           ctx = createSharedContext(input.task, currentTeam, input.taskNature);
           for (const prevRound of previousRounds) {
             ctx = addRound(ctx, prevRound);
           }
 
           try {
-            roundResult = await executeRound(ctx, i, deps, cfg, input);
+            // When debate rounds were dropped, use sequential number from fresh context
+            const retryRoundNumber = ctx.rounds.length + 1;
+            roundResult = await executeRound(ctx, retryRoundNumber, deps, cfg, input);
             retried = true;
             break;
           } catch (retryError) {
@@ -324,9 +330,9 @@ export async function deliberate(
         return { model: replacement.id, role: "worker" as const };
       });
       currentTeam = { workers: newWorkers };
-      const previousRounds = [...ctx.rounds];
+      const prevRounds = cfg.protocol === "debate" ? [] : [...ctx.rounds];
       ctx = createSharedContext(input.task, currentTeam, input.taskNature);
-      for (const prevRound of previousRounds) {
+      for (const prevRound of prevRounds) {
         ctx = addRound(ctx, prevRound);
       }
     }
@@ -340,11 +346,20 @@ export async function deliberate(
     ...(r.failedWorkers?.length ? { failedWorkers: r.failedWorkers } : {}),
   }));
 
+  // Provider diversity warning
+  const usedModels = modelsUsed(ctx);
+  const providers = new Set(usedModels.map(extractProvider));
+  const warnings: string[] = [];
+  if (providers.size < 2 && usedModels.length >= 2) {
+    warnings.push(`provider_diversity_low: ${providers.size} provider(s) — minimum 2 recommended`);
+  }
+
   return {
     roundsExecuted: ctx.rounds.length,
     totalTokens: accTokens,
     totalLLMCalls: totalLLMCalls(ctx),
-    modelsUsed: modelsUsed(ctx),
+    modelsUsed: usedModels,
     rounds: roundsSummary,
+    ...(warnings.length > 0 ? { warnings } : {}),
   };
 }

@@ -130,14 +130,28 @@ async function main(): Promise<void> {
   };
 
   // Build 3-stage pipeline directly (no factory)
-  const { modelIds } = filterModelsByProviders(registry, providers);
+  const { modelIds, warnings: providerWarnings } = filterModelsByProviders(registry, providers);
+  for (const w of providerWarnings) console.warn(`[pyreez] ${w}`);
+  if (modelIds.length === 0) {
+    console.error("[pyreez] No models available. Check API keys and scores/models.json.");
+    process.exit(1);
+  }
 
   // Shared CooldownManager: process-scoped, persists across MCP calls
   const sharedCooldown = createCooldownManager();
 
   const scoring = new BtScoringSystem({ persistIO: fileIO, scoresPath: "scores/models.json", registry });
   const profiler = new DomainOverrideProfiler();
-  const deliberation = new DivergeSynthProtocol({ maxRounds: 1, registry, cooldown: sharedCooldown });
+  // NOTE: filteredRegistry is built below (line ~189). DivergeSynthProtocol needs it
+  // at construction but filteredRegistry is defined later. Hoist the definition.
+  const configuredModelIds = new Set(modelIds);
+  const filteredRegistry = {
+    getAll: () => registry.getAll().filter((m) => configuredModelIds.has(m.id)),
+    getAvailable: () => registry.getAvailable().filter((m) => configuredModelIds.has(m.id)),
+    getById: (id: string) => configuredModelIds.has(id) ? registry.getById(id) : undefined,
+  };
+
+  const deliberation = new DivergeSynthProtocol({ maxRounds: 1, registry: filteredRegistry, cooldown: sharedCooldown });
 
   // MF Learner: matrix factorization for task-type × model affinity
   const mfLearner = new MfLearner({
@@ -185,14 +199,6 @@ async function main(): Promise<void> {
     sharedCooldown,
   );
 
-  // Filtered registry: only models from configured providers
-  const configuredModelIds = new Set(modelIds);
-  const filteredRegistry = {
-    getAll: () => registry.getAll().filter((m) => configuredModelIds.has(m.id)),
-    getAvailable: () => registry.getAvailable().filter((m) => configuredModelIds.has(m.id)),
-    getById: (id: string) => configuredModelIds.has(id) ? registry.getById(id) : undefined,
-  };
-
   const deliberateFn = createDeliberateFn({
     registry: filteredRegistry,
     chat: (model, messages, params) => chatAdapter(model, messages, params),
@@ -213,6 +219,8 @@ async function main(): Promise<void> {
     deliberationStore,
     runLogger,
     engine,
+    scoring,
+    chatFn: (model, messages, params) => chatAdapter(model, messages, params),
   });
 
   const transport = new StdioServerTransport();

@@ -68,12 +68,7 @@ const MAX_ESCALATION_FACTOR = 8; // 2^3 — after 4 failures, TTL stops growing
 
 const DEFAULT_TTL_MS = 600_000; // 10 minutes (fallback)
 
-/**
- * Extract provider prefix from a model ID (e.g., "anthropic" from "anthropic/claude-opus-4.6").
- */
-function extractProvider(modelId: string): string {
-  return modelId.split("/")[0] ?? modelId;
-}
+import { extractProvider } from "./provider-util";
 
 /**
  * Create a CooldownManager instance.
@@ -85,6 +80,8 @@ export function createCooldownManager(
   defaultTtlMs?: number,
 ): CooldownManager {
   const entries = new Map<string, CooldownEntry>();
+  /** Provider-level cooldown: provider name → cooldownUntil timestamp. */
+  const cooledProviders = new Map<string, number>();
   const fallbackTtl = defaultTtlMs ?? DEFAULT_TTL_MS;
 
   function computeTtl(errorType: CooldownErrorType | undefined, explicitTtlMs: number | undefined, failCount: number): number {
@@ -113,7 +110,9 @@ export function createCooldownManager(
     addProvider(modelId: string, reason: string, ttlMs?: number): void {
       const provider = extractProvider(modelId);
       const effectiveTtl = ttlMs ?? ERROR_TYPE_TTL.rate_limit;
-      // Cool down all models from the same provider
+      // Provider-level cooldown: affects ALL models from this provider (even untracked ones)
+      cooledProviders.set(provider, Date.now() + effectiveTtl);
+      // Also cool down individually-tracked models from the same provider
       for (const [id] of entries) {
         if (extractProvider(id) === provider && id !== modelId) {
           const existing = entries.get(id);
@@ -132,13 +131,20 @@ export function createCooldownManager(
     },
 
     isOnCooldown(modelId: string): boolean {
+      // Individual model check
       const entry = entries.get(modelId);
-      if (!entry) return false;
-      if (Date.now() >= entry.cooldownUntil) {
+      if (entry) {
+        if (Date.now() < entry.cooldownUntil) return true;
         entries.delete(modelId);
-        return false;
       }
-      return true;
+      // Provider-level check (catches untracked models from cooled providers)
+      const provider = extractProvider(modelId);
+      const until = cooledProviders.get(provider);
+      if (until != null) {
+        if (Date.now() < until) return true;
+        cooledProviders.delete(provider);
+      }
+      return false;
     },
 
     getCooledDownIds(): ReadonlySet<string> {
@@ -151,21 +157,40 @@ export function createCooldownManager(
           entries.delete(id);
         }
       }
+      // Clean expired provider cooldowns
+      for (const [provider, until] of cooledProviders) {
+        if (now >= until) cooledProviders.delete(provider);
+      }
       return active;
     },
 
     getEntry(modelId: string): CooldownEntry | undefined {
       const entry = entries.get(modelId);
-      if (!entry) return undefined;
-      if (Date.now() >= entry.cooldownUntil) {
+      if (entry) {
+        if (Date.now() < entry.cooldownUntil) return entry;
         entries.delete(modelId);
-        return undefined;
       }
-      return entry;
+      // Synthesize entry for provider-level cooldown
+      const provider = extractProvider(modelId);
+      const until = cooledProviders.get(provider);
+      if (until != null) {
+        if (Date.now() < until) {
+          return {
+            modelId,
+            reason: `provider cooldown (${provider})`,
+            cooldownUntil: until,
+            failCount: 1,
+            errorType: "rate_limit",
+          };
+        }
+        cooledProviders.delete(provider);
+      }
+      return undefined;
     },
 
     clear(): void {
       entries.clear();
+      cooledProviders.clear();
     },
   };
 }

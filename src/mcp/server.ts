@@ -669,6 +669,14 @@ export class PyreezMcpServer {
         .filter((r): r is PromiseFulfilledResult<{ model: string; verdict: "accept" | "reject"; misrepresented?: string; unresolved?: string }> => r.status === "fulfilled")
         .map((r) => r.value);
 
+      const failed = results.filter((r) => r.status === "rejected");
+      if (workers.length === 0 && failed.length > 0) {
+        return this.errorResult(JSON.stringify({
+          error: `All ${failed.length} acceptance check(s) failed`,
+          failedModels: args.workers.map((w) => w.model),
+        }));
+      }
+
       return this.textResult(JSON.stringify({
         workers,
         totalTokens: { input: totalInput, output: totalOutput },

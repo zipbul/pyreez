@@ -389,21 +389,21 @@ describe("extractDebateDigest", () => {
   <concerns>Worst case O(n²)</concerns>
 </response>`;
     const digest = extractDebateDigest(content);
-    expect(digest).toContain("<position>Quicksort is optimal for this case</position>");
-    expect(digest).toContain("<evidence>O(n log n) average, in-place</evidence>");
-    expect(digest).not.toContain("<concerns>");
+    expect(digest).toContain("Position: Quicksort is optimal for this case");
+    expect(digest).toContain("Evidence: O(n log n) average, in-place");
+    expect(digest).not.toContain("concerns");
   });
 
   it("should extract position only when evidence is absent", () => {
     const content = "<position>Use Redis</position>\nSome other text";
     const digest = extractDebateDigest(content);
-    expect(digest).toBe("<position>Use Redis</position>");
+    expect(digest).toBe("Position: Use Redis");
   });
 
   it("should extract evidence only when position is absent", () => {
     const content = "Analysis:\n<evidence>Benchmark shows 3x speedup</evidence>\nConclusion";
     const digest = extractDebateDigest(content);
-    expect(digest).toBe("<evidence>Benchmark shows 3x speedup</evidence>");
+    expect(digest).toBe("Evidence: Benchmark shows 3x speedup");
   });
 
   it("should fall back to first 3 lines when neither tag found", () => {
@@ -414,8 +414,8 @@ describe("extractDebateDigest", () => {
   it("should trim whitespace in extracted tags", () => {
     const content = "<position>  spaced  </position>\n<evidence>\n  indented\n</evidence>";
     const digest = extractDebateDigest(content);
-    expect(digest).toContain("<position>spaced</position>");
-    expect(digest).toContain("<evidence>indented</evidence>");
+    expect(digest).toContain("Position: spaced");
+    expect(digest).toContain("Evidence: indented");
   });
 });
 
@@ -438,11 +438,11 @@ describe("buildDebateWorkerMessages uses digest sharing", () => {
     };
     const messages = buildDebateWorkerMessages(ctx, undefined, { current: 2, max: 3 }, "a/m1", 0);
     const userContent = messages[1]!.content!;
-    // Should contain digest (position + evidence) not full content
-    expect(userContent).toContain("<position>Use B</position>");
-    expect(userContent).toContain("<evidence>Cheap</evidence>");
+    // Should contain plain text digest (position + evidence), XML-escaped, not full content
+    expect(userContent).toContain("Position: Use B");
+    expect(userContent).toContain("Evidence: Cheap");
     // Should NOT contain concerns (not part of digest)
-    expect(userContent).not.toContain("<concerns>Slow</concerns>");
+    expect(userContent).not.toContain("Slow");
   });
 });
 
