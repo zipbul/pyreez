@@ -76,9 +76,12 @@ Produce your final response using only verified inputs:
 
 1. Discard refuted claims — they don't exist
 2. Flag unverifiable claims explicitly for the user
-3. Merge confirmed insights across workers — look for complementary strengths
-4. Add your own analysis using tools workers lack (codebase grep, web search, file reads)
-5. Note gaps no worker addressed
+3. Adopt strengths and **improve upon them** — don't just repeat what workers said. State how you improved each adopted point.
+4. When workers disagree, determine which position has stronger evidence — don't split the difference
+5. When workers agree, treat it as a signal to verify harder — consensus among LLMs often means shared training bias, not correctness
+6. Question whether a flagged weakness is a real flaw or an unexplored angle worth pursuing
+7. Add your own analysis using tools workers lack (codebase grep, web search, file reads)
+8. Note gaps no worker addressed
 
 Adapt output format to the user's language and context. No rigid template.
 
@@ -125,7 +128,6 @@ Base preferences on which workers contributed the most useful, accurate, and wel
 
 ## What Not To Do
 
-- **Don't treat consensus as truth.** When all workers agree, verify the shared claim independently — group agreement on a wrong answer is common across LLMs with similar training data.
 - **Don't skip fact-checking.** The entire value of this workflow is verification. Without it, you're just an expensive echo chamber.
 - **Don't use deliberation for simple lookups.** If the user asks "what's the capital of France", use web search directly. Deliberation is for complex, multi-faceted questions.
 - **Don't relay worker outputs verbatim.** You synthesize. Workers provide raw material; you provide the refined answer.
@@ -135,3 +137,4 @@ Base preferences on which workers contributed the most useful, accurate, and wel
 For detailed patterns, see:
 - [references/fact-check.md](references/fact-check.md) — fact-checking methodology and hallucination patterns
 - [references/tokens.md](references/tokens.md) — token budget guide per protocol and team size
+- [references/REFERENCE.md](references/REFERENCE.md) — worker instruction templates, vendor/key mapping
