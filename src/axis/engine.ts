@@ -89,15 +89,23 @@ export class PyreezEngine {
 
     // Single-model shortcut: skip deliberation
     if (plan.models.length === 1) {
-      const chatResult = await this.chat(plan.models[0]!.modelId, prompt);
-      result = {
-        roundsExecuted: 0,
-        totalLLMCalls: 1,
-        modelsUsed: [plan.models[0]!.modelId],
-        protocol: "single",
-        sessionId,
-        rounds: [{ number: 1, responses: [{ model: plan.models[0]!.modelId, content: chatResult.content }] }],
-      };
+      const modelId = plan.models[0]!.modelId;
+      try {
+        const chatResult = await this.chat(modelId, prompt);
+        result = {
+          roundsExecuted: 0,
+          totalLLMCalls: 1,
+          modelsUsed: [modelId],
+          protocol: "single",
+          sessionId,
+          rounds: [{ number: 1, responses: [{ model: modelId, content: chatResult.content }] }],
+        };
+      } catch (error) {
+        throw new Error(
+          `Single-model call failed (${modelId}): ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      }
     } else {
       // Stage 3: deliberate
       const raw = await this.deliberation.deliberate(

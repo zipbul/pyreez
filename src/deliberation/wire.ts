@@ -233,7 +233,6 @@ export function createDeliberateFn(
       ?? (isDebate ? 3 : 1);
     const workerGenParams: GenerationParams = {
       temperature: 1.0,
-      top_p: 0.9,
       max_tokens: 2048,
     };
     const config: EngineConfig = {

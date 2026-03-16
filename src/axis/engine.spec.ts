@@ -351,4 +351,33 @@ describe("PyreezEngine", () => {
       expect(result.sessionId).toBeDefined();
     });
   });
+
+  describe("single-model error handling (B2)", () => {
+    it("should throw with cause chain when single-model chat fails", async () => {
+      const { scoring, profiler, selector, deliberation } =
+        makeMocks(mockPlanSingle);
+      const failingChat: ChatFn = mock(async () => {
+        throw new Error("provider 500");
+      });
+      const engine = new PyreezEngine(
+        scoring,
+        profiler,
+        selector,
+        deliberation,
+        failingChat,
+        ["test/model-a"],
+      );
+
+      try {
+        await engine.runWithTrace("task", budget, mockClassification);
+        expect(true).toBe(false); // should not reach
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        const err = error as Error;
+        expect(err.message).toContain("test/model-a");
+        expect(err.cause).toBeInstanceOf(Error);
+        expect((err.cause as Error).message).toBe("provider 500");
+      }
+    });
+  });
 });

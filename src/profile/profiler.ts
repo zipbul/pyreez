@@ -3,6 +3,7 @@
  * Maps ClassifyResult → TaskRequirement using domain defaults + task overrides.
  */
 
+import { DOMAIN_TASK_TYPES } from "../classify/types";
 import type { TaskDomain, TaskType, ClassifyResult } from "../classify/types";
 import type { CapabilityRequirement, TaskRequirement } from "./types";
 
@@ -259,6 +260,24 @@ const TASK_OVERRIDES: Partial<Record<TaskType, CapProfile>> = {
 };
 
 // -- Public API --
+
+/** Task type → domain reverse map, derived from the canonical DOMAIN_TASK_TYPES. */
+const TASK_TYPE_DOMAIN: Record<string, TaskDomain> = {};
+for (const [domain, tasks] of Object.entries(DOMAIN_TASK_TYPES)) {
+  for (const task of tasks) TASK_TYPE_DOMAIN[task] = domain as TaskDomain;
+}
+
+/**
+ * Get the primary capability dimensions for a task type.
+ * Single source of truth — used by both profiler (routing) and calibration (BT updates).
+ * Resolves: TASK_OVERRIDES → DOMAIN_DEFAULTS (via auto-resolved domain) → ["REASONING"] fallback.
+ */
+export function getDimensionsForTask(taskType: string, domain?: string): string[] {
+  const profile = TASK_OVERRIDES[taskType as TaskType]
+    ?? DOMAIN_DEFAULTS[(domain ?? TASK_TYPE_DOMAIN[taskType]) as TaskDomain];
+  if (!profile) return ["REASONING"];
+  return profile.map((c) => c.dimension);
+}
 
 /**
  * Profile a classified task into capability requirements.

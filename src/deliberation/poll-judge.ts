@@ -20,6 +20,8 @@ import type { GenerationParams, WorkerResponse } from "./types";
 export interface PollJudgeConfig {
   readonly chatFn: (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
   readonly getAvailableModels: () => ModelInfo[];
+  /** Random function for shuffle (default: Math.random). Inject for deterministic tests. */
+  readonly randomFn?: () => number;
 }
 
 export interface PollScore {
@@ -226,16 +228,30 @@ export async function evaluateWithPoll(
   const judges = selectJudges(config.getAvailableModels(), teamModelIds);
   if (judges.length < MIN_JUDGES) return EMPTY_RESULT;
 
-  // 2. Build prompt
-  const prompt = buildPollPrompt(task, workerResponses);
+  // 2. Shuffle response order to prevent position bias, keep reverse map
+  const rng = config.randomFn ?? Math.random;
+  const indices = Array.from({ length: workerResponses.length }, (_, i) => i);
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [indices[i], indices[j]] = [indices[j]!, indices[i]!];
+  }
+  const shuffled = indices.map((i) => workerResponses[i]!);
+  // reverseMap[shuffledIdx] = originalIdx
+  const reverseMap = new Map<number, number>();
+  for (let si = 0; si < indices.length; si++) {
+    reverseMap.set(si, indices[si]!);
+  }
+
+  // 3. Build prompt with shuffled order
+  const prompt = buildPollPrompt(task, shuffled);
   const messages: ChatMessage[] = [{ role: "user", content: prompt }];
 
-  // 3. Call judges in parallel
+  // 4. Call judges in parallel
   const judgeResults = await Promise.allSettled(
     judges.map((j) => config.chatFn(j.id, messages, { temperature: 0, max_tokens: 1024 })),
   );
 
-  // 4. Parse responses
+  // 5. Parse responses and map shuffled IDs back to original indices
   const allJudgeScores: { judgeModel: string; scores: JudgeScore[] }[] = [];
   for (let i = 0; i < judgeResults.length; i++) {
     const result = judgeResults[i]!;
@@ -244,13 +260,18 @@ export async function evaluateWithPoll(
     const parsed = parseJudgeResponse(result.value.content, workerResponses.length);
     if (!parsed) continue;
 
-    allJudgeScores.push({ judgeModel: judges[i]!.id, scores: parsed });
+    // Remap: judge's id (shuffled position) → original worker index
+    const remapped = parsed.map((s) => ({
+      id: reverseMap.get(s.id) ?? s.id,
+      score: s.score,
+    }));
+    allJudgeScores.push({ judgeModel: judges[i]!.id, scores: remapped });
   }
 
-  // Need at least 1 successful judge
-  if (allJudgeScores.length === 0) return EMPTY_RESULT;
+  // Need at least MIN_JUDGES successful responses for reliable aggregation
+  if (allJudgeScores.length < MIN_JUDGES) return EMPTY_RESULT;
 
-  // 5. Median aggregation per worker
+  // 6. Median aggregation per worker (using original indices)
   const workerScores: PollScore[] = [];
   for (let w = 0; w < workerResponses.length; w++) {
     const scoresForWorker = allJudgeScores

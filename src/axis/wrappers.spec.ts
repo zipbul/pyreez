@@ -663,7 +663,6 @@ describe("DivergeSynthProtocol", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.config!.workerGenParams).toEqual({
       temperature: 1.0,
-      top_p: 0.9,
       max_tokens: 2048,
     });
   });

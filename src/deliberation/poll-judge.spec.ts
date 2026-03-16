@@ -62,6 +62,7 @@ function makeConfig(overrides?: {
       outputTokens: 50,
     })),
     getAvailableModels: () => models,
+    randomFn: () => 0.999, // deterministic: Math.floor(0.999*(i+1))=i → no shuffle
   };
 }
 
@@ -316,5 +317,35 @@ describe("evaluateWithPoll", () => {
     for (const call of chatCalls) {
       expect(call.params).toEqual({ temperature: 0, max_tokens: 1024 });
     }
+  });
+
+  it("should return EMPTY_RESULT when only 1 judge succeeds (B5)", async () => {
+    const teamIds = new Set(WORKER_RESPONSES.map((r) => r.model));
+    let callCount = 0;
+    const config: PollJudgeConfig = {
+      chatFn: mock(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: makeJudgeResponse([{ id: 0, score: 8 }, { id: 1, score: 5 }]),
+            inputTokens: 100,
+            outputTokens: 50,
+          };
+        }
+        // All other judges fail
+        throw new Error("judge failed");
+      }),
+      getAvailableModels: () => [
+        makeModel("judge/a", 0.5),
+        makeModel("judge/b", 0.5),
+        makeModel("judge/c", 0.5),
+      ],
+    };
+
+    const result = await evaluateWithPoll("Test task", WORKER_RESPONSES, teamIds, config);
+
+    // With only 1 successful judge (below MIN_JUDGES=2), should return empty
+    expect(result.workerScores.length).toBe(0);
+    expect(result.pairwise.length).toBe(0);
   });
 });
