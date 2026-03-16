@@ -132,9 +132,3 @@ Base preferences on which workers contributed the most useful, accurate, and wel
 - **Don't use deliberation for simple lookups.** If the user asks "what's the capital of France", use web search directly. Deliberation is for complex, multi-faceted questions.
 - **Don't relay worker outputs verbatim.** You synthesize. Workers provide raw material; you provide the refined answer.
 
-## Reference Files
-
-For detailed patterns, see:
-- [references/fact-check.md](references/fact-check.md) — fact-checking methodology and hallucination patterns
-- [references/tokens.md](references/tokens.md) — token budget guide per protocol and team size
-- [references/REFERENCE.md](references/REFERENCE.md) — worker instruction templates, vendor/key mapping

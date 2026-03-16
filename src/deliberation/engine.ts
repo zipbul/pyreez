@@ -235,7 +235,7 @@ export async function deliberate(
     let roundResult: { round: Round; tokens: TokenUsage };
 
     try {
-      roundResult = await executeRound(ctx, i, deps, cfg, input);
+      roundResult = await executeRound(ctx, ctx.rounds.length + 1, deps, cfg, input);
     } catch (error) {
       if (retryDeps && error instanceof RoundExecutionError) {
         // Accumulate tokens consumed before the failure
