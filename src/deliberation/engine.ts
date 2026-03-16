@@ -27,8 +27,6 @@ import { assignWorkerRole } from "./prompts";
 import {
   createSharedContext,
   addRound,
-  totalLLMCalls,
-  modelsUsed,
 } from "./shared-context";
 import { selectTopModel, SELECTION_DIMS } from "./team-composer";
 import { extractProvider } from "./provider-util";
@@ -230,6 +228,10 @@ export async function deliberate(
   let currentTeam = team;
   let ctx = createSharedContext(input.task, currentTeam, input.taskNature);
   let accTokens: TokenUsage = { input: 0, output: 0 };
+  // Accumulate all rounds independently of ctx (survives context resets)
+  const allRounds: Round[] = [];
+  const allModels = new Set<string>();
+  let allLLMCalls = 0;
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
     let roundResult: { round: Round; tokens: TokenUsage };
@@ -276,9 +278,8 @@ export async function deliberate(
           currentTeam = { workers: newWorkers };
 
           // Rebuild context with updated team.
-          // In debate mode, drop previous rounds: new workers haven't seen them
-          // and would reference responses from retired models.
-          // In diverge-synth, previous rounds don't affect prompts, so preserve for diagnostics.
+          // Full retry = all workers failed, so no successful responses to preserve.
+          // Drop all rounds in debate (no cross-examination possible).
           const previousRounds = cfg.protocol === "debate" ? [] : [...ctx.rounds];
           ctx = createSharedContext(input.task, currentTeam, input.taskNature);
           for (const prevRound of previousRounds) {
@@ -311,6 +312,11 @@ export async function deliberate(
     };
     ctx = addRound(ctx, roundResult!.round);
 
+    // Accumulate metadata independently of ctx
+    allRounds.push(roundResult!.round);
+    allLLMCalls += roundResult!.round.responses.length + (roundResult!.round.failedWorkers?.length ?? 0);
+    for (const resp of roundResult!.round.responses) allModels.add(resp.model);
+
     // Proactive worker replacement: swap out workers that failed this round
     // so the next round has a better chance of success (only for multi-round)
     if (retryDeps && roundResult!.round.failedWorkers?.length && i < cfg.maxRounds) {
@@ -330,7 +336,15 @@ export async function deliberate(
         return { model: replacement.id, role: "worker" as const };
       });
       currentTeam = { workers: newWorkers };
-      const prevRounds = cfg.protocol === "debate" ? [] : [...ctx.rounds];
+      // In debate mode: keep only successful responses (filter out failed workers)
+      // so replacement workers can cross-examine surviving positions.
+      // In diverge-synth: preserve all rounds as-is (prompts don't reference them).
+      const prevRounds = cfg.protocol === "debate"
+        ? ctx.rounds.map((r) => ({
+            ...r,
+            responses: r.responses.filter((resp) => !failedIds.has(resp.model)),
+          })).filter((r) => r.responses.length > 0)
+        : [...ctx.rounds];
       ctx = createSharedContext(input.task, currentTeam, input.taskNature);
       for (const prevRound of prevRounds) {
         ctx = addRound(ctx, prevRound);
@@ -338,27 +352,26 @@ export async function deliberate(
     }
   }
 
-  // -- Assemble output --
-  // Extract per-round details for diagnostics (worker responses + failures)
-  const roundsSummary = ctx.rounds.map((r) => ({
-    number: r.number,
+  // -- Assemble output (from accumulated metadata, not ctx which may have been reset) --
+  const roundsSummary = allRounds.map((r, idx) => ({
+    number: idx + 1,
     responses: r.responses.map((resp) => ({ model: resp.model, content: resp.content, role: resp.role })),
     ...(r.failedWorkers?.length ? { failedWorkers: r.failedWorkers } : {}),
   }));
 
   // Provider diversity warning
-  const usedModels = modelsUsed(ctx);
-  const providers = new Set(usedModels.map(extractProvider));
+  const usedModelsList = [...allModels];
+  const providers = new Set(usedModelsList.map(extractProvider));
   const warnings: string[] = [];
-  if (providers.size < 2 && usedModels.length >= 2) {
+  if (providers.size < 2 && usedModelsList.length >= 2) {
     warnings.push(`provider_diversity_low: ${providers.size} provider(s) — minimum 2 recommended`);
   }
 
   return {
-    roundsExecuted: ctx.rounds.length,
+    roundsExecuted: allRounds.length,
     totalTokens: accTokens,
-    totalLLMCalls: totalLLMCalls(ctx),
-    modelsUsed: usedModels,
+    totalLLMCalls: allLLMCalls,
+    modelsUsed: usedModelsList,
     rounds: roundsSummary,
     ...(warnings.length > 0 ? { warnings } : {}),
   };

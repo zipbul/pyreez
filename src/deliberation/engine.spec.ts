@@ -720,3 +720,106 @@ describe("GenerationParams forwarding", () => {
     expect(new Set(roles).size).toBe(3); // all distinct
   });
 });
+
+// ================================================================
+// debate proactive replacement — metadata + cross-examination
+// ================================================================
+
+describe("debate proactive replacement", () => {
+  it("should preserve all rounds in metadata after proactive replacement drops context", async () => {
+    // 3 workers: worker-0 succeeds, worker-1 succeeds, worker-2 fails
+    // Round 1: partial failure → proactive replacement → Round 2
+    // Both rounds should appear in output metadata
+    let callCount = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        callCount++;
+        // Round 1: worker-2 fails (degenerate)
+        if (callCount === 3) {
+          return chatResult("short"); // below MIN_WORKER_RESPONSE_LENGTH
+        }
+        return chatResult(validWorkerContent(`response-${callCount}-${model}`));
+      }),
+      buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _model?: any, _idx?: any) => [
+        { role: "user" as const, content: "debate" },
+      ]),
+    });
+
+    const allModels = [
+      makeModelInfo("prov-a/model-0"),
+      makeModelInfo("prov-a/model-1"),
+      makeModelInfo("prov-a/model-2"),
+      makeModelInfo("prov-b/replacement"),
+    ];
+
+    const team: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-a/model-1", role: "worker" },
+        { model: "prov-a/model-2", role: "worker" },
+      ],
+    };
+
+    const cooldown = createCooldownManager();
+    const retryDeps: RetryDeps = {
+      cooldown,
+      getModels: () => allModels,
+    };
+
+    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+    const result = await deliberate(team, makeInput(), deps, config, retryDeps);
+
+    // Both rounds should be counted
+    expect(result.roundsExecuted).toBe(2);
+    // Round 1 responses should be in output
+    expect(result.rounds!.length).toBe(2);
+    // Models from both rounds should appear
+    expect(result.modelsUsed.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("should pass successful round 1 responses to debate round 2 workers (cross-examination)", async () => {
+    let debateCtxRounds: number | undefined;
+    const deps = makeDeps({
+      chat: mock(async (model: string, _messages: any) => {
+        // Round 1: worker-2 returns degenerate
+        if (model === "prov-a/model-2") {
+          return chatResult("short");
+        }
+        return chatResult(validWorkerContent(`response-from-${model}`));
+      }),
+      buildDebateWorkerMessages: mock((ctx: any, _inst?: any, _round?: any, _model?: any, _idx?: any) => {
+        // Capture how many rounds the debate builder sees
+        debateCtxRounds = ctx.rounds?.length ?? 0;
+        return [{ role: "user" as const, content: "debate" }];
+      }),
+    });
+
+    const allModels = [
+      makeModelInfo("prov-a/model-0"),
+      makeModelInfo("prov-a/model-1"),
+      makeModelInfo("prov-a/model-2"),
+      makeModelInfo("prov-b/replacement"),
+    ];
+
+    const team: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-a/model-1", role: "worker" },
+        { model: "prov-a/model-2", role: "worker" },
+      ],
+    };
+
+    const cooldown = createCooldownManager();
+    const retryDeps: RetryDeps = {
+      cooldown,
+      getModels: () => allModels,
+    };
+
+    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+    await deliberate(team, makeInput(), deps, config, retryDeps);
+
+    // Debate round 2 should see round 1's successful responses
+    // (debateCtxRounds > 0 means previous rounds were available)
+    expect(debateCtxRounds).toBeGreaterThan(0);
+  });
+});
