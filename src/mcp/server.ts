@@ -694,7 +694,7 @@ export class PyreezMcpServer {
       const pairwise = args.preferences.map((p) => ({
         modelAId: p.winner,
         modelBId: p.loser,
-        outcome: "A>B" as const,
+        outcome: "A>>B" as const,
         dimension: p.dimension ?? "JUDGMENT",
       }));
 

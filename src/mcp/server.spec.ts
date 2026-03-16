@@ -1128,7 +1128,7 @@ describe("PyreezMcpServer", () => {
 
       const call = (scoring.update as ReturnType<typeof mock>).mock.calls[0]![0];
       expect(call[0].dimension).toBe("JUDGMENT");
-      expect(call[0].outcome).toBe("A>B");
+      expect(call[0].outcome).toBe("A>>B");
     });
 
     it("should return error when scoring is not configured", async () => {
