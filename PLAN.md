@@ -248,9 +248,14 @@ After:
 
 ### Phase 7: 정리
 
-- [ ] **7.1** 사용되지 않는 import/export 정리
-- [ ] **7.2** A/B 미채택 코드 정리 (Phase 6.5 결과에 따라)
-- [ ] **7.3** `extractSummary` 정리: Phase 2 채택 시 `extractDebateDigest`만 남기고 원본 삭제. 미채택 시 원본 유지 + `extractDebateDigest` 삭제.
+- [x] **7.1** 사용되지 않는 import/export 정리
+  - `LEADER_DIMS` deprecated alias 삭제 (team-composer.ts)
+  - `extractSummary` 삭제 (prompts.ts) + 테스트 정리
+  - `estimateAmortizedCost` 삭제 (effective-cost.ts) + 테스트 정리
+  - `RoleBasedProtocol` backward compat alias 삭제 (wrappers.ts)
+  - `routing-trace.ts` 전체 삭제 (RoutingTrace, truncateTask, abGroup, selectorVariant — 모두 미사용)
+- [x] **7.2** A/B 미채택 코드 정리 — routing-trace.ts의 abGroup/selectorVariant 포함 전체 삭제
+- [x] **7.3** `extractSummary` 삭제, `extractDebateDigest`만 유지 (Phase 2 채택 확정)
 
 ---
 

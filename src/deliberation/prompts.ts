@@ -5,7 +5,6 @@
  *   buildWorkerMessages — build ChatMessage[] for a worker LLM (per-worker, role-aware)
  *   buildDebateWorkerMessages — build ChatMessage[] for debate-mode workers (full-sharing)
  *   assignWorkerRole — deterministic role assignment by worker index
- *   extractSummary — extract <summary> tag content from worker response
  *
  * Pure functions: SharedContext in → ChatMessage[] out.
  * Host provides instructions; pyreez uses minimal defaults when absent.
@@ -164,19 +163,7 @@ export function assignWorkerRole(workerIndex: number): DeliberationRole {
   return WORKER_ROLES[workerIndex % WORKER_ROLES.length]!.role;
 }
 
-// -- Summary Manifest Helpers --
-
-/**
- * Extract <summary>...</summary> content from a worker response.
- * Falls back to first 3 lines if no summary tags found.
- */
-export function extractSummary(content: string): string {
-  const match = content.match(/<summary>([\s\S]*?)<\/summary>/);
-  if (match?.[1]) {
-    return match[1].trim();
-  }
-  return content.split("\n").slice(0, 3).join("\n").trim();
-}
+// -- Debate Digest Helpers --
 
 /**
  * Extract debate-relevant digest from a worker response.

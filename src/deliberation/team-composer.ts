@@ -57,9 +57,6 @@ export const SELECTION_DIMS: WeightedDimension[] = [
   { dimension: "SELF_CONSISTENCY", weight: 0.1 },
 ];
 
-/** @deprecated Use SELECTION_DIMS instead. Kept for backward compatibility during migration. */
-export const LEADER_DIMS = SELECTION_DIMS;
-
 // -- Helper functions --
 
 /**

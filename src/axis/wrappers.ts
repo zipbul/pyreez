@@ -573,6 +573,3 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
     return { workers };
   }
 }
-
-// Backward compatibility alias
-export { DivergeSynthProtocol as RoleBasedProtocol };

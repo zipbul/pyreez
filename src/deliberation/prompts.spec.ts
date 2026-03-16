@@ -2,7 +2,7 @@
  * Unit tests for prompts.ts — Leaderless deliberation prompt builders.
  *
  * SUT: buildWorkerMessages, buildDebateWorkerMessages,
- *      assignWorkerRole, extractSummary
+ *      assignWorkerRole, extractDebateDigest
  */
 
 import { describe, it, expect } from "bun:test";
@@ -11,7 +11,6 @@ import {
   buildDebateWorkerMessages,
   buildAcceptanceMessages,
   assignWorkerRole,
-  extractSummary,
   extractDebateDigest,
 } from "./prompts";
 import type {
@@ -375,22 +374,6 @@ describe("artifact worker prompts", () => {
     const messages = buildWorkerMessages(ctx, undefined, undefined, 0);
     expect(messages[0]!.content).toContain("advocate analyst");
     expect(messages[0]!.content).toContain("<position>");
-  });
-});
-
-// ================================================================
-// extractSummary
-// ================================================================
-
-describe("extractSummary", () => {
-  it("should extract content from summary tags", () => {
-    const content = "<summary>\nAPPROACH: quicksort\nTRADEOFF: memory\nASSUMPTION: fits\n</summary>\ncode";
-    expect(extractSummary(content)).toBe("APPROACH: quicksort\nTRADEOFF: memory\nASSUMPTION: fits");
-  });
-
-  it("should fall back to first 3 lines when no summary tags", () => {
-    const content = "line 1\nline 2\nline 3\nline 4\nline 5";
-    expect(extractSummary(content)).toBe("line 1\nline 2\nline 3");
   });
 });
 

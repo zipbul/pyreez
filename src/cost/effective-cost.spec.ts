@@ -6,7 +6,6 @@ import { describe, it, expect } from "bun:test";
 import {
   estimateStaticCost,
   estimateEffectiveCost,
-  estimateAmortizedCost,
   PROVIDER_CACHING,
 } from "./effective-cost";
 import type { ModelInfo } from "../model/types";
@@ -167,33 +166,3 @@ describe("estimateEffectiveCost", () => {
   });
 });
 
-// -- estimateAmortizedCost --
-
-describe("estimateAmortizedCost", () => {
-  it("should equal static cost for 1 round", () => {
-    const model = makeModel("google", 1.25, 5);
-    const static1 = estimateStaticCost(model, 1000, 500);
-    const amortized1 = estimateAmortizedCost(model, 1000, 500, 1);
-    expect(amortized1).toBeCloseTo(static1, 10);
-  });
-
-  it("should be less than static cost for anthropic multi-round", () => {
-    const model = makeModel("anthropic", 3, 15);
-    const static1 = estimateStaticCost(model, 1000, 500);
-    const amortized3 = estimateAmortizedCost(model, 1000, 500, 3);
-    expect(amortized3).toBeLessThan(static1);
-  });
-
-  it("should be less than static cost for openai multi-round (caching)", () => {
-    const model = makeModel("openai", 2, 8);
-    const static1 = estimateStaticCost(model, 1000, 500);
-    const amortized3 = estimateAmortizedCost(model, 1000, 500, 3);
-    // OpenAI: 50% read discount on cached portion
-    expect(amortized3).toBeLessThan(static1);
-  });
-
-  it("should return 0 for 0 rounds", () => {
-    const model = makeModel("openai", 2, 8);
-    expect(estimateAmortizedCost(model, 1000, 500, 0)).toBe(0);
-  });
-});

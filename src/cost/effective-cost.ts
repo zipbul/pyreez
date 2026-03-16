@@ -109,16 +109,3 @@ export function estimateEffectiveCost(params: EffectiveCostParams): number {
   return totalInput + outputCost;
 }
 
-/**
- * Amortized per-round cost (effective cost / rounds).
- * Used for cost-efficiency ranking in Selectors.
- */
-export function estimateAmortizedCost(
-  model: ModelInfo,
-  inputTokens: number,
-  outputTokens: number,
-  rounds: number,
-): number {
-  if (rounds <= 0) return 0;
-  return estimateEffectiveCost({ model, inputTokens, outputTokens, rounds }) / rounds;
-}
