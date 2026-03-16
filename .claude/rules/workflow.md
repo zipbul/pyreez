@@ -4,6 +4,7 @@
 
 | Step | Description |
 |------|-------------|
+| Classify | Categorize work into a flow → **human approval required** |
 | Spec | Concretize discussion with human → human approval |
 | Plan | Create implementation plan → human approval |
 | Analyze | Identify impact scope, design approach (disposable, discard after implementation) |
@@ -15,15 +16,17 @@
 
 ## Flows
 
-If no flow matches, report to human and do not proceed.
+Every task begins with **Classify**. Agent proposes a flow, human approves. No work starts before approval.
 
 ```
-New Feature / Large Change:   Spec → Analyze → Plan → [Test ↔ Implement → Verify]* → Validate → Commit
-Bug Fix:                      Analyze → Test(RED) → Implement(GREEN) → Verify → Validate → Commit
-Refactoring:                  Analyze → [Implement → Verify]* → Commit
-Exploration:                  Analyze → Report
-Performance:                  Analyze(profile) → [Implement → Measure → Verify]* → Commit
-Chore:                        Implement → Verify → Commit
+Classify(human approval)
+  ├→ New Feature / Large Change:  Spec → Analyze → Plan → [Test ↔ Implement → Verify]* → Validate → Commit
+  ├→ Bug Fix:                     Analyze → Test(RED) → Implement(GREEN) → Verify → Validate → Commit
+  ├→ Refactoring:                 Analyze → [Implement → Verify]* → Commit
+  ├→ Exploration:                 Analyze → Report
+  ├→ Performance:                 Analyze(profile) → [Implement → Measure → Verify]* → Commit
+  ├→ Chore:                       Implement → Verify → Commit
+  └→ No match:                    Report to human, do not proceed
 ```
 
 `[]*` = Autonomous loop until completion (Ralph Loop). Completion: all tests pass + typecheck passes.
@@ -37,6 +40,6 @@ Chore:                        Implement → Verify → Commit
 
 | Type | When |
 |------|------|
-| Human Review | Spec, Plan (planning domain) |
+| Human Review | Classify, Spec, Plan (planning domain) |
 | Automated | Verify (test/type/quality) |
 | Self Review | Any step (Reflection) |
