@@ -1,303 +1,85 @@
-# PLAN: 리더 폐기 + 호스트-리더 아키텍처
+# PLAN: 개선점
 
-## 배경
+## 1. Cooldown 프로바이더 전파 누락
 
-논의를 통해 다음이 확정됨:
+**현상**: `cooldown.addProvider()`가 `entries` 맵에 이미 등록된 모델만 쿨다운. 같은 프로바이더의 미등록 모델은 쿨다운 안 됨.
 
-1. **리더 폐기** — 호스트(Claude Code 등)가 합성을 수행. 내부 리더 LLM 호출 제거.
-2. **debate 시 구조화 요약 공유** — worker 간 전체 응답 대신 `<position>` + `<evidence>` 추출본 공유. 비용 60% 절감.
-3. **acceptance 라운드** — 호스트 합성 후 worker가 accept/reject 검증. 별도 MCP 도구 `pyreez_acceptance`로 노출.
-4. **BT 피드백 루프** — 호스트가 worker 품질 피드백을 별도 도구 `pyreez_feedback`으로 전달.
-5. **멀티 팀 미구현** — 호스트가 pyreez를 여러 번 호출하는 것으로 충분.
-6. **.github/skills, .github/agents 삭제** — 팬텀 도구 참조 + 구 리더 플로우. 삭제 완료.
+**영향**: retry 시 `selectTopModel`이 같은 프로바이더의 쿨다운 안 된 모델을 선택 → 429 재발 → 불필요한 API 호출 1회 추가. 자기 교정되지만 비용/지연 낭비.
 
-## 아키텍처 변경
+**권장안**: `addProvider` 호출 시 `entries` 순회 대신, 쿨다운된 프로바이더 Set을 별도 관리. `isOnCooldown`에서 모델 ID 매칭 실패 시 프로바이더 Set도 확인.
 
 ```
-Before:
-  Host → pyreez → [Workers] → Leader(LLM) → synthesis → Host
-                                ↑ 비용 40~50%, 호스트보다 낮은 품질
+// cooldown.ts
+const cooledProviders = new Map<string, number>(); // provider → cooldownUntil
 
-After:
-  Host → pyreez → [Workers] → responses → Host(합성 + 검증)
-                                            ↓ (필요시)
-                                          pyreez_acceptance → [Workers] → acceptance
-                                            ↓
-                                          Host(확정)
-                                            ↓
-                                          pyreez_feedback → BT 업데이트
+addProvider(modelId, reason, ttlMs?) {
+  const provider = extractProvider(modelId);
+  cooledProviders.set(provider, Date.now() + effectiveTtl);
+  this.add(modelId, reason, "rate_limit", ttlMs);
+}
+
+isOnCooldown(modelId) {
+  // 기존 개별 모델 체크
+  const entry = entries.get(modelId);
+  if (entry && Date.now() < entry.cooldownUntil) return true;
+  // 프로바이더 레벨 체크
+  const provider = extractProvider(modelId);
+  const until = cooledProviders.get(provider);
+  return until != null && Date.now() < until;
+}
 ```
 
-## 플로우
+## 2. 프로바이더 장애 시 팀 다양성 상실
+
+**현상**: 2026-03-16 deliberation 실측 — 5개 worker 중 3개 실패 (Google 429 ×2, Anthropic degenerate). retry 후 xAI 모델 2개만 남아 프로바이더 다양성 완전 소실.
+
+**영향**: 동일 프로바이더 모델끼리 deliberation하면 훈련 편향이 겹쳐 다양한 시각 확보 불가. deliberation의 핵심 가치(다양성) 훼손.
+
+**권장안**: 팀 구성 결과에 최소 프로바이더 수 제약 추가. 제약 미달 시 호스트에 경고 반환 (deliberation 자체는 진행하되 `warnings` 필드로 알림).
 
 ```
-1. Diverge:    Worker A, B, C 병렬 (독립 응답)
-2. Debate:     Worker A, B, C 병렬 (position+evidence 상호 공유, 반박) [선택적]
-3. Host 합성:  호스트가 fact-check + 합성
-4. Acceptance: Worker A, B, C 병렬 (합성 검증, accept/reject) [선택적]
-5. Host 확정:  reject 사유 반영 후 최종 결과
-6. Feedback:   호스트 → pyreez_feedback (BT 업데이트)
+// 응답에 warnings 필드 추가
+{
+  "modelsUsed": ["xai/grok-4", "xai/grok-4-1-fast"],
+  "warnings": ["provider_diversity_low: 1 provider (minimum 2 recommended)"],
+  ...
+}
 ```
 
----
+## 3. Scoring System 기본 설정 부재
 
-## TODO
+**현상**: MCP 서버가 scoring system 없이 시작되면 `pyreez_feedback`가 항상 에러 반환 (`"feedback not available"`). 서버 시작 시 `BtScoringSystem` 자동 생성 없음.
 
-### Phase 1: 리더 제거 + MCP 스키마 정리
+**영향**: 피드백 루프 단절. BT 레이팅 개선 불가. 호스트가 에러를 받아도 원인 파악 어려움.
 
-> 리더 관련 코드 전체 제거 + MCP 입출력 동시 정리.
-> 각 스텝 완료 후 `bun run typecheck` 통과 필수. 기존 테스트 수정을 동반.
-> 시작 전 `git tag pre-leader-removal` 생성 (롤백 지점).
+**권장안**: `PyreezMcpServer` 생성자에서 scoring이 미제공 시 기본 `BtScoringSystem` 자동 생성. `scores/models.json` 경로를 기본값으로.
 
-- [x] **1.1** `src/deliberation/types.ts` — 리더 관련 타입 제거
-  - `TeamRole`에서 `"leader"` 제거 → `type TeamRole = "worker"`
-  - `Synthesis` 인터페이스 삭제
-  - `ConsensusMode` 타입 삭제
-  - `TeamComposition`에서 `leader` 필드 제거 → `{ workers: readonly TeamMember[] }`
-  - `DeliberateInput`에서 `leaderInstructions`, `consensus`, `leaderContributes` 제거
-  - `DeliberateOutput`에서 `result: string` 제거, `consensusReached` 제거
-  - `Round`에서 `synthesis?: Synthesis` 제거
-  - 동반 테스트 수정: `shared-context.spec.ts`, `engine.spec.ts`, `wire.spec.ts`
+## 4. 통합 테스트 부재
 
-- [x] **1.1b** `src/axis/types.ts` — `DeliberationResult` 리더 필드 제거
-  - `result: string` 제거 (리더 합성 결과)
-  - `consensusReached: boolean | null` 제거
-  - `rounds[].synthesis?: string` 제거
-  - `protocol` 값에서 `"leader_decides"` 의미 제거 (실제 deliberation protocol만 남김)
+**현상**: 855개 테스트 전부 mock 기반. 실제 LLM 프로바이더 호출 테스트 0건.
 
-- [x] **1.1c** `src/axis/interfaces.ts` — `DeliberationOverrides` 리더 필드 제거
-  - `consensus?: "leader_decides"` 제거
-  - `leaderContributes?: boolean` 제거
-  - `leaderInstructions?: string` 제거
+**영향**: 프로바이더 API 변경, 응답 포맷 변화, rate limit 동작 등을 자동 감지 불가. 프로덕션 장애를 수동 검증에 의존.
 
-- [x] **1.1d** `src/deliberation/store-types.ts` — `DeliberationRecord` 리더 필드 정리
-  - `result: string` 제거
-  - `consensusReached: boolean | null` 제거
-  - `leaderInstructions?: string` 제거
-  - `consensus?: string` 제거
-  - `roundsSummary` 내 `synthesis?: string` 제거
-  - `DeliberationQuery`에서 `consensusReached?: boolean` 제거
-  - `src/deliberation/file-store.ts` — `q.consensusReached` 쿼리 필터 로직 제거
-  - 동반 테스트 수정: `file-store.spec.ts`
+**권장안**: `test/integration/` 디렉토리에 환경변수 기반 스모크 테스트 추가. API 키 없으면 자동 skip.
 
-- [x] **1.2** `engine.ts` — 리더 호출 로직 전체 제거
-  - `parseSynthesis` 함수 삭제
-  - `extractJsonObject`, `stripJsonWrapping`, `stripDeliberationBlock` 삭제
-  - `retryLeaderOnce` 함수 삭제
-  - `executeRound`에서 "2. Leader" 블록 전체 제거 (`partialRound` ~ leader synthesis return)
-  - `validateSynthesisStructure`, `buildRetryHint` import 및 호출 제거
-  - `EngineDeps`에서 `buildLeaderMessages` 제거
-  - `EngineConfig`에서 `consensus`, `leaderContributes`, `structuralTags`, `leaderGenParams` 제거
-  - `deliberate()`에서 consensus 루프 제거 → 고정 라운드만 지원
-  - `deliberate()` 반환값에서 `result` (leader synthesis), `consensusReached` 제거
-  - `deliberate()` retry 로직에서 `currentTeam.leader` 참조 제거 (leader 교체 → worker 교체로 통일)
-  - `RoundExecutionError.role`에서 `"leader"` 제거
-  - 동반 테스트 수정: `engine.spec.ts`
+```typescript
+// test/integration/smoke.test.ts
+import { describe, it, expect } from "bun:test";
 
-- [x] **1.3** `synthesis-validator.ts` + `synthesis-validator.spec.ts` 전체 삭제
+const HAS_KEY = !!Bun.env.PYREEZ_XAI_KEY;
 
-- [x] **1.4** `prompts.ts` — 리더 프롬프트 전체 삭제
-  - `LEADER_OBLIGATIONS`, `LEADER_CRITIQUE_OUTPUT`, `LEADER_DEFAULT`, `LEADER_SUFFIX` 삭제
-  - `LEADER_ARTIFACT`, `LEADER_ARTIFACT_SUFFIX` 삭제
-  - `DEBATE_INTERMEDIATE_LEADER` 삭제
-  - `buildLeaderMessages` 함수 삭제
-  - `extractSummary` 보존 (Phase 2에서 `extractDebateDigest`로 진화)
-  - 동반 테스트 수정: `prompts.spec.ts`
-
-- [x] **1.5** `team-composer.ts` — 리더 선택 로직 제거
-  - `composeTeam`에서 리더 할당 제거 → workers만 반환
-  - `TeamComposition`에서 `leader` 필드 제거
-  - `LEADER_DIMS` → `SELECTION_DIMS`로 rename (worker 선택에 계속 사용)
-  - `selectTopModel`은 retry 시 worker 교체에 사용 → 보존
-  - 동반 테스트 수정: `team-composer.spec.ts`
-
-- [x] **1.6** `shared-context.ts` — leader/synthesis 의존 전체 제거
-  - `Synthesis` import 삭제
-  - `createSharedContext`에서 `team.leader` 검증 제거
-  - `isConsensusReached` 함수 삭제
-  - `latestSynthesis` 함수 삭제
-  - `totalLLMCalls`에서 `round.synthesis` 카운트 제거
-  - `modelsUsed`에서 `round.synthesis` 추적 제거
-  - module docstring 업데이트
-  - 동반 테스트 수정: `shared-context.spec.ts`
-
-- [x] **1.7** `wire.ts` — 리더 wiring 제거
-  - `buildLeaderMessages` import 및 `engineDeps` 주입 제거
-  - `leaderGenParams` config 제거
-  - `config.consensus`, `config.leaderContributes`, `config.structuralTags` 제거
-  - `composeTeam` 호출부에서 리더 관련 로직 정리
-  - `deliberate()` 호출 후 반환값 매핑 업데이트 (result, consensusReached 없음)
-  - 동반 테스트 수정: `wire.spec.ts`
-
-- [x] **1.8** `server.ts` (MCP 도구) — 리더 관련 파라미터/출력 제거
-  - `pyreez_deliberate` 입력 스키마에서 제거: `leader_instructions`, `consensus`, `leader_contributes`
-  - `models` description 업데이트: "전체가 workers" (마지막=리더 규칙 폐기)
-  - `pyreez_deliberate` description 업데이트: "consensus-based" → "multi-model"
-  - 출력에서 `result`, `consensusReached`, `rounds[].synthesis` 제거
-  - `handleDeliberate`에서 `leaderInstructions`, `consensus`, `leaderContributes` 전달 제거
-  - auto_route 경로의 `effectiveConsensus` 제거
-  - `deliberationStore.save()` 호출에서 `leaderInstructions`, `consensus` 제거
-  - 동반 테스트 수정: `server.spec.ts`
-
-- [x] **1.9** `src/axis/wrappers.ts` — `DivergeSynthProtocol` 리더 제거
-  - `buildLeaderMessages` import 삭제
-  - `ConsensusMode` import 삭제
-  - `DivergeSynthProtocolOptions`에서 `consensus` 제거
-  - 클래스 내부에서 `this.consensus` 필드 및 관련 로직 제거
-  - `deps` 조립 시 `buildLeaderMessages` 주입 제거
-  - `leaderGenParams` config 제거
-  - `config` 조립 시 `consensus`, `leaderContributes`, `structuralTags`, `leaderGenParams` 제거
-  - `buildExplicitTeam` — `leader` 할당 로직 제거 → 전체가 workers
-  - `buildAutoTeam` — JUDGMENT 기반 리더 선택 제거 → 전체가 workers
-  - `DeliberationResult` 매핑에서 `result`, `consensusReached` 제거
-  - `team.leader` 참조 전체 제거 (team augmentation 포함)
-  - module docstring 업데이트: "Workers (parallel) → Leader (synthesis)" → "Workers (parallel) → Host"
-  - 동반 테스트 수정: `wrappers.spec.ts`, `role-based-protocol.spec.ts`
-
-- [x] **1.10** `src/axis/engine.ts` — 리더 관련 출력 필드 정리
-  - `consensusReached: null` 등 리더 제거 후 불필요한 필드 제거
-  - 동반 테스트 수정: `src/axis/engine.spec.ts`, `learning.spec.ts`, `learning-phase6.spec.ts`
-
-- [x] **1.11** `poll-judge.ts` — 변경 불필요 확인
-  - poll-judge는 worker 응답만 평가 (leader 의존 없음)
-  - `WorkerResponse` 타입만 사용 → 리더 제거 영향 없음
-  - wire.ts에서 `evaluateWithPoll` 호출부만 정리 (result.modelsUsed 변경 반영)
-
-- [x] **1.12** Verify 게이트
-  - `bun run typecheck` 통과
-  - `bun test` 통과
-  - SKILL.md 최소 패치: 리더 관련 언급 제거 (과도기 동작 보장)
-
-### Phase 2: Debate 요약 공유 최적화
-
-> Phase 7 A/B 평가 전까지 feature flag로 비활성 (기존 전체 공유가 기본값).
-
-- [x] **2.1** `extractSummary` → `extractDebateDigest` 개선
-  - `<position>`, `<evidence>` 태그를 직접 추출
-  - 두 태그 모두 없으면 첫 3줄 fallback 유지
-  - 단위 테스트 추가
-
-- [x] **2.2** `buildDebateWorkerMessages` 변경
-  - 현재: 타 worker 전체 응답 (`r.content`) 공유
-  - 변경: `extractDebateDigest`로 추출본만 공유
-  - 단위 테스트 추가: digest 공유 vs 전체 공유 비교
-
-- [x] **2.3** Verify 게이트: `bun run typecheck` + `bun test`
-
-### Phase 3: Acceptance 라운드
-
-> 별도 MCP 도구 `pyreez_acceptance`로 노출.
-> 호스트가 합성 후 선택적으로 호출. 비용: worker당 ~800 tokens (입력 ~500 + 출력 ~300), 3 workers 기준 총 ~2.5K tokens.
-
-- [x] **3.1** acceptance용 worker 프롬프트 추가
-  - 파일: `src/deliberation/prompts.ts`
-  - `buildAcceptanceMessages(synthesis: string, originalPosition: string, task: string): ChatMessage[]`
-  - 출력 스키마: `<acceptance><verdict>accept|reject</verdict><misrepresented>...</misrepresented><unresolved>...</unresolved></acceptance>`
-  - 단위 테스트 추가
-
-- [x] **3.2** `pyreez_acceptance` MCP 도구 추가
-  - 입력: `{ task: string, synthesis: string, workers: [{ model: string, original_position: string }] }`
-  - 출력: `{ workers: [{ model: string, verdict: "accept"|"reject", misrepresented?: string, unresolved?: string }] }`
-  - 단위 테스트 추가
-
-- [x] **3.3** Verify 게이트: `bun run typecheck` + `bun test`
-
-### Phase 4: BT 피드백 도구
-
-- [x] **4.1** `pyreez_feedback` MCP 도구 추가
-  - 입력: `{ task_id: string, preferences: [{ winner: string, loser: string }] }`
-  - 출력: `{ updated: number, models: string[] }`
-  - ScoringSystem.update() 호출
-  - 단위 테스트 추가
-
-- [x] **4.2** Verify 게이트: `bun run typecheck` + `bun test`
-
-### Phase 5+6: 스킬 개편 + A/B 평가 (`/skill-creator` 통합)
-
-> `/skill-creator` (anthropics/skills)를 사용하여 스킬 재생성 + eval + A/B 비교를 단일 루프로 수행.
-> 새 대화에서 `/skill-creator`를 실행하여 진행.
-
-- [x] **5.1** `/skill-creator`로 pyreez 스킬 재생성
-  - 새 대화에서 `/skill-creator` 실행
-  - 현재 SKILL.md + 새 MCP 도구(acceptance, feedback) 컨텍스트 제공
-  - skill-creator가 interview → draft → test case 생성
-  - Skills 2.0 frontmatter 자동 적용: `allowed-tools`, `argument-hint`, `$ARGUMENTS`
-  - 새 플로우 반영: Diverge → (Debate) → Fact Verification → Host 합성 → (Acceptance) → Feedback
-  - SKILL.md 본문 500줄 이하 유지
-  - `references/` 분할: fact-check 패턴, 토큰 예산, worker instruction 템플릿
-
-- [x] **5.2** eval 테스트 케이스 구성 (skill-creator 루프 내)
-  - skill-creator가 test prompt 생성 → human 리뷰
-  - with-skill vs without-skill baseline 병렬 실행
-  - eval-viewer로 정성적 리뷰 + benchmark로 정량적 비교
-
-- [x] **5.3** 스킬 변형 A/B 비교 (skill-creator Comparator)
-  - 변형 A: digest 공유 (Phase 2) 포함 스킬
-  - 변형 B: acceptance 라운드 (Phase 3) 포함 스킬
-  - blind comparison으로 품질 판정
-  - 결과 기반 최종 스킬 확정
-
-- [x] **5.4** description 최적화 (skill-creator run_loop)
-  - trigger eval query 20개 생성 (should-trigger 10 + should-not-trigger 10)
-  - `run_loop.py`로 description 자동 최적화
-  - train/test split으로 overfitting 방지
-
-- [x] **5.5** `scripts/available-models.ts` 추가 (선택적)
-  - `!command` 동적 컨텍스트 주입용
-  - scores/models.json에서 available 모델 목록 출력
-
-### Phase 7: 정리
-
-- [x] **7.1** 사용되지 않는 import/export 정리
-  - `LEADER_DIMS` deprecated alias 삭제 (team-composer.ts)
-  - `extractSummary` 삭제 (prompts.ts) + 테스트 정리
-  - `estimateAmortizedCost` 삭제 (effective-cost.ts) + 테스트 정리
-  - `RoleBasedProtocol` backward compat alias 삭제 (wrappers.ts)
-  - `routing-trace.ts` 전체 삭제 (RoutingTrace, truncateTask, abGroup, selectorVariant — 모두 미사용)
-- [x] **7.2** A/B 미채택 코드 정리 — routing-trace.ts의 abGroup/selectorVariant 포함 전체 삭제
-- [x] **7.3** `extractSummary` 삭제, `extractDebateDigest`만 유지 (Phase 2 채택 확정)
-
----
-
-## 삭제 대상 요약
-
-| 파일/모듈 | 조치 |
-|-----------|------|
-| `src/deliberation/synthesis-validator.ts` + `.spec.ts` | 전체 삭제 |
-| `src/deliberation/prompts.ts` — `buildLeaderMessages`, `LEADER_*` 상수 | 삭제 (worker/debate 프롬프트 보존) |
-| `src/deliberation/engine.ts` — `parseSynthesis`, `retryLeaderOnce`, 리더 호출 블록, consensus 루프 | 삭제 |
-| `src/deliberation/wire.ts` — `buildLeaderMessages` 주입, `leaderGenParams`, consensus/structuralTags config | 삭제 |
-| `src/deliberation/types.ts` — `Synthesis`, `ConsensusMode`, `TeamComposition.leader`, `DeliberateInput.leader*` | 삭제 |
-| `src/deliberation/team-composer.ts` — 리더 선택/할당 | 삭제 |
-| `src/deliberation/shared-context.ts` — `isConsensusReached`, `latestSynthesis`, synthesis 관련 로직 | 삭제 |
-| `src/deliberation/store-types.ts` — `result`, `consensusReached`, `leaderInstructions`, `consensus`, `roundsSummary.synthesis` | 삭제 |
-| `src/axis/wrappers.ts` — `DivergeSynthProtocol` 리더 선택/주입/config, `buildLeaderMessages` | 삭제 |
-| `src/axis/interfaces.ts` — `DeliberationOverrides.consensus`, `.leaderContributes`, `.leaderInstructions` | 삭제 |
-| `src/axis/types.ts` — `DeliberationResult.result`, `.consensusReached`, `.rounds[].synthesis` | 삭제 |
-| `src/mcp/server.ts` — `leader_instructions`, `consensus`, `leader_contributes`, `result`, `consensusReached` | 삭제 |
-
-## 보존 대상
-
-| 모듈 | 이유 |
-|------|------|
-| worker 프롬프트 (advocate/critic/wildcard) | 그대로 사용 |
-| debate worker 프롬프트 | 요약 공유 최적화 후 사용 |
-| `extractSummary` | Phase 2에서 `extractDebateDigest`로 진화. A/B 결과에 따라 최종 판단 |
-| BT 스코어링 시스템 | 그대로 사용 |
-| 라우팅 파이프라인 (profile → score → select) | 그대로 사용 |
-| cooldown + retry (worker 레벨) | 그대로 사용 |
-| `selectTopModel` (→ `SELECTION_DIMS`) | retry 시 worker 교체에 사용 |
-| PoLL judge (worker 간 pairwise) | 변경 불필요 (leader 의존 없음) |
-
-## 실행 순서
-
-```
-Phase 1 (리더 제거 + MCP 정리 + 테스트 수정 + typecheck) ✅
-  → Phase 2 (debate 최적화) + Phase 3 (acceptance) + Phase 4 (feedback) [병렬] ✅
-  → Phase 5+6 (스킬 재생성 + A/B 평가) ← /skill-creator로 통합 수행
-  → Phase 7 (정리)
+describe.skipIf(!HAS_KEY)("smoke: xai provider", () => {
+  it("should complete a single-model deliberation", async () => {
+    // 최소 1개 프로바이더로 실제 deliberation 실행
+    // 응답 구조 검증 (content 존재, 토큰 카운트 > 0)
+  });
+});
 ```
 
-- Phase 1~4 완료.
-- Phase 5+6은 새 대화에서 `/skill-creator` 실행. 스킬 재생성 + eval + A/B 비교를 단일 루프로.
-- Phase 7은 Phase 5+6 결과 확정 후.
+## 5. report 모듈 미사용 인프라
+
+**현상**: `src/report/types.ts`의 `CallRecord` 인터페이스 (leaderId 필드 포함)와 `FileReporter`가 정의되어 있으나 프로덕션에서 인스턴스화 안 됨. Reporter 인프라 전체가 죽은 상태.
+
+**영향**: 코드 크기 증가, 타입 혼란 (leaderId 같은 구시대 필드 잔존). 기능적 영향 없음.
+
+**권장안**: Reporter 기능을 실제로 사용할 계획이 있으면 leaderId 제거 후 활성화. 계획 없으면 모듈 전체 삭제.
