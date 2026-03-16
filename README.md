@@ -3,19 +3,18 @@
 Heterogeneous multi-model deliberation infrastructure exposed as an [MCP](https://modelcontextprotocol.io/) server.
 
 pyreez sits between a host agent (GitHub Copilot, Claude Desktop, etc.) and multiple LLM providers.
-It routes tasks to the optimal model, orchestrates multi-model deliberation with consensus,
+It routes tasks to the optimal model, orchestrates leaderless multi-model deliberation,
 and continuously calibrates model ratings via Bradley-Terry scoring.
 
 ## Key Features
 
 - **Intelligent Routing** — PROFILE → SCORE → SELECT pipeline picks the best model per task
-- **Multi-Model Deliberation** — Workers → Leader consensus loop across providers
+- **Multi-Model Deliberation** — Workers respond independently; host synthesizes across providers
 - **Bradley-Terry Ratings** — 21-dimension capability scores with pairwise calibration
-- **Provider Diversity** — 43 models across 9 providers
+- **Provider Diversity** — 50 models across 9 providers
 - **Learning Layer** — Online BT updates, preference tracking, MoE gating, matrix factorization
 - **Feedback API** — 4-type feedback (boolean, float, comment, demonstration) with session linkage
 - **Quality Tracking** — Per-model reporting with context utilization metrics
-- **A/B Testing** — Selector splitter for controlled routing experiments
 
 ## Supported Models
 
@@ -35,12 +34,11 @@ and continuously calibrates model ratings via Bradley-Terry scoring.
 
 | Tool | Description |
 |------|-------------|
-| `pyreez_route` | Route a task through PROFILE → SCORE → SELECT to find the optimal model. Domain required, task_type and complexity auto-inferred if omitted. |
+| `pyreez_route` | Route a task through PROFILE → SCORE → SELECT to find the optimal model |
 | `pyreez_scores` | Query model capability scores (filter by model, dimension, top-N) |
-| `pyreez_report` | Record LLM call results or retrieve quality summaries |
-| `pyreez_deliberate` | Run multi-model consensus-based deliberation |
-| `pyreez_calibrate` | Update Bradley-Terry ratings from usage data |
-| `pyreez_feedback` | Record feedback (boolean/float/comment/demonstration) linked to a session |
+| `pyreez_deliberate` | Run leaderless multi-model deliberation |
+| `pyreez_acceptance` | Verify host synthesis by having workers check position accuracy |
+| `pyreez_feedback` | Submit pairwise quality preferences to update model BT ratings |
 
 ## Quick Start
 
@@ -102,7 +100,7 @@ Host Agent (Copilot / Claude Desktop / Claude Code)
     │
     ▼ (MCP stdio)
 ┌──────────────────────────────────────────────┐
-│  pyreez MCP Server (6 tools)                 │
+│  pyreez MCP Server (5 tools)                 │
 │                                              │
 │  ┌────────────────────────────────────────┐  │
 │  │  3-Stage Pipeline (PyreezEngine)       │  │

@@ -4168,9 +4168,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 720.4261461709062,
-          "sigma": 109.15328754395028,
-          "comparisons": 5
+          "mu": 715.1201609689356,
+          "sigma": 106.43019292323302,
+          "comparisons": 6
         },
         "CODE_GENERATION": {
           "mu": 743,
@@ -4404,9 +4404,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 705.4362499044255,
-          "sigma": 120.56853099721468,
-          "comparisons": 3
+          "mu": 710.7422351063962,
+          "sigma": 117.56065532462807,
+          "comparisons": 4
         },
         "CODE_GENERATION": {
           "mu": 700,
