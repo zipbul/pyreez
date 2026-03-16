@@ -172,17 +172,17 @@ After:
 
 > Phase 7 A/B 평가 전까지 feature flag로 비활성 (기존 전체 공유가 기본값).
 
-- [ ] **2.1** `extractSummary` → `extractDebateDigest` 개선
+- [x] **2.1** `extractSummary` → `extractDebateDigest` 개선
   - `<position>`, `<evidence>` 태그를 직접 추출
   - 두 태그 모두 없으면 첫 3줄 fallback 유지
   - 단위 테스트 추가
 
-- [ ] **2.2** `buildDebateWorkerMessages` 변경
+- [x] **2.2** `buildDebateWorkerMessages` 변경
   - 현재: 타 worker 전체 응답 (`r.content`) 공유
   - 변경: `extractDebateDigest`로 추출본만 공유
   - 단위 테스트 추가: digest 공유 vs 전체 공유 비교
 
-- [ ] **2.3** Verify 게이트: `bun run typecheck` + `bun test`
+- [x] **2.3** Verify 게이트: `bun run typecheck` + `bun test`
 
 ### Phase 3: Acceptance 라운드
 

@@ -178,6 +178,25 @@ export function extractSummary(content: string): string {
   return content.split("\n").slice(0, 3).join("\n").trim();
 }
 
+/**
+ * Extract debate-relevant digest from a worker response.
+ * Pulls <position> and <evidence> tags for compact cross-worker sharing.
+ * Falls back to first 3 lines if neither tag is found.
+ */
+export function extractDebateDigest(content: string): string {
+  const position = content.match(/<position>([\s\S]*?)<\/position>/);
+  const evidence = content.match(/<evidence>([\s\S]*?)<\/evidence>/);
+
+  if (position?.[1] || evidence?.[1]) {
+    const parts: string[] = [];
+    if (position?.[1]) parts.push(`<position>${position[1].trim()}</position>`);
+    if (evidence?.[1]) parts.push(`<evidence>${evidence[1].trim()}</evidence>`);
+    return parts.join("\n");
+  }
+
+  return content.split("\n").slice(0, 3).join("\n").trim();
+}
+
 // -- Exported Builders --
 
 /**
@@ -247,10 +266,10 @@ export function buildDebateWorkerMessages(
   if (lastRound && lastRound.responses.length > 0) {
     const others = lastRound.responses
       .filter((r) => workerIndex == null || r.workerIndex !== workerIndex)
-      .map((r) => `<worker role="${r.role ?? "worker"}">\n${r.content}\n</worker>`)
+      .map((r) => `<worker role="${r.role ?? "worker"}">\n${extractDebateDigest(r.content)}\n</worker>`)
       .join("\n\n");
     if (others) {
-      userParts.push(`## Other Workers' Responses\n${others}`);
+      userParts.push(`## Other Workers' Positions\n${others}`);
     }
   }
 

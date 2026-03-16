@@ -11,6 +11,7 @@ import {
   buildDebateWorkerMessages,
   assignWorkerRole,
   extractSummary,
+  extractDebateDigest,
 } from "./prompts";
 import type {
   SharedContext,
@@ -175,9 +176,8 @@ describe("buildDebateWorkerMessages", () => {
     const messages = buildDebateWorkerMessages(ctx, undefined, undefined, "worker/a", 0);
     const user = messages[1]!.content!;
 
-    // Should see other worker's full response
-    expect(user).toContain("Round 1 answer B");
-    expect(user).toContain("Other Workers' Responses");
+    // Should see other worker's digest
+    expect(user).toContain("Other Workers' Positions");
     // Should NOT see own response in "Other Workers" (only in "Your Previous Response")
     expect(user).toContain("Your Previous Response");
     expect(user).toContain("Round 1 answer A");
@@ -390,6 +390,75 @@ describe("extractSummary", () => {
   it("should fall back to first 3 lines when no summary tags", () => {
     const content = "line 1\nline 2\nline 3\nline 4\nline 5";
     expect(extractSummary(content)).toBe("line 1\nline 2\nline 3");
+  });
+});
+
+// ================================================================
+// extractDebateDigest
+// ================================================================
+
+describe("extractDebateDigest", () => {
+  it("should extract position and evidence tags", () => {
+    const content = `<response>
+  <position>Quicksort is optimal for this case</position>
+  <evidence>O(n log n) average, in-place</evidence>
+  <concerns>Worst case O(n²)</concerns>
+</response>`;
+    const digest = extractDebateDigest(content);
+    expect(digest).toContain("<position>Quicksort is optimal for this case</position>");
+    expect(digest).toContain("<evidence>O(n log n) average, in-place</evidence>");
+    expect(digest).not.toContain("<concerns>");
+  });
+
+  it("should extract position only when evidence is absent", () => {
+    const content = "<position>Use Redis</position>\nSome other text";
+    const digest = extractDebateDigest(content);
+    expect(digest).toBe("<position>Use Redis</position>");
+  });
+
+  it("should extract evidence only when position is absent", () => {
+    const content = "Analysis:\n<evidence>Benchmark shows 3x speedup</evidence>\nConclusion";
+    const digest = extractDebateDigest(content);
+    expect(digest).toBe("<evidence>Benchmark shows 3x speedup</evidence>");
+  });
+
+  it("should fall back to first 3 lines when neither tag found", () => {
+    const content = "line 1\nline 2\nline 3\nline 4\nline 5";
+    expect(extractDebateDigest(content)).toBe("line 1\nline 2\nline 3");
+  });
+
+  it("should trim whitespace in extracted tags", () => {
+    const content = "<position>  spaced  </position>\n<evidence>\n  indented\n</evidence>";
+    const digest = extractDebateDigest(content);
+    expect(digest).toContain("<position>spaced</position>");
+    expect(digest).toContain("<evidence>indented</evidence>");
+  });
+});
+
+describe("buildDebateWorkerMessages uses digest sharing", () => {
+  it("should share digest instead of full content in debate round 2+", () => {
+    const round1Responses = [
+      {
+        model: "a/m1", content: "<response>\n<position>Use A</position>\n<evidence>Fast</evidence>\n<concerns>Cost</concerns>\n</response>",
+        role: "advocate" as const, workerIndex: 0,
+      },
+      {
+        model: "b/m2", content: "<response>\n<position>Use B</position>\n<evidence>Cheap</evidence>\n<concerns>Slow</concerns>\n</response>",
+        role: "critic" as const, workerIndex: 1,
+      },
+    ];
+    const ctx: SharedContext = {
+      task: "Pick the best DB",
+      team: { workers: [makeWorker("a/m1"), makeWorker("b/m2")] },
+      rounds: [{ number: 1, responses: round1Responses }],
+    };
+    const messages = buildDebateWorkerMessages(ctx, undefined, { current: 2, max: 3 }, "a/m1", 0);
+    const userContent = messages[1]!.content!;
+    // Should contain digest (position + evidence) not full content
+    expect(userContent).toContain("<position>Use B</position>");
+    expect(userContent).toContain("<evidence>Cheap</evidence>");
+    // Should NOT contain concerns (not part of digest)
+    expect(userContent).not.toContain("<concerns>Slow</concerns>");
   });
 });
 
