@@ -1,7 +1,7 @@
 /**
  * PyreezMcpServer — MCP server exposing infrastructure tools.
  *
- * Tools: pyreez_route, pyreez_scores, pyreez_deliberate, pyreez_acceptance
+ * Tools: pyreez_route, pyreez_scores, pyreez_deliberate, pyreez_acceptance, pyreez_feedback
  * Architecture: pyreez = Infrastructure layer, Host = Orchestrator + Synthesizer.
  *
  * Classification: host provides domain (required), task_type and complexity are auto-inferred if omitted.
@@ -23,6 +23,7 @@ import { resolveTaskNature, shouldAutoDebate } from "../deliberation/task-nature
 import { NoModelsAvailableError } from "../deliberation/team-composer";
 import { buildAcceptanceMessages } from "../deliberation/prompts";
 import type { GenerationParams } from "../deliberation/types";
+import type { ScoringSystem } from "../axis/interfaces";
 
 /** Domain → default task_type mapping. Used when host omits task_type. */
 const DOMAIN_DEFAULTS: Record<string, string> = {
@@ -56,6 +57,8 @@ export interface PyreezMcpServerConfig {
   engine: PyreezEngine;
   /** Chat function for acceptance rounds. When omitted, pyreez_acceptance is unavailable. */
   chatFn?: (model: string, messages: import("../llm/types").ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
+  /** Scoring system for BT feedback updates. When omitted, pyreez_feedback is unavailable. */
+  scoring?: ScoringSystem;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -82,6 +85,7 @@ export class PyreezMcpServer {
   private readonly runLogger?: RunLogger;
   private readonly engine: PyreezEngine;
   private readonly chatFn?: PyreezMcpServerConfig["chatFn"];
+  private readonly scoring?: ScoringSystem;
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -101,6 +105,7 @@ export class PyreezMcpServer {
     this.runLogger = config.runLogger;
     this.engine = config.engine;
     this.chatFn = config.chatFn;
+    this.scoring = config.scoring;
 
     this.registerTools();
   }
@@ -294,6 +299,26 @@ export class PyreezMcpServer {
         }),
       },
       async (args) => this.handleAcceptance(args),
+    );
+
+    this.mcpServer.registerTool(
+      "pyreez_feedback",
+      {
+        title: "Pyreez Feedback",
+        description:
+          "Submit pairwise quality preferences to update model BT ratings. Call after deliberation to improve future model selection.",
+        inputSchema: z.object({
+          preferences: z
+            .array(z.object({
+              winner: z.string().describe("Model ID that produced the better response"),
+              loser: z.string().describe("Model ID that produced the worse response"),
+              dimension: z.string().optional().describe("Capability dimension (default: JUDGMENT)"),
+            }))
+            .min(1)
+            .describe("Pairwise preferences from the deliberation"),
+        }),
+      },
+      async (args) => this.handleFeedback(args),
     );
 
   }
@@ -647,6 +672,43 @@ export class PyreezMcpServer {
       return this.textResult(JSON.stringify({
         workers,
         totalTokens: { input: totalInput, output: totalOutput },
+      }, null, 2));
+    } catch (error) {
+      return this.errorResult(`Error: ${sanitizeError(error)}`);
+    }
+    });
+  }
+
+  async handleFeedback(args: {
+    preferences: { winner: string; loser: string; dimension?: string }[];
+  }): Promise<CallToolResult> {
+    return this.logRun("feedback", async () => {
+    if (!args.preferences?.length) {
+      return this.errorResult("Error: at least one preference is required");
+    }
+    if (!this.scoring) {
+      return this.errorResult("Error: feedback not available (no scoring system configured)");
+    }
+
+    try {
+      const pairwise = args.preferences.map((p) => ({
+        modelAId: p.winner,
+        modelBId: p.loser,
+        outcome: "A>B" as const,
+        dimension: p.dimension ?? "JUDGMENT",
+      }));
+
+      await this.scoring.update(pairwise);
+
+      const models = new Set<string>();
+      for (const p of args.preferences) {
+        models.add(p.winner);
+        models.add(p.loser);
+      }
+
+      return this.textResult(JSON.stringify({
+        updated: pairwise.length,
+        models: [...models],
       }, null, 2));
     } catch (error) {
       return this.errorResult(`Error: ${sanitizeError(error)}`);

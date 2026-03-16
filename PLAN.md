@@ -204,13 +204,13 @@ After:
 
 ### Phase 4: BT 피드백 도구
 
-- [ ] **4.1** `pyreez_feedback` MCP 도구 추가
+- [x] **4.1** `pyreez_feedback` MCP 도구 추가
   - 입력: `{ task_id: string, preferences: [{ winner: string, loser: string }] }`
   - 출력: `{ updated: number, models: string[] }`
   - ScoringSystem.update() 호출
   - 단위 테스트 추가
 
-- [ ] **4.2** Verify 게이트: `bun run typecheck` + `bun test`
+- [x] **4.2** Verify 게이트: `bun run typecheck` + `bun test`
 
 ### Phase 5: 스킬 개편
 

@@ -128,12 +128,12 @@ describe("PyreezMcpServer", () => {
   // === Constructor ===
 
   describe("constructor", () => {
-    it("should create instance and register 4 tools when config is valid", () => {
+    it("should create instance and register 5 tools when config is valid", () => {
       const mcp = stubMcpServer();
       const server = new PyreezMcpServer(validConfig({ mcpServer: mcp }));
 
       expect(server).toBeInstanceOf(PyreezMcpServer);
-      expect(mcp.registerTool).toHaveBeenCalledTimes(4);
+      expect(mcp.registerTool).toHaveBeenCalledTimes(5);
 
       const calls = (mcp.registerTool as ReturnType<typeof mock>).mock.calls;
       const toolNames = calls.map((c: unknown[]) => c[0]);
@@ -1088,6 +1088,63 @@ describe("PyreezMcpServer", () => {
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed.workers[0].misrepresented).toBeUndefined();
       expect(parsed.workers[0].unresolved).toBeUndefined();
+    });
+  });
+
+  // === pyreez_feedback ===
+
+  describe("pyreez_feedback", () => {
+    function stubScoring() {
+      return { getScores: mock(() => Promise.resolve([])), update: mock(() => Promise.resolve()) };
+    }
+
+    it("should update BT ratings and return updated count", async () => {
+      const scoring = stubScoring();
+      const server = new PyreezMcpServer(validConfig({ scoring }));
+
+      const result = await server.handleFeedback({
+        preferences: [
+          { winner: "a/m1", loser: "b/m2" },
+          { winner: "a/m1", loser: "c/m3", dimension: "REASONING" },
+        ],
+      });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.updated).toBe(2);
+      expect(parsed.models).toContain("a/m1");
+      expect(parsed.models).toContain("b/m2");
+      expect(parsed.models).toContain("c/m3");
+      expect(scoring.update).toHaveBeenCalledTimes(1);
+    });
+
+    it("should default dimension to JUDGMENT when omitted", async () => {
+      const scoring = stubScoring();
+      const server = new PyreezMcpServer(validConfig({ scoring }));
+
+      await server.handleFeedback({
+        preferences: [{ winner: "a/m1", loser: "b/m2" }],
+      });
+
+      const call = (scoring.update as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(call[0].dimension).toBe("JUDGMENT");
+      expect(call[0].outcome).toBe("A>B");
+    });
+
+    it("should return error when scoring is not configured", async () => {
+      const server = new PyreezMcpServer(validConfig());
+      const result = await server.handleFeedback({
+        preferences: [{ winner: "a/m1", loser: "b/m2" }],
+      });
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("not available");
+    });
+
+    it("should return error when preferences is empty", async () => {
+      const scoring = stubScoring();
+      const server = new PyreezMcpServer(validConfig({ scoring }));
+      const result = await server.handleFeedback({ preferences: [] });
+      expect(result.isError).toBe(true);
     });
   });
 
