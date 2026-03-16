@@ -212,60 +212,39 @@ After:
 
 - [x] **4.2** Verify 게이트: `bun run typecheck` + `bun test`
 
-### Phase 5: 스킬 개편
+### Phase 5+6: 스킬 개편 + A/B 평가 (`/skill-creator` 통합)
 
-> 조건부: Skills 2.0 기능 (`!command`, `argument-hint`, `allowed-tools`) 가용 여부 먼저 확인.
-> 미가용 시 기존 SKILL.md 포맷 + 수동 최적화로 대체.
+> `/skill-creator` (anthropics/skills)를 사용하여 스킬 재생성 + eval + A/B 비교를 단일 루프로 수행.
+> 새 대화에서 `/skill-creator`를 실행하여 진행.
 
-- [ ] **5.1** Skills 2.0 기능 가용성 검증
-  - `!command` 동적 컨텍스트 주입 테스트
-  - `allowed-tools` frontmatter 동작 확인
-  - 미가용 시: 5.2의 frontmatter를 현재 지원 기능으로 축소
-
-- [ ] **5.2** `SKILL.md` 전면 개편
-  - frontmatter 업데이트 (가용 기능에 맞춰 조정)
-  - 더미 리더 핵 제거
-  - 수동 팀 구성 제거 → pyreez 자동 라우팅에 위임
-  - 새 플로우: Diverge → (Debate) → Fact Verification → Host 합성 → (Acceptance) → Feedback
+- [ ] **5.1** `/skill-creator`로 pyreez 스킬 재생성
+  - 새 대화에서 `/skill-creator` 실행
+  - 현재 SKILL.md + 새 MCP 도구(acceptance, feedback) 컨텍스트 제공
+  - skill-creator가 interview → draft → test case 생성
+  - Skills 2.0 frontmatter 자동 적용: `allowed-tools`, `argument-hint`, `$ARGUMENTS`
+  - 새 플로우 반영: Diverge → (Debate) → Fact Verification → Host 합성 → (Acceptance) → Feedback
   - SKILL.md 본문 500줄 이하 유지
+  - `references/` 분할: fact-check 패턴, 토큰 예산, worker instruction 템플릿
 
-- [ ] **5.3** `scripts/available-models.ts` 추가
-  - scores/models.json에서 available 모델 목록 출력 (JSON compact)
+- [ ] **5.2** eval 테스트 케이스 구성 (skill-creator 루프 내)
+  - skill-creator가 test prompt 생성 → human 리뷰
+  - with-skill vs without-skill baseline 병렬 실행
+  - eval-viewer로 정성적 리뷰 + benchmark로 정량적 비교
 
-- [ ] **5.4** `references/` 분할
-  - `references/REFERENCE.md` → fact-check 패턴, hallucination 가이드
-  - `references/TOKENS.md` → 토큰 예산 가이드 (리더 비용 제거, acceptance 추가)
-  - `references/TEMPLATES.md` → worker instruction 템플릿
+- [ ] **5.3** 스킬 변형 A/B 비교 (skill-creator Comparator)
+  - 변형 A: digest 공유 (Phase 2) 포함 스킬
+  - 변형 B: acceptance 라운드 (Phase 3) 포함 스킬
+  - blind comparison으로 품질 판정
+  - 결과 기반 최종 스킬 확정
 
-### Phase 6: A/B 평가
+- [ ] **5.4** description 최적화 (skill-creator run_loop)
+  - trigger eval query 20개 생성 (should-trigger 10 + should-not-trigger 10)
+  - `run_loop.py`로 description 자동 최적화
+  - train/test split으로 overfitting 방지
 
-> debate 요약 공유(Phase 2) + acceptance(Phase 3) 품질 검증.
-> 리더 제거 자체는 A/B 불필요 (SKILL.md가 이미 더미 리더로 호스트 합성 중, 동일 품질).
-
-- [ ] **6.1** 평가용 태스크셋 구성
-  - 도메인 혼합: CODING 3개, ARCHITECTURE 3개, REVIEW 2개, IDEATION 2개 = 10개
-  - 태스크당 난이도 moderate 이상 (simple은 deliberation 불필요)
-  - 재현 가능: seed 고정, 동일 모델 팀
-
-- [ ] **6.2** 수동 A/B 스크립트 작성
-  - `scripts/eval-ab.ts` — 동일 태스크를 Control/Treatment 양쪽으로 실행, 결과 비교
-  - 측정 지표: eval 통과율, 반박 구체성, 토큰 사용량, 소요시간
-  - Skills 2.0 eval 인프라가 가용하면 해당 인프라 활용으로 전환
-
-- [ ] **6.3** Test A: Debate 요약공유 vs 전체공유
-  - Control: 전체 응답 공유 (Phase 2 적용 전)
-  - Treatment: position+evidence digest만 공유 (Phase 2)
-  - 판정: Treatment가 Control 대비 품질 동등 이상이면 채택
-
-- [ ] **6.4** Test B: Acceptance 라운드 유무
-  - Control: acceptance 없음
-  - Treatment: acceptance 포함 (Phase 3)
-  - 측정: reject 비율, 합성 오류 검출률, 최종 품질
-  - 판정: reject 발생 시 품질 개선이 명확하면 채택. reject <10%면 복잡 태스크에만 선택적 적용
-
-- [ ] **6.5** A/B 결과 기반 최종 결정
-  - 채택된 변형을 기본 동작으로 확정
-  - 미채택 변형: 코드 보존하되 기본 비활성
+- [ ] **5.5** `scripts/available-models.ts` 추가 (선택적)
+  - `!command` 동적 컨텍스트 주입용
+  - scores/models.json에서 available 모델 목록 출력
 
 ### Phase 7: 정리
 
@@ -308,14 +287,12 @@ After:
 ## 실행 순서
 
 ```
-Phase 1 (리더 제거 + MCP 정리 + 테스트 수정 + typecheck)
-  → Phase 2 (debate 최적화) + Phase 3 (acceptance) + Phase 4 (feedback) [병렬 가능]
-  → Phase 6 (A/B 평가) ← debate/acceptance 품질 검증
-  → Phase 5 (스킬 개편) ← A/B 확정 후
+Phase 1 (리더 제거 + MCP 정리 + 테스트 수정 + typecheck) ✅
+  → Phase 2 (debate 최적화) + Phase 3 (acceptance) + Phase 4 (feedback) [병렬] ✅
+  → Phase 5+6 (스킬 재생성 + A/B 평가) ← /skill-creator로 통합 수행
   → Phase 7 (정리)
 ```
 
-- Phase 1이 가장 크고 위험. `git tag pre-leader-removal`로 롤백 지점 확보.
-- Phase 2, 3, 4는 독립적이므로 병렬 진행 가능.
-- Phase 5(스킬)는 엔진 변경 + A/B 확정 후 마지막에 반영.
-- 각 Phase 끝에 Verify 게이트 (typecheck + test) 통과 필수.
+- Phase 1~4 완료.
+- Phase 5+6은 새 대화에서 `/skill-creator` 실행. 스킬 재생성 + eval + A/B 비교를 단일 루프로.
+- Phase 7은 Phase 5+6 결과 확정 후.
