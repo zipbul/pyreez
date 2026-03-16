@@ -331,3 +331,41 @@ Structure your response. Min 200 characters, max 600 words.
     { role: "user", content: userParts.join("\n\n") },
   ];
 }
+
+// -- Acceptance Round --
+
+/**
+ * Build messages for an acceptance round worker.
+ * The worker verifies whether the host's synthesis accurately represents
+ * their original position and addresses key concerns.
+ */
+export function buildAcceptanceMessages(
+  synthesis: string,
+  originalPosition: string,
+  task: string,
+): ChatMessage[] {
+  const system = `<role>You are a verification reviewer. Check whether a synthesis accurately represents your original position.</role>
+
+<rules>
+- Compare the synthesis against your original position carefully.
+- Accept if your key claims are fairly represented, even if the synthesis disagrees with you.
+- Reject ONLY if the synthesis misrepresents your position or ignores critical unresolved issues.
+- Be specific about what was misrepresented or unresolved.
+</rules>
+
+<output-format>
+Respond with ONLY the following XML structure:
+<acceptance>
+  <verdict>accept or reject</verdict>
+  <misrepresented>What was distorted or misattributed from your position. "None." if accept.</misrepresented>
+  <unresolved>Critical issues from your position that were ignored. "None." if accept.</unresolved>
+</acceptance>
+</output-format>`;
+
+  const user = `## Task\n${task}\n\n## Your Original Position\n${originalPosition}\n\n## Host Synthesis\n${synthesis}`;
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ];
+}

@@ -128,12 +128,12 @@ describe("PyreezMcpServer", () => {
   // === Constructor ===
 
   describe("constructor", () => {
-    it("should create instance and register 3 tools when config is valid", () => {
+    it("should create instance and register 4 tools when config is valid", () => {
       const mcp = stubMcpServer();
       const server = new PyreezMcpServer(validConfig({ mcpServer: mcp }));
 
       expect(server).toBeInstanceOf(PyreezMcpServer);
-      expect(mcp.registerTool).toHaveBeenCalledTimes(3);
+      expect(mcp.registerTool).toHaveBeenCalledTimes(4);
 
       const calls = (mcp.registerTool as ReturnType<typeof mock>).mock.calls;
       const toolNames = calls.map((c: unknown[]) => c[0]);
@@ -1005,6 +1005,89 @@ describe("PyreezMcpServer", () => {
       const server = new PyreezMcpServer(validConfig({ mcpServer: mcp }));
 
       await expect(server.close()).rejects.toThrow("close failed");
+    });
+  });
+
+  // === pyreez_acceptance ===
+
+  describe("pyreez_acceptance", () => {
+    function stubChatFn(content: string = '<acceptance><verdict>accept</verdict><misrepresented>None.</misrepresented><unresolved>None.</unresolved></acceptance>') {
+      return mock(() => Promise.resolve({ content, inputTokens: 500, outputTokens: 300 }));
+    }
+
+    it("should return acceptance results for each worker", async () => {
+      const chatFn = stubChatFn();
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
+
+      const result = await server.handleAcceptance({
+        task: "Pick a DB",
+        synthesis: "Use PostgreSQL",
+        workers: [
+          { model: "a/m1", original_position: "Use Redis" },
+          { model: "b/m2", original_position: "Use Mongo" },
+        ],
+      });
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.workers).toHaveLength(2);
+      expect(parsed.workers[0].verdict).toBe("accept");
+      expect(parsed.totalTokens.input).toBe(1000);
+      expect(parsed.totalTokens.output).toBe(600);
+    });
+
+    it("should parse reject verdict with misrepresented and unresolved", async () => {
+      const chatFn = stubChatFn(
+        '<acceptance><verdict>reject</verdict><misrepresented>My Redis argument was ignored</misrepresented><unresolved>Latency requirements</unresolved></acceptance>'
+      );
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
+
+      const result = await server.handleAcceptance({
+        task: "Pick a DB",
+        synthesis: "Use PostgreSQL",
+        workers: [{ model: "a/m1", original_position: "Use Redis" }],
+      });
+
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.workers[0].verdict).toBe("reject");
+      expect(parsed.workers[0].misrepresented).toBe("My Redis argument was ignored");
+      expect(parsed.workers[0].unresolved).toBe("Latency requirements");
+    });
+
+    it("should return error when task is empty", async () => {
+      const server = new PyreezMcpServer(validConfig({ chatFn: stubChatFn() }));
+      const result = await server.handleAcceptance({
+        task: "",
+        synthesis: "S",
+        workers: [{ model: "a/m1", original_position: "P" }],
+      });
+      expect(result.isError).toBe(true);
+    });
+
+    it("should return error when chatFn is not configured", async () => {
+      const server = new PyreezMcpServer(validConfig());
+      const result = await server.handleAcceptance({
+        task: "T",
+        synthesis: "S",
+        workers: [{ model: "a/m1", original_position: "P" }],
+      });
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("not available");
+    });
+
+    it("should omit misrepresented/unresolved when they are 'None.'", async () => {
+      const chatFn = stubChatFn();
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
+
+      const result = await server.handleAcceptance({
+        task: "T",
+        synthesis: "S",
+        workers: [{ model: "a/m1", original_position: "P" }],
+      });
+
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.workers[0].misrepresented).toBeUndefined();
+      expect(parsed.workers[0].unresolved).toBeUndefined();
     });
   });
 

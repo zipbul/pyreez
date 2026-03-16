@@ -1,7 +1,7 @@
 /**
  * PyreezMcpServer — MCP server exposing infrastructure tools.
  *
- * Tools: pyreez_route, pyreez_scores, pyreez_deliberate
+ * Tools: pyreez_route, pyreez_scores, pyreez_deliberate, pyreez_acceptance
  * Architecture: pyreez = Infrastructure layer, Host = Orchestrator + Synthesizer.
  *
  * Classification: host provides domain (required), task_type and complexity are auto-inferred if omitted.
@@ -21,6 +21,8 @@ import type { PyreezEngine } from "../axis/engine";
 import type { TaskClassification } from "../axis/types";
 import { resolveTaskNature, shouldAutoDebate } from "../deliberation/task-nature";
 import { NoModelsAvailableError } from "../deliberation/team-composer";
+import { buildAcceptanceMessages } from "../deliberation/prompts";
+import type { GenerationParams } from "../deliberation/types";
 
 /** Domain → default task_type mapping. Used when host omits task_type. */
 const DOMAIN_DEFAULTS: Record<string, string> = {
@@ -52,6 +54,8 @@ export interface PyreezMcpServerConfig {
   deliberationStore?: DeliberationStore;
   runLogger?: RunLogger;
   engine: PyreezEngine;
+  /** Chat function for acceptance rounds. When omitted, pyreez_acceptance is unavailable. */
+  chatFn?: (model: string, messages: import("../llm/types").ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -77,6 +81,7 @@ export class PyreezMcpServer {
   private readonly deliberationStore?: DeliberationStore;
   private readonly runLogger?: RunLogger;
   private readonly engine: PyreezEngine;
+  private readonly chatFn?: PyreezMcpServerConfig["chatFn"];
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -95,6 +100,7 @@ export class PyreezMcpServer {
     this.deliberationStore = config.deliberationStore;
     this.runLogger = config.runLogger;
     this.engine = config.engine;
+    this.chatFn = config.chatFn;
 
     this.registerTools();
   }
@@ -267,6 +273,27 @@ export class PyreezMcpServer {
         }),
       },
       async (args) => this.handleDeliberate(args),
+    );
+
+    this.mcpServer.registerTool(
+      "pyreez_acceptance",
+      {
+        title: "Pyreez Acceptance",
+        description:
+          "Verify a host synthesis by having workers check if their positions were accurately represented. Call after synthesizing worker outputs.",
+        inputSchema: z.object({
+          task: z.string().max(100_000).describe("Original task that was deliberated"),
+          synthesis: z.string().max(100_000).describe("Host's synthesis to verify"),
+          workers: z
+            .array(z.object({
+              model: z.string().describe("Model ID of the worker"),
+              original_position: z.string().max(50_000).describe("Worker's original position/response to verify against"),
+            }))
+            .min(1)
+            .describe("Workers whose positions should be verified against the synthesis"),
+        }),
+      },
+      async (args) => this.handleAcceptance(args),
     );
 
   }
@@ -566,6 +593,63 @@ export class PyreezMcpServer {
       return this.errorResult(
         `Error: ${sanitizeError(error)}`,
       );
+    }
+    });
+  }
+
+  async handleAcceptance(args: {
+    task: string;
+    synthesis: string;
+    workers: { model: string; original_position: string }[];
+  }): Promise<CallToolResult> {
+    return this.logRun("acceptance", async () => {
+    if (!args.task) {
+      return this.errorResult("Error: task is required");
+    }
+    if (!args.synthesis) {
+      return this.errorResult("Error: synthesis is required");
+    }
+    if (!args.workers?.length) {
+      return this.errorResult("Error: at least one worker is required");
+    }
+    if (!this.chatFn) {
+      return this.errorResult("Error: acceptance not available (no chatFn configured)");
+    }
+
+    try {
+      let totalInput = 0;
+      let totalOutput = 0;
+
+      const workerPromises = args.workers.map(async (w) => {
+        const messages = buildAcceptanceMessages(args.synthesis, w.original_position, args.task);
+        const result = await this.chatFn!(w.model, messages, { temperature: 0, max_tokens: 512 });
+        totalInput += result.inputTokens;
+        totalOutput += result.outputTokens;
+
+        // Parse XML response
+        const verdict = result.content.match(/<verdict>([\s\S]*?)<\/verdict>/)?.[1]?.trim() ?? "accept";
+        const misrepresented = result.content.match(/<misrepresented>([\s\S]*?)<\/misrepresented>/)?.[1]?.trim();
+        const unresolved = result.content.match(/<unresolved>([\s\S]*?)<\/unresolved>/)?.[1]?.trim();
+
+        return {
+          model: w.model,
+          verdict: verdict === "reject" ? "reject" as const : "accept" as const,
+          ...(misrepresented && misrepresented !== "None." ? { misrepresented } : {}),
+          ...(unresolved && unresolved !== "None." ? { unresolved } : {}),
+        };
+      });
+
+      const results = await Promise.allSettled(workerPromises);
+      const workers = results
+        .filter((r): r is PromiseFulfilledResult<{ model: string; verdict: "accept" | "reject"; misrepresented?: string; unresolved?: string }> => r.status === "fulfilled")
+        .map((r) => r.value);
+
+      return this.textResult(JSON.stringify({
+        workers,
+        totalTokens: { input: totalInput, output: totalOutput },
+      }, null, 2));
+    } catch (error) {
+      return this.errorResult(`Error: ${sanitizeError(error)}`);
     }
     });
   }

@@ -9,6 +9,7 @@ import { describe, it, expect } from "bun:test";
 import {
   buildWorkerMessages,
   buildDebateWorkerMessages,
+  buildAcceptanceMessages,
   assignWorkerRole,
   extractSummary,
   extractDebateDigest,
@@ -498,5 +499,42 @@ describe("anti-sycophancy in debate prompts", () => {
     expect(system).toContain("Do NOT agree merely to be polite");
     expect(system).toContain("Disagreement backed by evidence");
     expect(system).toContain("maintain it and explain why");
+  });
+});
+
+// ================================================================
+// buildAcceptanceMessages
+// ================================================================
+
+describe("buildAcceptanceMessages", () => {
+  it("should produce system + user message pair", () => {
+    const messages = buildAcceptanceMessages("Synthesis text", "My position", "The task");
+    expect(messages).toHaveLength(2);
+    expect(messages[0]!.role).toBe("system");
+    expect(messages[1]!.role).toBe("user");
+  });
+
+  it("should include acceptance XML schema in system prompt", () => {
+    const messages = buildAcceptanceMessages("S", "P", "T");
+    const system = messages[0]!.content!;
+    expect(system).toContain("<acceptance>");
+    expect(system).toContain("<verdict>");
+    expect(system).toContain("<misrepresented>");
+    expect(system).toContain("<unresolved>");
+  });
+
+  it("should include task, original position, and synthesis in user message", () => {
+    const messages = buildAcceptanceMessages("Host merged views", "Use Redis for caching", "Pick a cache layer");
+    const user = messages[1]!.content!;
+    expect(user).toContain("Pick a cache layer");
+    expect(user).toContain("Use Redis for caching");
+    expect(user).toContain("Host merged views");
+  });
+
+  it("should instruct to reject only on misrepresentation", () => {
+    const messages = buildAcceptanceMessages("S", "P", "T");
+    const system = messages[0]!.content!;
+    expect(system).toContain("Reject ONLY if");
+    expect(system).toContain("misrepresents");
   });
 });

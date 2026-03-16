@@ -189,18 +189,18 @@ After:
 > 별도 MCP 도구 `pyreez_acceptance`로 노출.
 > 호스트가 합성 후 선택적으로 호출. 비용: worker당 ~800 tokens (입력 ~500 + 출력 ~300), 3 workers 기준 총 ~2.5K tokens.
 
-- [ ] **3.1** acceptance용 worker 프롬프트 추가
+- [x] **3.1** acceptance용 worker 프롬프트 추가
   - 파일: `src/deliberation/prompts.ts`
   - `buildAcceptanceMessages(synthesis: string, originalPosition: string, task: string): ChatMessage[]`
   - 출력 스키마: `<acceptance><verdict>accept|reject</verdict><misrepresented>...</misrepresented><unresolved>...</unresolved></acceptance>`
   - 단위 테스트 추가
 
-- [ ] **3.2** `pyreez_acceptance` MCP 도구 추가
+- [x] **3.2** `pyreez_acceptance` MCP 도구 추가
   - 입력: `{ task: string, synthesis: string, workers: [{ model: string, original_position: string }] }`
   - 출력: `{ workers: [{ model: string, verdict: "accept"|"reject", misrepresented?: string, unresolved?: string }] }`
   - 단위 테스트 추가
 
-- [ ] **3.3** Verify 게이트: `bun run typecheck` + `bun test`
+- [x] **3.3** Verify 게이트: `bun run typecheck` + `bun test`
 
 ### Phase 4: BT 피드백 도구
 
