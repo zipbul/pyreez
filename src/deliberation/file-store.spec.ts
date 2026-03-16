@@ -29,9 +29,7 @@ function makeRecord(overrides: Partial<DeliberationRecord> = {}): DeliberationRe
     id: "rec-001",
     task: "Write unit tests",
     timestamp: 1700000000000,
-    consensusReached: true,
     roundsExecuted: 2,
-    result: "Generated code here",
     modelsUsed: ["openai/gpt-4.1", "meta/llama-4-scout"],
     totalLLMCalls: 7,
     ...overrides,
@@ -141,21 +139,6 @@ describe("FileDeliberationStore", () => {
       expect(results[0]!.id).toBe("r1");
     });
 
-    it("should filter by consensusReached boolean", async () => {
-      // Arrange
-      const r1 = makeRecord({ id: "r1", consensusReached: true });
-      const r2 = makeRecord({ id: "r2", consensusReached: false });
-      const io = ioWithRecords([r1, r2]);
-      const store = new FileDeliberationStore("/data", io);
-
-      // Act
-      const results = await store.query({ consensusReached: false });
-
-      // Assert
-      expect(results).toHaveLength(1);
-      expect(results[0]!.id).toBe("r2");
-    });
-
     it("should limit results when limit is specified", async () => {
       // Arrange
       const records = Array.from({ length: 5 }, (_, i) =>
@@ -176,17 +159,14 @@ describe("FileDeliberationStore", () => {
       const r1 = makeRecord({
         id: "r1",
         task: "Write code",
-        consensusReached: true,
       });
       const r2 = makeRecord({
         id: "r2",
         task: "Write tests",
-        consensusReached: false,
       });
       const r3 = makeRecord({
         id: "r3",
         task: "Write docs",
-        consensusReached: true,
       });
       const io = ioWithRecords([r1, r2, r3]);
       const store = new FileDeliberationStore("/data", io);
@@ -194,12 +174,10 @@ describe("FileDeliberationStore", () => {
       // Act
       const results = await store.query({
         task: "Write",
-        consensusReached: true,
       });
 
       // Assert
-      expect(results).toHaveLength(2);
-      expect(results.map((r) => r.id)).toEqual(["r1", "r3"]);
+      expect(results).toHaveLength(3);
     });
   });
 

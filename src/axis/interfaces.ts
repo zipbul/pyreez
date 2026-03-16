@@ -60,10 +60,7 @@ export interface Selector {
 export interface DeliberationOverrides {
   readonly protocol?: "diverge-synth" | "debate";
   readonly maxRounds?: number;
-  readonly consensus?: "leader_decides";
-  readonly leaderContributes?: boolean;
   readonly workerInstructions?: string;
-  readonly leaderInstructions?: string;
   readonly taskNature?: TaskNature;
 }
 

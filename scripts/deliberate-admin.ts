@@ -123,8 +123,6 @@ async function main() {
   const result = await deliberateFn({
     task: TASK,
     models: MODELS,
-    consensus: "leader_decides",
-    leaderContributes: true,
     protocol,
     maxRounds,
   });
@@ -133,7 +131,7 @@ async function main() {
 
   console.log(`--- Result (${elapsed}s) ---`);
   console.log(`Models used: ${result.modelsUsed.join(", ")}`);
-  console.log(`Rounds: ${result.roundsExecuted}, Consensus: ${result.consensusReached}`);
+  console.log(`Rounds: ${result.roundsExecuted}`);
   console.log(`LLM calls: ${result.totalLLMCalls}, Tokens: ${JSON.stringify(result.totalTokens)}`);
 
   if (result.rounds) {
@@ -153,9 +151,6 @@ async function main() {
         }
       }
 
-      if (r.synthesis) {
-        console.log(`\n--- [LEADER SYNTHESIS] ---\n${r.synthesis}`);
-      }
     }
   }
 }

@@ -2,13 +2,12 @@
  * SharedContext factory and query utilities.
  *
  * All mutations are immutable — return new objects.
- * Diverge-Synth model: Workers + Leader (no producer/reviewer distinction).
+ * Leaderless model: Workers only, Host handles synthesis.
  */
 
 import type {
   Round,
   SharedContext,
-  Synthesis,
   TeamComposition,
 } from "./types";
 import type { TaskNature } from "./task-nature";
@@ -17,7 +16,7 @@ import type { TaskNature } from "./task-nature";
  * Create a new empty SharedContext.
  *
  * @param task - Task description (non-empty string required).
- * @param team - Team composition (must have ≥1 worker + leader).
+ * @param team - Team composition (must have ≥1 worker).
  * @param taskNature - Optional task nature for prompt selection.
  * @throws {Error} If task is empty or team is invalid.
  */
@@ -31,9 +30,6 @@ export function createSharedContext(
   }
   if (!team.workers || team.workers.length === 0) {
     throw new Error("Team must have at least one worker");
-  }
-  if (!team.leader) {
-    throw new Error("Team must have a leader");
   }
   return { task: task.trim(), team, rounds: [], ...(taskNature ? { taskNature } : {}) };
 }
@@ -69,31 +65,15 @@ export function latestRound(ctx: SharedContext): Round | undefined {
 }
 
 /**
- * Check if consensus has been reached.
- * Consensus = latest round has a synthesis with decision "approve".
- */
-export function isConsensusReached(ctx: SharedContext): boolean {
-  const latest = latestRound(ctx);
-  if (!latest?.synthesis) {
-    return false;
-  }
-  return latest.synthesis.decision === "approve";
-}
-
-/**
  * Count total LLM calls across all rounds.
- * Includes successful responses, failed workers (API calls were still made), and synthesis.
+ * Includes successful responses and failed workers (API calls were still made).
  */
 export function totalLLMCalls(ctx: SharedContext): number {
   let count = 0;
   for (const round of ctx.rounds) {
     count += round.responses.length;
-    // Failed workers still consumed API calls (degenerate responses, network errors, etc.)
     if (round.failedWorkers?.length) {
       count += round.failedWorkers.length;
-    }
-    if (round.synthesis) {
-      count += 1;
     }
   }
   return count;
@@ -101,8 +81,8 @@ export function totalLLMCalls(ctx: SharedContext): number {
 
 /**
  * Get all unique models that contributed to the deliberation result.
- * Only includes models with successful responses or synthesis.
- * Failed workers (degenerate, network error) are excluded — they did not contribute
+ * Only includes models with successful responses.
+ * Failed workers are excluded — they did not contribute
  * to the output. Use totalLLMCalls() for API cost tracking including failed attempts.
  */
 export function modelsUsed(ctx: SharedContext): string[] {
@@ -111,20 +91,6 @@ export function modelsUsed(ctx: SharedContext): string[] {
     for (const response of round.responses) {
       models.add(response.model);
     }
-    if (round.synthesis) {
-      models.add(round.synthesis.model);
-    }
   }
   return [...models];
-}
-
-/**
- * Extract the latest synthesis, if any.
- */
-export function latestSynthesis(ctx: SharedContext): Synthesis | undefined {
-  const latest = latestRound(ctx);
-  if (!latest) {
-    return undefined;
-  }
-  return latest.synthesis;
 }

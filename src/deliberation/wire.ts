@@ -24,7 +24,6 @@ import { createCooldownManager } from "./cooldown";
 import { evaluateWithPoll } from "./poll-judge";
 import {
   buildWorkerMessages,
-  buildLeaderMessages,
   buildDebateWorkerMessages,
 } from "./prompts";
 
@@ -58,7 +57,6 @@ export function stripThinkTags(text: string): string {
   // Strip complete <think>...</think> blocks
   let result = text.replace(/<think>[\s\S]*?<\/think>/g, "");
   // Strip unclosed <think> only if no matching </think> follows
-  // (prevents stripping literal "<think>" in normal prose)
   const openIdx = result.lastIndexOf("<think>");
   if (openIdx !== -1 && result.indexOf("</think>", openIdx) === -1) {
     result = result.slice(0, openIdx);
@@ -76,37 +74,19 @@ type RawChatFn = (
  * Retry configuration for the chat adapter.
  */
 export interface ChatAdapterOptions {
-  /** Maximum number of retries on retryable errors. Default: 3. */
   readonly maxRetries?: number;
-  /** Base delay in ms for exponential backoff. Default: 1000. */
   readonly baseDelayMs?: number;
-  /** HTTP status codes that trigger retry. Default: [429]. */
   readonly retryableStatuses?: readonly number[];
-  /** Random function for jitter (0~1). Default: Math.random. Injected for deterministic testing. */
   readonly randomFn?: () => number;
-  /** Callback invoked on each retryable error. Use for telemetry/event collection. */
   readonly onRetry?: (event: RetryEvent) => void;
-  /**
-   * Maximum delay in ms applied to retryAfterMs before jitter.
-   * Prevents extremely long waits when the server returns a large Retry-After header.
-   * When undefined, no cap is applied.
-   */
   readonly maxRetryAfterMs?: number;
 }
 
-/**
- * Event emitted on each retryable error occurrence.
- */
 export interface RetryEvent {
-  /** HTTP status code that triggered the event. */
   readonly status: number;
-  /** Retry attempt number (1-based). */
   readonly attempt: number;
-  /** Delay in ms before next retry (or 0 if willRetry=false). */
   readonly delayMs: number;
-  /** Model ID that was being called. */
   readonly model: string;
-  /** Whether a retry will be attempted after this event. */
   readonly willRetry: boolean;
 }
 
@@ -120,12 +100,6 @@ const DEFAULT_ADAPTER_OPTIONS = {
 /**
  * Wrap a raw LLMClient-style chat function into the
  * `(model, messages) => Promise<ChatResult>` signature required by EngineDeps.
- *
- * Features:
- *   - Strips `<think>` tags from responses (DeepSeek-R1 support)
- *   - Tracks token usage from response.usage
- *   - Retries on retryable HTTP statuses with exponential backoff + jitter
- *   - Emits RetryEvent via onRetry callback for telemetry
  */
 export function createChatAdapter(
   chatFn: RawChatFn,
@@ -157,7 +131,6 @@ export function createChatAdapter(
       } catch (error) {
         lastError = error;
 
-        // Retryable error detection
         if (
           error instanceof LLMClientError &&
           opts.retryableStatuses.includes(error.status)
@@ -173,7 +146,6 @@ export function createChatAdapter(
           const jitter = willRetry ? 0.5 + opts.randomFn() * 0.5 : 1;
           const delay = baseDelay * jitter;
 
-          // Emit retry event for telemetry
           opts.onRetry?.({
             status: error.status,
             attempt: attempt + 1,
@@ -192,7 +164,6 @@ export function createChatAdapter(
       }
     }
 
-    // Should never reach here, but satisfy TypeScript
     throw lastError;
   };
 }
@@ -216,7 +187,7 @@ export function createDeliberateFn(
       if (invalid.length > 0) {
         throw new Error(`Unknown model(s): ${invalid.join(", ")}. Check scores/models.json.`);
       }
-      // All specified models participate. Leader auto-selected by JUDGMENT score.
+      // All specified models are workers.
       const specifiedModels = input.models
         .map((id) => deps.registry.getById(id)!)
         .filter(Boolean);
@@ -230,8 +201,7 @@ export function createDeliberateFn(
     } else {
       // Auto compose from available models, capped to prevent cost explosion.
       // selectDiverseModels ensures provider diversity (round-robin across providers).
-      // Team-composer handles leader selection by JUDGMENT score internally.
-      // Artifact tasks: 2 workers + 1 leader = 3. Critique: 4 workers + 1 leader = 5.
+      // Artifact tasks: 3 workers. Critique: 5 workers.
       const available = deps.registry.getAvailable();
       const MAX_AUTO_TEAM = input.taskNature === "artifact" ? 3 : 5;
       const selected = selectDiverseModels(available, MAX_AUTO_TEAM);
@@ -248,43 +218,28 @@ export function createDeliberateFn(
     // 2.5. Reorder workers by capability → role fit
     //       advocate(idx 0)=REASONING, critic(idx 1)=ANALYSIS, wildcard(idx 2)=CREATIVITY
     const orderedWorkers = orderWorkersByRole(team.workers, (id) => deps.registry.getById(id));
-    team = { ...team, workers: orderedWorkers };
+    team = { workers: orderedWorkers };
 
     // 3. Assemble engine deps — deps.chat already returns ChatResult
     const engineDeps: EngineDeps = {
       chat: deps.chat,
       buildWorkerMessages,
-      buildLeaderMessages,
       buildDebateWorkerMessages,
     };
 
     // 4. Build engine config
     const isDebate = input.protocol === "debate";
-    // For debate: default to 3 rounds, but respect explicit user input
     const effectiveMaxRounds = input.maxRounds
       ?? (isDebate ? 3 : 1);
-    const nature = input.taskNature ?? "critique";
     const workerGenParams: GenerationParams = {
       temperature: 1.0,
       top_p: 0.9,
       max_tokens: 2048,
     };
-    // Artifact leader output IS the deliverable — no max_tokens constraint.
-    // Critique leader has a cap since analysis output is bounded.
-    const leaderGenParams: GenerationParams = {
-      temperature: 0.7,
-      ...(nature === "artifact" ? {} : { max_tokens: 8192 }),
-    };
     const config: EngineConfig = {
       maxRounds: effectiveMaxRounds,
-      consensus: input.consensus,
-      leaderContributes: input.leaderContributes,
       protocol: input.protocol,
-      structuralTags: nature === "critique"
-        ? ["verification", "adopted", "novel", "result"]
-        : undefined,
       workerGenParams,
-      leaderGenParams,
     };
 
     // 5. Build retryDeps for automatic team recomposition on failure
@@ -302,8 +257,13 @@ export function createDeliberateFn(
         const lastRound = result.rounds[result.rounds.length - 1];
         if (lastRound?.responses && lastRound.responses.length >= 2) {
           const teamIds = new Set(result.modelsUsed as string[]);
+          const workerResponses = lastRound.responses.map(r => ({
+            model: r.model,
+            content: r.content,
+            ...(r.role ? { role: r.role as import("./types").DeliberationRole } : {}),
+          }));
           const pollResult = await evaluateWithPoll(
-            input.task, lastRound.responses, teamIds, deps.pollJudge,
+            input.task, workerResponses, teamIds, deps.pollJudge,
           );
           if (pollResult.pairwise.length > 0) {
             await deps.scoring.update([...pollResult.pairwise]);
@@ -324,17 +284,13 @@ export function createDeliberateFn(
           id: crypto.randomUUID(),
           task: input.task,
           timestamp: Date.now(),
-          consensusReached: result.consensusReached,
           roundsExecuted: result.roundsExecuted,
-          result: result.result,
           modelsUsed: [...result.modelsUsed],
           totalLLMCalls: result.totalLLMCalls,
           totalTokens: result.totalTokens,
           workerInstructions: input.workerInstructions,
-          leaderInstructions: input.leaderInstructions,
-          consensus: input.consensus,
           protocol: input.protocol,
-          ...(result.rounds ? { roundsSummary: result.rounds } : {}),
+          ...(result.rounds ? { roundsSummary: result.rounds.map(r => ({ number: r.number })) } : {}),
         });
       } catch {
         // best-effort save — do not fail the deliberation

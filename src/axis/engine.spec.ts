@@ -43,7 +43,7 @@ const mockReq: AxisTaskRequirement = {
 
 const mockPlanMulti: EnsemblePlan = {
   models: [{ modelId: "test/model-a" }, { modelId: "test/model-b" }],
-  strategy: "leader_decides",
+  strategy: "composite",
   estimatedCost: 0.01,
   reason: "test multi",
 };
@@ -56,12 +56,10 @@ const mockPlanSingle: EnsemblePlan = {
 };
 
 const mockResult: DeliberationResult = {
-  result: "deliberation output",
   roundsExecuted: 1,
-  consensusReached: null,
   totalLLMCalls: 3,
   modelsUsed: ["test/model-a", "test/model-b"],
-  protocol: "leader_decides",
+  protocol: "diverge-synth",
 };
 
 const budget: BudgetConfig = { perRequest: 1.0 };
@@ -144,9 +142,7 @@ describe("PyreezEngine", () => {
 
       const result = await engine.run("write a function", budget, mockClassification);
 
-      expect(result.result).toBe(mockResult.result);
       expect(result.roundsExecuted).toBe(mockResult.roundsExecuted);
-      expect(result.consensusReached).toBe(mockResult.consensusReached);
       expect(result.protocol).toBe(mockResult.protocol);
       expect(result.sessionId).toBeDefined();
     });
@@ -168,7 +164,6 @@ describe("PyreezEngine", () => {
       expect(deliberation.deliberate).not.toHaveBeenCalled();
       expect(result.protocol).toBe("single");
       expect(result.roundsExecuted).toBe(0);
-      expect(result.consensusReached).toBeNull();
       expect(result.modelsUsed).toEqual(["test/model-a"]);
     });
 
@@ -219,7 +214,7 @@ describe("PyreezEngine", () => {
       expect(call[0]).toBe(mockClassification);
       expect(call[1]).toBe(mockPlanMulti);
       // Result now includes sessionId added by engine
-      expect(call[2].result).toBe(mockResult.result);
+      expect(call[2].roundsExecuted).toBe(mockResult.roundsExecuted);
       expect(call[2].sessionId).toBeDefined();
     });
 
@@ -317,7 +312,7 @@ describe("PyreezEngine", () => {
       expect(trace.classified).toBe(mockClassification);
       expect(trace.requirement).toBe(mockReq);
       expect(trace.plan).toBe(mockPlanMulti);
-      expect(trace.result.result).toBe(mockResult.result);
+      expect(trace.result.roundsExecuted).toBe(mockResult.roundsExecuted);
       expect(trace.result.sessionId).toBeDefined();
     });
 
@@ -352,7 +347,7 @@ describe("PyreezEngine", () => {
       );
 
       const result = await engine.run("task", budget, mockClassification);
-      expect(result.result).toBe(mockResult.result);
+      expect(result.roundsExecuted).toBe(mockResult.roundsExecuted);
       expect(result.sessionId).toBeDefined();
     });
   });

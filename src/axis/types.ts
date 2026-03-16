@@ -81,19 +81,17 @@ export interface EnsemblePlan {
  * Final deliberation result — output of DeliberationProtocol.
  */
 export interface DeliberationResult {
-  result: string;
   roundsExecuted: number;
-  consensusReached: boolean | null;
   totalLLMCalls: number;
   modelsUsed: string[];
-  /** Which protocol variant was used (e.g., "leader_decides", "single", "role-based"). */
+  /** Which protocol variant was used (e.g., "diverge-synth", "debate"). */
   protocol: string;
   /** Unique session ID for feedback linkage (Not Diamond session reference). */
   sessionId?: string;
   /** Token usage for cost tracking. */
   totalTokens?: { input: number; output: number };
-  /** Per-round worker responses and synthesis for audit trail. */
-  rounds?: readonly { number: number; responses?: readonly { model: string; content: string }[]; synthesis?: string; failedWorkers?: readonly { model: string; error: string }[] }[];
+  /** Per-round worker responses for audit trail. */
+  rounds?: readonly { number: number; responses?: readonly { model: string; content: string }[]; failedWorkers?: readonly { model: string; error: string }[] }[];
 }
 
 // -- Scoring output: ModelScore --

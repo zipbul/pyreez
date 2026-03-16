@@ -33,12 +33,10 @@ function makePlan(...modelIds: string[]): EnsemblePlan {
 
 function makeResult(modelsUsed: string[]): DeliberationResult {
   return {
-    result: "test result",
     roundsExecuted: 1,
-    consensusReached: true,
     totalLLMCalls: modelsUsed.length,
     modelsUsed,
-    protocol: "role-based",
+    protocol: "diverge-synth",
   };
 }
 

@@ -1,14 +1,13 @@
 /**
- * Unit tests for prompts.ts — Diverge-Synth deliberation prompt builders.
+ * Unit tests for prompts.ts — Leaderless deliberation prompt builders.
  *
- * SUT: buildWorkerMessages, buildLeaderMessages, buildDebateWorkerMessages,
+ * SUT: buildWorkerMessages, buildDebateWorkerMessages,
  *      assignWorkerRole, extractSummary
  */
 
 import { describe, it, expect } from "bun:test";
 import {
   buildWorkerMessages,
-  buildLeaderMessages,
   buildDebateWorkerMessages,
   assignWorkerRole,
   extractSummary,
@@ -19,7 +18,6 @@ import type {
   TeamComposition,
   TeamMember,
   WorkerResponse,
-  Synthesis,
   DeliberationRole,
 } from "./types";
 
@@ -29,14 +27,9 @@ function makeWorker(model: string): TeamMember {
   return { model, role: "worker" };
 }
 
-function makeLeader(model: string): TeamMember {
-  return { model, role: "leader" };
-}
-
 function makeTeam(): TeamComposition {
   return {
     workers: [makeWorker("worker/a"), makeWorker("worker/b")],
-    leader: makeLeader("leader/model"),
   };
 }
 
@@ -48,18 +41,10 @@ function makeResponse(model: string, content: string, role?: DeliberationRole, w
   return { model, content, ...(role ? { role } : {}), ...(workerIndex != null ? { workerIndex } : {}) };
 }
 
-function makeSynthesis(
-  decision?: "continue" | "approve",
-  content = "Synthesis content",
-): Synthesis {
-  return { model: "leader/model", content, decision };
-}
-
 function makeRound(
   number: number,
   options?: {
     responses?: WorkerResponse[];
-    synthesis?: Synthesis;
   },
 ): Round {
   return {
@@ -68,7 +53,6 @@ function makeRound(
       makeResponse("worker/a", `Response A round ${number}`, "advocate"),
       makeResponse("worker/b", `Response B round ${number}`, "critic"),
     ],
-    synthesis: options?.synthesis,
   };
 }
 
@@ -141,16 +125,6 @@ describe("buildWorkerMessages", () => {
     expect(messages[0]!.content).toContain("<certainty>");
   });
 
-  it("should include previous round synthesis in user message when rounds exist", () => {
-    const round = makeRound(1, {
-      synthesis: makeSynthesis("continue", "The best approach uses quicksort"),
-    });
-    const ctx = makeCtx([round]);
-    const messages = buildWorkerMessages(ctx);
-    expect(messages[1]!.content).toContain("The best approach uses quicksort");
-    expect(messages[1]!.content).toContain("Previous Round Result");
-  });
-
   it("should default to advocate (index 0) when workerIndex is omitted", () => {
     const ctx = makeCtx();
     const messages = buildWorkerMessages(ctx);
@@ -177,256 +151,10 @@ describe("buildWorkerMessages", () => {
     expect(messages[1]!.content!).not.toMatch(/final/i);
   });
 
-  it("should only see the PREVIOUS round synthesis, not full history (O(1) context)", () => {
-    const round1 = makeRound(1, { synthesis: makeSynthesis("continue", "Round 1 synthesis") });
-    const round2 = makeRound(2, { synthesis: makeSynthesis("continue", "Round 2 synthesis") });
-    const ctx = makeCtx([round1, round2]);
-    const messages = buildWorkerMessages(ctx);
-    const user = messages[1]!.content!;
-    expect(user).toContain("Round 2 synthesis");
-    expect(user).not.toContain("Round 1 synthesis");
-  });
-
-  it("should not include synthesis section when previous round has no synthesis", () => {
-    const round = makeRound(1);
-    const ctx = makeCtx([round]);
-    const messages = buildWorkerMessages(ctx);
-    expect(messages[1]!.content).not.toContain("Previous Round Result");
-  });
-
   it("should start user message with task section", () => {
     const ctx = makeCtx();
     const messages = buildWorkerMessages(ctx);
     expect(messages[1]!.content).toMatch(/^## Task\n/);
-  });
-});
-
-// ================================================================
-// buildLeaderMessages
-// ================================================================
-
-describe("buildLeaderMessages", () => {
-  it("should return system + user with verification-first leader prompt", () => {
-    const ctx = makeCtx();
-    const messages = buildLeaderMessages(ctx);
-
-    expect(messages).toHaveLength(2);
-    expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toContain("verification-first synthesizer");
-    expect(messages[0]!.content).toContain("Verify first");
-    expect(messages[0]!.content).toContain("Integrate all responses");
-    expect(messages[1]!.role).toBe("user");
-    expect(messages[1]!.content).toContain("Write a sorting function");
-  });
-
-  it("should include XML output structure tags in system message", () => {
-    const ctx = makeCtx();
-    const messages = buildLeaderMessages(ctx);
-    const system = messages[0]!.content!;
-    expect(system).toContain("<verification>");
-    expect(system).toContain("<adopted>");
-    expect(system).toContain("<novel>");
-    expect(system).toContain("<result>");
-  });
-
-  it("should label worker responses by role in user message", () => {
-    const round = makeRound(1, {
-      responses: [
-        makeResponse("worker/a", "Quicksort approach", "advocate"),
-        makeResponse("worker/b", "Merge sort approach", "critic"),
-      ],
-    });
-    const ctx = makeCtx([round]);
-    const messages = buildLeaderMessages(ctx);
-    const user = messages[1]!.content!;
-    expect(user).toContain('role="advocate"');
-    expect(user).toContain('role="critic"');
-    expect(user).toContain("Quicksort approach");
-    expect(user).toContain("Merge sort approach");
-  });
-
-  it("should use host-provided instructions with verification-first suffix", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx, "Be strict on security");
-    expect(messages[0]!.content).toContain("Be strict on security");
-    expect(messages[0]!.content).toContain("Verify first");
-  });
-
-  it("should fall back to default leader prompt when instructions is undefined", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx, undefined);
-    expect(messages[0]!.content).toContain("verification-first synthesizer");
-  });
-
-  it("should fall back to default leader prompt when instructions is empty string", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx, "");
-    expect(messages[0]!.content).toContain("verification-first synthesizer");
-  });
-
-  it("should include round budget when roundInfo is provided", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx, undefined, { current: 2, max: 3 });
-    const user = messages[1]!.content!;
-    expect(user).toContain("Round 2");
-    expect(user).toContain("3");
-  });
-
-  it("should include FINAL marker when current equals max", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx, undefined, { current: 3, max: 3 });
-    expect(messages[1]!.content!).toMatch(/final/i);
-  });
-
-  it("should NOT include FINAL marker when current less than max", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx, undefined, { current: 1, max: 3 });
-    expect(messages[1]!.content!).not.toMatch(/final/i);
-  });
-
-  it("should show worker responses from the CURRENT (latest) round only", () => {
-    const round1 = makeRound(1, {
-      responses: [makeResponse("worker/a", "Round 1 answer")],
-      synthesis: makeSynthesis("continue", "Round 1 synth"),
-    });
-    const round2 = makeRound(2, {
-      responses: [makeResponse("worker/b", "Round 2 answer")],
-    });
-    const ctx = makeCtx([round1, round2]);
-    const messages = buildLeaderMessages(ctx);
-    const user = messages[1]!.content!;
-    expect(user).toContain("Round 2 answer");
-    expect(user).not.toContain("Round 1 answer");
-  });
-
-  it("should inject JSON output format instruction when consensus is leader_decides", () => {
-    const ctx: SharedContext = {
-      task: "Test task",
-      team: {
-        workers: [{ model: "w1", role: "worker" }],
-        leader: { model: "l1", role: "leader" },
-      },
-      rounds: [{ number: 1, responses: [{ model: "w1", content: "response 1" }] }],
-    };
-    const messages = buildLeaderMessages(ctx, undefined, undefined, "leader_decides");
-    const systemContent = messages.find(m => m.role === "system")!.content;
-    expect(systemContent).toContain("JSON");
-    expect(systemContent).toContain("decision");
-    expect(systemContent).toContain("approve");
-  });
-
-  it("should NOT inject JSON format when consensus is undefined", () => {
-    const ctx: SharedContext = {
-      task: "Test task",
-      team: {
-        workers: [{ model: "w1", role: "worker" }],
-        leader: { model: "l1", role: "leader" },
-      },
-      rounds: [{ number: 1, responses: [{ model: "w1", content: "response 1" }] }],
-    };
-    const messages = buildLeaderMessages(ctx, undefined, undefined);
-    const systemContent = messages.find(m => m.role === "system")!.content;
-    expect(systemContent).not.toContain("approve");
-  });
-
-  it("should use intermediate leader prompt for intermediate debate rounds", () => {
-    const ctx: SharedContext = {
-      task: "Test task",
-      team: {
-        workers: [{ model: "w1", role: "worker" }],
-        leader: { model: "l1", role: "leader" },
-      },
-      rounds: [{ number: 1, responses: [{ model: "w1", content: "response 1" }] }],
-    };
-    const messages = buildLeaderMessages(ctx, undefined, { current: 1, max: 3 }, "leader_decides", "debate");
-    const systemContent = messages.find(m => m.role === "system")!.content;
-    expect(systemContent).toContain("Intermediate synthesis lead");
-    expect(systemContent).toContain("agreement");
-    expect(systemContent).toContain("disagreement");
-    expect(systemContent).toContain("gaps");
-    expect(systemContent).toContain("continue");
-  });
-
-  it("should use final synthesis prompt on the last round", () => {
-    const ctx: SharedContext = {
-      task: "Test task",
-      team: {
-        workers: [{ model: "w1", role: "worker" }],
-        leader: { model: "l1", role: "leader" },
-      },
-      rounds: [{ number: 1, responses: [{ model: "w1", content: "response 1" }] }],
-    };
-    const messages = buildLeaderMessages(ctx, undefined, { current: 3, max: 3 }, "leader_decides", "debate");
-    const systemContent = messages.find(m => m.role === "system")!.content;
-    expect(systemContent).toContain("approve");
-    expect(systemContent).toContain("verification-first synthesizer");
-    expect(systemContent).not.toContain("Intermediate synthesis lead");
-  });
-
-  it("should skip JSON injection when host instructions already contain json+decision", () => {
-    const ctx: SharedContext = {
-      task: "Test task",
-      team: {
-        workers: [{ model: "w1", role: "worker" }],
-        leader: { model: "l1", role: "leader" },
-      },
-      rounds: [{ number: 1, responses: [{ model: "w1", content: "response 1" }] }],
-    };
-    const hostInstructions = 'Output a JSON object with "decision" field: approve or continue.';
-    const messages = buildLeaderMessages(ctx, hostInstructions, undefined, "leader_decides");
-    const systemContent = messages.find(m => m.role === "system")!.content;
-    expect(systemContent).toContain(hostInstructions);
-    expect(systemContent).toContain("Verify first");
-  });
-
-  it("should use intermediate leader prompt for debate rounds WITHOUT consensus mode", () => {
-    const ctx: SharedContext = {
-      task: "Test task",
-      team: {
-        workers: [{ model: "w1", role: "worker" }],
-        leader: { model: "l1", role: "leader" },
-      },
-      rounds: [{ number: 1, responses: [{ model: "w1", content: "response 1" }] }],
-    };
-    const messages = buildLeaderMessages(ctx, undefined, { current: 1, max: 3 }, undefined, "debate");
-    const systemContent = messages.find(m => m.role === "system")!.content;
-    expect(systemContent).toContain("Intermediate synthesis lead");
-    expect(systemContent).toContain("agreement");
-    expect(systemContent).toContain("disagreement");
-    expect(systemContent).not.toContain('"decision"');
-  });
-
-  it("should place verification before result in output structure", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx);
-    const systemContent = messages.find(m => m.role === "system")!.content!;
-    const verificationIdx = systemContent.indexOf("<verification>");
-    const resultIdx = systemContent.indexOf("<result>");
-    expect(verificationIdx).toBeGreaterThan(-1);
-    expect(resultIdx).toBeGreaterThan(-1);
-    expect(verificationIdx).toBeLessThan(resultIdx);
-  });
-
-  it("should start user message with task section", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx);
-    expect(messages[1]!.content).toMatch(/^## Task\n/);
-  });
-
-  it("should NOT include model names in worker response tags (anti-sycophancy)", () => {
-    const round = makeRound(1, {
-      responses: [
-        makeResponse("worker/a", "Response A", "advocate"),
-        makeResponse("worker/b", "Response B", "critic"),
-      ],
-    });
-    const ctx = makeCtx([round]);
-    const messages = buildLeaderMessages(ctx);
-    const user = messages[1]!.content!;
-    expect(user).not.toContain("worker/a");
-    expect(user).not.toContain("worker/b");
-    expect(user).toContain('role="advocate"');
-    expect(user).toContain('role="critic"');
   });
 });
 
@@ -435,13 +163,12 @@ describe("buildLeaderMessages", () => {
 // ================================================================
 
 describe("buildDebateWorkerMessages", () => {
-  it("should include other workers' full responses (not just leader summary)", () => {
+  it("should include other workers' full responses (not just summary)", () => {
     const round1 = makeRound(1, {
       responses: [
         makeResponse("worker/a", "Round 1 answer A", "advocate", 0),
         makeResponse("worker/b", "Round 1 answer B", "critic", 1),
       ],
-      synthesis: makeSynthesis("continue", "Leader summary"),
     });
     const ctx = makeCtx([round1]);
 
@@ -463,7 +190,6 @@ describe("buildDebateWorkerMessages", () => {
         makeResponse("worker/b", "Answer B", "critic", 1),
         makeResponse("worker/c", "Answer C", "wildcard", 2),
       ],
-      synthesis: makeSynthesis("continue", "Summary"),
     });
     const ctx = makeCtx([round1]);
 
@@ -479,11 +205,9 @@ describe("buildDebateWorkerMessages", () => {
   it("should only see LAST round responses (not full history)", () => {
     const r1 = makeRound(1, {
       responses: [makeResponse("worker/a", "R1-answer-A", "advocate")],
-      synthesis: makeSynthesis("continue", "Synth-1"),
     });
     const r2 = makeRound(2, {
       responses: [makeResponse("worker/a", "R2-answer-A", "advocate")],
-      synthesis: makeSynthesis("continue", "Synth-2"),
     });
     const ctx = makeCtx([r1, r2]);
 
@@ -495,25 +219,25 @@ describe("buildDebateWorkerMessages", () => {
   });
 
   it("should include debate role in system message", () => {
-    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
+    const ctx = makeCtx([makeRound(1)]);
     const messages = buildDebateWorkerMessages(ctx, undefined, undefined, undefined, 0);
     expect(messages[0]!.content).toContain("advocate debater");
   });
 
   it("should NOT contain Self-Doubt (replaced by <concerns>)", () => {
-    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
+    const ctx = makeCtx([makeRound(1)]);
     const messages = buildDebateWorkerMessages(ctx);
     expect(messages[0]!.content).not.toContain("Self-Doubt");
   });
 
   it("should include final round instruction on last round", () => {
-    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
+    const ctx = makeCtx([makeRound(1)]);
     const messages = buildDebateWorkerMessages(ctx, undefined, { current: 3, max: 3 });
     expect(messages[1]!.content!).toMatch(/final/i);
   });
 
   it("should use host instructions combined with debate context", () => {
-    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
+    const ctx = makeCtx([makeRound(1)]);
     const messages = buildDebateWorkerMessages(ctx, "Focus on performance");
     expect(messages[0]!.content).toContain("Focus on performance");
     expect(messages[0]!.content).toContain("debater");
@@ -525,7 +249,6 @@ describe("buildDebateWorkerMessages", () => {
         makeResponse("worker/a", "My analysis of quicksort", "advocate", 0),
         makeResponse("worker/b", "My analysis of mergesort", "critic", 1),
       ],
-      synthesis: makeSynthesis("continue", "Disagreement on sort choice"),
     });
     const ctx = makeCtx([round1]);
 
@@ -538,7 +261,6 @@ describe("buildDebateWorkerMessages", () => {
   it("should NOT include previous response section when workerIndex is not provided", () => {
     const round1 = makeRound(1, {
       responses: [makeResponse("worker/a", "My analysis", "advocate", 0)],
-      synthesis: makeSynthesis("continue", "Summary"),
     });
     const ctx = makeCtx([round1]);
 
@@ -547,14 +269,14 @@ describe("buildDebateWorkerMessages", () => {
   });
 
   it("should instruct workers to rebut and refine positions", () => {
-    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis("continue", "Disagreement: A vs B") })]);
+    const ctx = makeCtx([makeRound(1)]);
     const messages = buildDebateWorkerMessages(ctx);
     const system = messages[0]!.content!;
     expect(system).toMatch(/rebut|refine|concede/i);
   });
 
   it("should skip output-structure for artifact tasks in debate mode", () => {
-    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })], "artifact");
+    const ctx = makeCtx([makeRound(1)], "artifact");
     const messages = buildDebateWorkerMessages(ctx);
     expect(messages[0]!.content).not.toContain("<output-structure>");
   });
@@ -568,7 +290,6 @@ describe("buildDebateWorkerMessages", () => {
         makeResponse("worker/c", "Wildcard-2 response", "wildcard", 2),
         makeResponse("worker/d", "Advocate-3 response", "advocate", 3),
       ],
-      synthesis: makeSynthesis("continue", "Summary"),
     });
     const ctx = makeCtx([round1]);
 
@@ -595,25 +316,17 @@ describe("buildDebateWorkerMessages", () => {
 // ================================================================
 
 describe("cross-function", () => {
-  it("should always return exactly 2 messages (system + user) for all functions", () => {
+  it("should always return exactly 2 messages (system + user) for buildWorkerMessages", () => {
     const ctx0 = makeCtx();
     const ctx1 = makeCtx([makeRound(1)]);
-    const ctx2 = makeCtx([
-      makeRound(1, { synthesis: makeSynthesis("continue") }),
-      makeRound(2),
-    ]);
+    const ctx2 = makeCtx([makeRound(1), makeRound(2)]);
 
     for (const ctx of [ctx0, ctx1, ctx2]) {
       const worker = buildWorkerMessages(ctx);
-      const leader = buildLeaderMessages(ctx);
 
       expect(worker).toHaveLength(2);
       expect(worker[0]!.role).toBe("system");
       expect(worker[1]!.role).toBe("user");
-
-      expect(leader).toHaveLength(2);
-      expect(leader[0]!.role).toBe("system");
-      expect(leader[1]!.role).toBe("user");
     }
   });
 
@@ -622,27 +335,8 @@ describe("cross-function", () => {
 
     const w1 = buildWorkerMessages(ctx, "inst", undefined, 0);
     const w2 = buildWorkerMessages(ctx, "inst", undefined, 0);
-    const l1 = buildLeaderMessages(ctx, "inst");
-    const l2 = buildLeaderMessages(ctx, "inst");
 
     expect(w1).toEqual(w2);
-    expect(l1).toEqual(l2);
-  });
-
-  it("should handle round with no synthesis gracefully in both functions", () => {
-    const round: Round = {
-      number: 1,
-      responses: [makeResponse("worker/a", "partial content")],
-    };
-    const ctx = makeCtx([round]);
-
-    const worker = buildWorkerMessages(ctx);
-    const leader = buildLeaderMessages(ctx);
-
-    expect(worker).toHaveLength(2);
-    expect(leader).toHaveLength(2);
-    expect(worker[1]!.content).not.toContain("Previous Round Result");
-    expect(leader[1]!.content).toContain("partial content");
   });
 
   it("should handle empty responses array in a round", () => {
@@ -650,11 +344,8 @@ describe("cross-function", () => {
     const ctx = makeCtx([round]);
 
     const worker = buildWorkerMessages(ctx);
-    const leader = buildLeaderMessages(ctx);
 
     expect(worker).toHaveLength(2);
-    expect(leader).toHaveLength(2);
-    expect(leader[1]!.content).not.toContain("Worker Responses");
   });
 });
 
@@ -683,38 +374,6 @@ describe("artifact worker prompts", () => {
     const messages = buildWorkerMessages(ctx, undefined, undefined, 0);
     expect(messages[0]!.content).toContain("advocate analyst");
     expect(messages[0]!.content).toContain("<position>");
-  });
-});
-
-describe("artifact leader prompts", () => {
-  it("should use artifact leader prompt when taskNature is artifact", () => {
-    const round = makeRound(1);
-    const ctx = makeCtx([round], "artifact");
-    const messages = buildLeaderMessages(ctx);
-    expect(messages[0]!.content).toContain("synthesis lead");
-    expect(messages[0]!.content).toContain("DO NOT write per-worker analysis");
-    expect(messages[0]!.content).not.toContain("verification-first synthesizer");
-  });
-
-  it("should include worker summary manifest for artifact tasks", () => {
-    const round = makeRound(1, {
-      responses: [
-        makeResponse("worker/a", "<summary>\nAPPROACH: quicksort\nTRADEOFF: memory\nASSUMPTION: fits in RAM\n</summary>\ncode here"),
-        makeResponse("worker/b", "No summary tag, just code"),
-      ],
-    });
-    const ctx = makeCtx([round], "artifact");
-    const messages = buildLeaderMessages(ctx);
-    const user = messages[1]!.content!;
-    expect(user).toContain("WORKER SUMMARY MANIFEST");
-    expect(user).toContain("APPROACH: quicksort");
-  });
-
-  it("should NOT include summary manifest for critique tasks", () => {
-    const round = makeRound(1);
-    const ctx = makeCtx([round], "critique");
-    const messages = buildLeaderMessages(ctx);
-    expect(messages[1]!.content).not.toContain("WORKER SUMMARY MANIFEST");
   });
 });
 
@@ -756,31 +415,6 @@ describe("certainty and confidence expression", () => {
     expect(messages[0]!.content).not.toContain("[0-10]");
     expect(messages[0]!.content).toContain("Justify your approach");
   });
-
-  it("should include CoVe verification instructions in critique leader prompt", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx);
-    expect(messages[0]!.content).toContain("<verification>");
-    expect(messages[0]!.content).toContain("CONFIRMED");
-    expect(messages[0]!.content).toContain("REFUTED");
-    expect(messages[0]!.content).toContain("UNVERIFIABLE");
-    // No CONFIDENCE weighting
-    expect(messages[0]!.content).not.toContain("CONFIDENCE scores");
-  });
-
-  it("should not reference CONFIDENCE scores in artifact leader prompt", () => {
-    const ctx = makeCtx([makeRound(1)], "artifact");
-    const messages = buildLeaderMessages(ctx);
-    expect(messages[0]!.content).not.toContain("CONFIDENCE scores");
-    expect(messages[0]!.content).toContain("approach justification");
-  });
-
-  it("should include cross-check instruction in critique leader", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildLeaderMessages(ctx);
-    expect(messages[0]!.content).toContain("Cross-check");
-    expect(messages[0]!.content).toContain("consensus ≠ correctness");
-  });
 });
 
 // ================================================================
@@ -789,7 +423,7 @@ describe("certainty and confidence expression", () => {
 
 describe("anti-sycophancy in debate prompts", () => {
   it("should include anti-sycophancy rules in debate worker prompt", () => {
-    const ctx = makeCtx([makeRound(1, { synthesis: makeSynthesis() })]);
+    const ctx = makeCtx([makeRound(1)]);
     const messages = buildDebateWorkerMessages(ctx);
     const system = messages[0]!.content!;
     expect(system).toContain("Do NOT agree merely to be polite");

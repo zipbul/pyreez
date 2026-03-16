@@ -104,18 +104,6 @@ function fixtureRegistry() {
 // Chat response helpers
 // ============================================================
 
-/** Detect role from system message content */
-function detectRole(messages: ChatMessage[]): "worker" | "leader" {
-  const system = messages.find((m) => m.role === "system");
-  if (!system?.content) return "worker";
-  if (
-    system.content.includes("verification-first synthesizer") ||
-    system.content.includes("Intermediate synthesis lead") ||
-    system.content.includes("synthesis lead")
-  ) return "leader";
-  return "worker";
-}
-
 function chatResult(content: string, input = 10, output = 20): ChatResult {
   return { content, inputTokens: input, outputTokens: output };
 }
@@ -123,11 +111,6 @@ function chatResult(content: string, input = 10, output = 20): ChatResult {
 /** Pad worker content above MIN_WORKER_RESPONSE_LENGTH to avoid degenerate-response filtering. */
 function validWorker(label: string): string {
   return label.padEnd(MIN_WORKER_RESPONSE_LENGTH, ".");
-}
-
-/** Wrap leader content in required XML structural tags to pass synthesis validation. */
-function validLeader(content: string): string {
-  return `<verification>verified</verification><adopted>adopted</adopted><novel>none</novel><result>${content}</result>`;
 }
 
 // ============================================================
@@ -138,13 +121,9 @@ describe("Deliberation E2E", () => {
   // ----------------------------------------------------------
   // 1. [HP] single-round completion
   // ----------------------------------------------------------
-  it("should complete single-round (workers respond, leader synthesizes, result)", async () => {
+  it("should complete single-round (workers respond)", async () => {
     // Arrange
-    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
-      const role = detectRole(messages);
-      if (role === "leader") {
-        return chatResult(validLeader("Leader synthesis of all responses"));
-      }
+    const chatFn = mock(async (_model: string, _messages: ChatMessage[]) => {
       return chatResult(validWorker("Worker response content"));
     });
 
@@ -157,35 +136,16 @@ describe("Deliberation E2E", () => {
     const result = await fn(input);
 
     // Assert
-    expect(result.consensusReached).toBeNull(); // no consensus mode = null
     expect(result.roundsExecuted).toBe(1);
-    expect(result.result).toContain("Leader synthesis of all responses");
     expect(result.modelsUsed.length).toBeGreaterThanOrEqual(1);
   });
 
   // ----------------------------------------------------------
-  // 2. [HP] multi-round with consensus mode (leader_decides)
+  // 2. [HP] multi-round
   // ----------------------------------------------------------
-  it("should complete multi-round consensus (continue then approve)", async () => {
+  it("should complete multi-round deliberation", async () => {
     // Arrange
-    let roundCount = 0;
-    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
-      const role = detectRole(messages);
-      if (role === "leader") {
-        roundCount++;
-        if (roundCount === 1) {
-          // Round 1: continue
-          return chatResult(JSON.stringify({
-            result: validLeader("Draft v1"),
-            decision: "continue",
-          }));
-        }
-        // Round 2: approve
-        return chatResult(JSON.stringify({
-          result: validLeader("Revised v2"),
-          decision: "approve",
-        }));
-      }
+    const chatFn = mock(async (_model: string, _messages: ChatMessage[]) => {
       return chatResult(validWorker("Worker response"));
     });
 
@@ -195,25 +155,18 @@ describe("Deliberation E2E", () => {
     const result = await fn({
       task: "Implement error handler",
       maxRounds: 3,
-      consensus: "leader_decides",
     });
 
     // Assert
-    expect(result.roundsExecuted).toBe(2);
-    expect(result.consensusReached).toBe(true);
-    expect(result.result).toContain("Revised v2");
+    expect(result.roundsExecuted).toBe(3);
   });
 
   // ----------------------------------------------------------
-  // 3. [HP] maxRounds exhausted without consensus mode
+  // 3. [HP] maxRounds exhausted
   // ----------------------------------------------------------
-  it("should run all rounds and report consensusReached=null when no consensus mode", async () => {
+  it("should run all rounds when maxRounds is specified", async () => {
     // Arrange
-    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
-      const role = detectRole(messages);
-      if (role === "leader") {
-        return chatResult(validLeader("Leader synthesis"));
-      }
+    const chatFn = mock(async (_model: string, _messages: ChatMessage[]) => {
       return chatResult(validWorker("Worker attempt"));
     });
 
@@ -225,24 +178,19 @@ describe("Deliberation E2E", () => {
       maxRounds: 3,
     });
 
-    // Assert — no consensus mode = null
-    expect(result.consensusReached).toBeNull();
+    // Assert
     expect(result.roundsExecuted).toBe(3);
   });
 
   // ----------------------------------------------------------
-  // 4. [HP] workerInstructions and leaderInstructions passed to prompts
+  // 4. [HP] workerInstructions passed to prompts
   // ----------------------------------------------------------
-  it("should pass workerInstructions and leaderInstructions to prompts", async () => {
+  it("should pass workerInstructions to prompts", async () => {
     // Arrange
     const capturedSystemMessages: string[] = [];
     const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
       const systemMsg = messages.find((m) => m.role === "system")?.content ?? "";
       capturedSystemMessages.push(systemMsg);
-      const role = detectRole(messages);
-      if (role === "leader") {
-        return chatResult(validLeader("Leader output"));
-      }
       return chatResult(validWorker("Worker output"));
     });
 
@@ -252,20 +200,13 @@ describe("Deliberation E2E", () => {
     await fn({
       task: "Instruction test",
       workerInstructions: "Use TypeScript strictly",
-      leaderInstructions: "Prioritize security",
     });
 
-    // Assert — worker instructions appear in worker calls (with role-specific prompt),
-    // leader instructions in leader call (with verification-first synthesizer suffix).
-    // Note: structural validation may retry the leader call (up to 2 total).
+    // Assert — worker instructions appear in worker calls (with role-specific prompt).
     const workerMsgs = capturedSystemMessages.filter(
       (msg) => msg.includes("Use TypeScript strictly") && msg.includes("analyst"),
     );
-    const leaderMsgs = capturedSystemMessages.filter(
-      (msg) => msg.includes("Prioritize security") && msg.includes("Verify first"),
-    );
     expect(workerMsgs.length).toBeGreaterThanOrEqual(1);
-    expect(leaderMsgs.length).toBeGreaterThanOrEqual(1);
   });
 
   // ----------------------------------------------------------
@@ -274,11 +215,7 @@ describe("Deliberation E2E", () => {
   it("should produce result when one worker chat fails (partial failure)", async () => {
     // Arrange
     let workerCallCount = 0;
-    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
-      const role = detectRole(messages);
-      if (role === "leader") {
-        return chatResult(validLeader("Leader synthesis despite partial failure"));
-      }
+    const chatFn = mock(async (_model: string, _messages: ChatMessage[]) => {
       workerCallCount++;
       if (workerCallCount === 1) {
         throw new Error("Network timeout");
@@ -295,7 +232,6 @@ describe("Deliberation E2E", () => {
 
     // Assert — deliberation should still complete with partial worker responses
     expect(result.roundsExecuted).toBeGreaterThanOrEqual(1);
-    expect(result.result).toBeTruthy();
   });
 
   // ----------------------------------------------------------
@@ -313,42 +249,11 @@ describe("Deliberation E2E", () => {
   });
 
   // ----------------------------------------------------------
-  // 7. [ED] non-JSON leader responses → content returned as-is
-  // ----------------------------------------------------------
-  it("should return non-JSON leader response as-is when no consensus mode", async () => {
-    // Arrange
-    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
-      const role = detectRole(messages);
-      if (role === "leader") {
-        return chatResult(validLeader("Here is my plain text synthesis without JSON"));
-      }
-      return chatResult(validWorker("Worker plain text answer"));
-    });
-
-    const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
-
-    // Act
-    const result = await fn({
-      task: "Non-JSON test",
-      maxRounds: 1,
-    });
-
-    // Assert — no JSON parsing attempted without consensus mode
-    expect(result.roundsExecuted).toBe(1);
-    expect(result.result).toContain("Here is my plain text synthesis without JSON");
-    expect(result.consensusReached).toBeNull();
-  });
-
-  // ----------------------------------------------------------
-  // 8. [HP] all output fields populated correctly
+  // 7. [HP] all output fields populated correctly
   // ----------------------------------------------------------
   it("should populate all DeliberateOutput fields correctly", async () => {
     // Arrange
-    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
-      const role = detectRole(messages);
-      if (role === "leader") {
-        return chatResult(validLeader("Final leader output"), 50, 100);
-      }
+    const chatFn = mock(async (_model: string, _messages: ChatMessage[]) => {
       return chatResult(validWorker("Worker output"), 30, 60);
     });
 
@@ -360,12 +265,10 @@ describe("Deliberation E2E", () => {
     });
 
     // Assert — every field in DeliberateOutput
-    expect(result.result).toContain("Final leader output");
     expect(result.roundsExecuted).toBe(1);
-    expect(result.consensusReached).toBeNull();
     expect(result.totalTokens.input).toBeGreaterThan(0);
     expect(result.totalTokens.output).toBeGreaterThan(0);
-    // workers + leader = at least 2 LLM calls
+    // workers = at least 2 LLM calls
     expect(result.totalLLMCalls).toBeGreaterThanOrEqual(2);
     expect(result.modelsUsed.length).toBeGreaterThanOrEqual(1);
     // Verify modelsUsed contains valid model IDs
@@ -376,17 +279,13 @@ describe("Deliberation E2E", () => {
   });
 
   // ----------------------------------------------------------
-  // 9. [ID] consecutive independent calls
+  // 8. [ID] consecutive independent calls
   // ----------------------------------------------------------
   it("should produce independent results on consecutive calls", async () => {
     // Arrange
     let globalCallCount = 0;
-    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
+    const chatFn = mock(async (_model: string, _messages: ChatMessage[]) => {
       globalCallCount++;
-      const role = detectRole(messages);
-      if (role === "leader") {
-        return chatResult(validLeader(`Leader-${globalCallCount}`));
-      }
       return chatResult(validWorker(`Worker-${globalCallCount}`));
     });
 
@@ -397,39 +296,17 @@ describe("Deliberation E2E", () => {
     const result2 = await fn({ task: "Call 2" });
 
     // Assert — different tasks, different contexts
-    // Both reach consensus independently
-    expect(result1.consensusReached).toBeNull();
-    expect(result2.consensusReached).toBeNull();
-    // Results differ (different globalCallCount at leader time)
-    expect(result1.result).not.toBe(result2.result);
     // Round counts are independent
     expect(result1.roundsExecuted).toBe(1);
     expect(result2.roundsExecuted).toBe(1);
   });
 
   // ----------------------------------------------------------
-  // 10. [HP] token accumulation across rounds
+  // 9. [HP] token accumulation across rounds
   // ----------------------------------------------------------
   it("should accumulate tokens across multiple rounds", async () => {
     // Arrange
-    let leaderRound = 0;
-    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
-      const role = detectRole(messages);
-      if (role === "leader") {
-        leaderRound++;
-        if (leaderRound < 3) {
-          return chatResult(
-            JSON.stringify({ result: validLeader(`Round ${leaderRound}`), decision: "continue" }),
-            50,
-            100,
-          );
-        }
-        return chatResult(
-          JSON.stringify({ result: validLeader("Final"), decision: "approve" }),
-          50,
-          100,
-        );
-      }
+    const chatFn = mock(async (_model: string, _messages: ChatMessage[]) => {
       return chatResult(validWorker("Worker response"), 30, 60);
     });
 
@@ -438,17 +315,15 @@ describe("Deliberation E2E", () => {
     // Act
     const result = await fn({
       task: "Token accumulation test",
-      maxRounds: 5,
-      consensus: "leader_decides",
+      maxRounds: 3,
     });
 
     // Assert — tokens should accumulate across rounds
-    expect(result.roundsExecuted).toBeGreaterThan(1);
-    // Each round has workers + leader, so tokens accumulate multiplicatively
-    // With 3 rounds, minimum tokens = 3 * (N_workers * 30 + 50) input
-    expect(result.totalTokens.input).toBeGreaterThan(100);
-    expect(result.totalTokens.output).toBeGreaterThan(100);
-    // Total LLM calls = rounds * (workers + 1 leader)
+    expect(result.roundsExecuted).toBe(3);
+    // Each round has workers, so tokens accumulate multiplicatively
+    expect(result.totalTokens.input).toBeGreaterThan(50);
+    expect(result.totalTokens.output).toBeGreaterThan(50);
+    // Total LLM calls = rounds * workers
     expect(result.totalLLMCalls).toBeGreaterThanOrEqual(result.roundsExecuted * 2);
   });
 });

@@ -1,8 +1,8 @@
 /**
- * PyreezMcpServer — MCP server exposing 3 infrastructure tools.
+ * PyreezMcpServer — MCP server exposing infrastructure tools.
  *
  * Tools: pyreez_route, pyreez_scores, pyreez_deliberate
- * Architecture: pyreez = Infrastructure layer, Host = Orchestrator.
+ * Architecture: pyreez = Infrastructure layer, Host = Orchestrator + Synthesizer.
  *
  * Classification: host provides domain (required), task_type and complexity are auto-inferred if omitted.
  */
@@ -65,7 +65,6 @@ const MAX_ERROR_LENGTH = 500;
  */
 function sanitizeError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  // Strip absolute file paths (Unix/Windows)
   const cleaned = raw.replace(/(?:\/[\w.-]+){3,}/g, "[path]");
   if (cleaned.length <= MAX_ERROR_LENGTH) return cleaned;
   return cleaned.slice(0, MAX_ERROR_LENGTH) + "…";
@@ -200,7 +199,7 @@ export class PyreezMcpServer {
       {
         title: "Pyreez Deliberate",
         description:
-          "Run multi-model consensus-based deliberation on a task. Submit task and instructions in English.",
+          "Run leaderless multi-model deliberation on a task. Workers respond independently; host synthesizes. Submit task and instructions in English.",
         inputSchema: z.object({
           task: z.string().max(100_000).describe("Task to deliberate on"),
           domain: z
@@ -245,27 +244,14 @@ export class PyreezMcpServer {
             .max(10_000)
             .optional()
             .describe("Optional instructions for the workers"),
-          leader_instructions: z
-            .string()
-            .max(10_000)
-            .optional()
-            .describe("Optional instructions for the leader"),
           max_rounds: z
             .number()
             .optional()
             .describe("Maximum deliberation rounds (default: 1)"),
-          consensus: z
-            .enum(["leader_decides"])
-            .optional()
-            .describe("Consensus mode (default: fixed rounds)"),
-          leader_contributes: z
-            .boolean()
-            .optional()
-            .describe("When true, the leader also responds independently in the diverge phase before synthesizing. Ensures the strongest model's unanchored opinion is captured."),
           models: z
             .array(z.string())
             .optional()
-            .describe("Explicit model IDs to use. First N-1 are workers, last is leader. Bypasses auto team composition."),
+            .describe("Explicit model IDs to use as workers. Bypasses auto team composition."),
           protocol: z
             .enum(["diverge-synth", "debate"])
             .optional()
@@ -354,7 +340,6 @@ export class PyreezMcpServer {
       const complexity = (args.complexity ?? inferComplexity(args.task)) as TaskClassification["complexity"];
       const method = args.task_type ? "host" : "default";
 
-      // R-2: Derive criticality from complexity when not explicitly set
       const criticality = complexity === "complex" ? "high"
         : complexity === "simple" ? "low"
         : "medium";
@@ -423,7 +408,6 @@ export class PyreezMcpServer {
           confidence: conf,
         };
       });
-      // S-2: Warn when all models score 0 for the dimension (likely invalid dimension name)
       const allZero = scored.every((s) => s.score === 0 && s.confidence === 0);
       if (args.top != null) {
         scored = scored
@@ -457,10 +441,7 @@ export class PyreezMcpServer {
     budget?: number;
     auto_route?: boolean;
     worker_instructions?: string;
-    leader_instructions?: string;
     max_rounds?: number;
-    consensus?: string;
-    leader_contributes?: boolean;
     models?: string[];
     protocol?: string;
     quality_weight?: number;
@@ -493,27 +474,18 @@ export class PyreezMcpServer {
           qualityWeight: args.quality_weight,
           costWeight: args.cost_weight,
         };
-        // Build deliberation overrides from user params
         const userProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
         const taskNature = resolveTaskNature(args.domain, taskType);
-        // Auto-select debate for complex critique/review tasks (only when user didn't specify protocol)
         const autoDebate = !userProtocol && shouldAutoDebate(args.domain, taskType, complexity);
         const effectiveProtocol = userProtocol ?? (autoDebate ? "debate" as const : undefined);
-        // Auto-debate implies consensus for adaptive stopping
-        const effectiveConsensus = args.consensus === "leader_decides" ? "leader_decides" as const
-          : (autoDebate ? "leader_decides" as const : undefined);
-        const hasOverrides = effectiveProtocol != null || args.max_rounds != null || effectiveConsensus != null || args.leader_contributes != null || args.worker_instructions != null || args.leader_instructions != null || taskNature != null;
+        const hasOverrides = effectiveProtocol != null || args.max_rounds != null || args.worker_instructions != null || taskNature != null;
         const deliberationOverrides = hasOverrides ? {
           protocol: effectiveProtocol,
           maxRounds: args.max_rounds,
-          consensus: effectiveConsensus,
-          leaderContributes: args.leader_contributes,
           workerInstructions: args.worker_instructions,
-          leaderInstructions: args.leader_instructions,
           taskNature,
         } : undefined;
 
-        // D-2: Use runWithTrace to include routing info in response
         const traceResult = await this.engine.runWithTrace(args.task, budget, classification, deliberationOverrides);
         const result = traceResult.result;
 
@@ -524,24 +496,19 @@ export class PyreezMcpServer {
               id: crypto.randomUUID(),
               task: args.task,
               timestamp: Date.now(),
-              consensusReached: result.consensusReached,
               roundsExecuted: result.roundsExecuted,
-              result: result.result,
               modelsUsed: result.modelsUsed,
               totalLLMCalls: result.totalLLMCalls,
               totalTokens: result.totalTokens,
               protocol: result.protocol as "diverge-synth" | "debate" | undefined,
-              consensus: deliberationOverrides?.consensus,
               workerInstructions: args.worker_instructions,
-              leaderInstructions: args.leader_instructions,
-              ...(result.rounds ? { roundsSummary: result.rounds } : {}),
+              ...(result.rounds ? { roundsSummary: result.rounds.map(r => ({ number: r.number })) } : {}),
             });
           } catch {
             // best-effort save
           }
         }
 
-        // Include routing trace so caller sees which models were selected and why
         const response = {
           ...result,
           routing: {
@@ -574,18 +541,12 @@ export class PyreezMcpServer {
       const manualUserProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
       const manualTaskNature = args.domain ? resolveTaskNature(args.domain, args.task_type) : undefined;
       const manualComplexity = (args.complexity ?? inferComplexity(args.task)) as string;
-      // Auto-select debate for complex critique/review tasks
       const manualAutoDebate = !manualUserProtocol && args.domain && shouldAutoDebate(args.domain, args.task_type, manualComplexity);
       const manualEffectiveProtocol = manualUserProtocol ?? (manualAutoDebate ? "debate" as const : undefined);
-      const manualEffectiveConsensus = args.consensus === "leader_decides" ? "leader_decides" as const
-        : (manualAutoDebate ? "leader_decides" as const : undefined);
       const input: DeliberateInput = {
         task: args.task,
         workerInstructions: args.worker_instructions,
-        leaderInstructions: args.leader_instructions,
         maxRounds: args.max_rounds,
-        consensus: manualEffectiveConsensus,
-        leaderContributes: args.leader_contributes,
         protocol: manualEffectiveProtocol,
         qualityWeight: args.quality_weight,
         costWeight: args.cost_weight,

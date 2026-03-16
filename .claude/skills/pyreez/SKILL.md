@@ -5,7 +5,7 @@ license: Apache-2.0
 compatibility: Requires pyreez MCP server running with pyreez_deliberate and pyreez_scores tools available. Requires web search capability for fact verification.
 metadata:
   author: zipbul
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Leaderless Multi-Model Deliberation
@@ -23,8 +23,7 @@ pyreez_scores → filter by available: true
 Selection criteria (strict priority):
 1. Minimum 3 workers from 3 different vendors (perspective diversity)
 2. Pick models with highest REASONING scores among available ones
-3. Last model in the array is used as leader by the engine — set it to the weakest available model or duplicate a worker (the leader output will be discarded; you are the real leader)
-4. Never include models the user lacks API keys for
+3. Never include models the user lacks API keys for
 
 ## Step 2: Run Deliberation
 
@@ -33,20 +32,17 @@ Call `pyreez_deliberate` with:
 ```json
 {
   "task": "<detailed task description>",
-  "models": ["worker1", "worker2", "worker3", "dummy-leader"],
+  "models": ["worker1", "worker2", "worker3"],
   "protocol": "debate",
   "max_rounds": 2,
-  "leader_contributes": false,
-  "worker_instructions": "<role + constraints>",
-  "leader_instructions": "Output the raw worker responses without synthesis. Do not judge or filter claims."
+  "worker_instructions": "<role + constraints>"
 }
 ```
 
 Key settings:
-- `leader_contributes: false` — dummy leader should not waste tokens
-- `leader_instructions` must say "do not synthesize" — we want raw material
 - `protocol: "debate"` — workers see and challenge each other's responses
 - `max_rounds: 2` — sufficient for convergence without token waste
+- All models are workers — the engine returns raw worker responses for you to synthesize
 
 ## Step 3: Fact Verification (Immediately After Receiving Worker Outputs)
 
@@ -78,7 +74,6 @@ Output format — adapt to user's language and context. No rigid template.
 
 ## Anti-Patterns (Do Not)
 
-- Do not relay the engine leader's synthesis as your own analysis
 - Do not say "workers agreed on X" as proof X is true (consensus != correctness)
 - Do not skip fact-checking because the output "looks reasonable"
 - Do not include unverified benchmarks or statistics without flagging them

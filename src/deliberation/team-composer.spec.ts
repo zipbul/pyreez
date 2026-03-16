@@ -1,5 +1,5 @@
 /**
- * Unit tests for team-composer.ts — Diverge-Synth Team Composer.
+ * Unit tests for team-composer.ts — Leaderless Team Composer.
  *
  * SUT: extractProvider, scoreDimensions, selectTopModel, composeTeam
  * @module Team Composer Tests
@@ -417,57 +417,30 @@ describe("composeTeam", () => {
   });
 
   // ================================================================
-  // composeTeam -- auto selection (leader by JUDGMENT)
+  // composeTeam -- auto selection (all workers)
   // ================================================================
 
   describe("auto selection", () => {
-    it("should auto-select leader with best JUDGMENT composite score", () => {
-      const judgeModel = makeModel({
-        id: "mistral/judge",
-        capabilities: { JUDGMENT: 10, ANALYSIS: 10, REASONING: 10, SELF_CONSISTENCY: 10 },
-      });
-      const otherModel = makeModel({
-        id: "openai/other",
-        capabilities: { JUDGMENT: 3, ANALYSIS: 3 },
-      });
-      const thirdModel = makeModel({
-        id: "meta/third",
-        capabilities: { JUDGMENT: 2, ANALYSIS: 2 },
-      });
-      const deps = makeDeps([judgeModel, otherModel, thirdModel]);
-
-      const team = composeTeam(
-        { task: "Evaluate", modelIds: ["mistral/judge", "openai/other", "meta/third"] },
-        deps,
-      );
-      expect(team.leader.model).toBe("mistral/judge");
-      expect(team.leader.role).toBe("leader");
-    });
-
-    it("should assign remaining models as workers", () => {
+    it("should assign all models as workers", () => {
       const deps = makeDeps();
       const modelIds = ["openai/gpt-4.1", "deepseek/deepseek-v3", "mistral/mistral-large"];
 
       const team = composeTeam({ task: "Build feature", modelIds }, deps);
 
-      // Leader is one of the models, workers are the rest
-      expect(team.workers.length).toBe(2);
+      expect(team.workers.length).toBe(3);
       expect(team.workers.every((w) => w.role === "worker")).toBe(true);
-      // All models accounted for
-      const allModels = [...team.workers.map((w) => w.model), team.leader.model];
+      const allModels = team.workers.map((w) => w.model);
       expect(allModels.sort()).toEqual([...modelIds].sort());
     });
 
-    it("should create full team with workers and leader", () => {
+    it("should create team with all workers", () => {
       const deps = makeDeps();
       const team = composeTeam(
         { task: "Build feature", modelIds: ["openai/gpt-4.1", "meta/llama-4-scout", "mistral/mistral-large"] },
         deps,
       );
       expect(team.workers.length).toBeGreaterThanOrEqual(1);
-      expect(team.leader).toBeDefined();
-      expect(team.leader.role).toBe("leader");
-      expect(team.leader.model).toMatch(/\w+\/\w+/);
+      expect(team.workers.every((w) => w.role === "worker")).toBe(true);
     });
   });
 
@@ -476,7 +449,7 @@ describe("composeTeam", () => {
   // ================================================================
 
   describe("single model", () => {
-    it("should use single model as both worker and leader", () => {
+    it("should use single model as sole worker", () => {
       const models = [
         makeModel({
           id: "openai/only",
@@ -489,59 +462,8 @@ describe("composeTeam", () => {
         { task: "Build", modelIds: ["openai/only"] },
         deps,
       );
-      // Single model is both leader and the sole worker
-      expect(team.leader.model).toBe("openai/only");
       expect(team.workers).toHaveLength(1);
       expect(team.workers[0]!.model).toBe("openai/only");
-    });
-  });
-
-  // ================================================================
-  // composeTeam -- leader override
-  // ================================================================
-
-  describe("leader override", () => {
-    it("should use override leader model directly", () => {
-      const deps = makeDeps();
-
-      const team = composeTeam(
-        {
-          task: "Build feature",
-          modelIds: ["openai/gpt-4.1", "meta/llama-4-scout", "mistral/mistral-large"],
-          overrides: { leader: "openai/gpt-4.1" },
-        },
-        deps,
-      );
-      expect(team.leader.model).toBe("openai/gpt-4.1");
-      expect(team.leader.role).toBe("leader");
-    });
-
-    it("should place non-leader models as workers when leader is overridden", () => {
-      const deps = makeDeps();
-
-      const team = composeTeam(
-        {
-          task: "Build feature",
-          modelIds: ["openai/gpt-4.1", "meta/llama-4-scout", "mistral/mistral-large"],
-          overrides: { leader: "openai/gpt-4.1" },
-        },
-        deps,
-      );
-      const workerModels = team.workers.map((w) => w.model).sort();
-      expect(workerModels).toEqual(["meta/llama-4-scout", "mistral/mistral-large"]);
-    });
-
-    it("should throw when override leader is not found in registry", () => {
-      expect(() =>
-        composeTeam(
-          {
-            task: "Build",
-            modelIds: ["openai/gpt-4.1"],
-            overrides: { leader: "nonexistent/model" },
-          },
-          makeDeps(),
-        ),
-      ).toThrow(/not found/i);
     });
   });
 
@@ -560,7 +482,6 @@ describe("composeTeam", () => {
       const team1 = composeTeam(opts, deps);
       const team2 = composeTeam(opts, deps);
 
-      expect(team1.leader.model).toBe(team2.leader.model);
       expect(team1.workers.map((w) => w.model)).toEqual(
         team2.workers.map((w) => w.model),
       );
@@ -580,7 +501,9 @@ describe("composeTeam", () => {
         makeDeps(reversed),
       );
 
-      expect(team1.leader.model).toBe(team2.leader.model);
+      expect(team1.workers.map((w) => w.model).sort()).toEqual(
+        team2.workers.map((w) => w.model).sort(),
+      );
     });
   });
 });

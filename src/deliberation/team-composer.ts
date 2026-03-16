@@ -1,8 +1,7 @@
 /**
- * Team Composer — builds workers + leader for Diverge-Synth deliberation.
+ * Team Composer — builds worker team for leaderless deliberation.
  *
- * Leader: best JUDGMENT composite score.
- * Workers: all remaining models.
+ * All models are workers. Host handles synthesis.
  *
  * @module Team Composer
  */
@@ -37,9 +36,6 @@ export class NoModelsAvailableError extends Error {
 export interface ComposeTeamOptions {
   readonly task: string;
   readonly modelIds: readonly string[];
-  readonly overrides?: {
-    readonly leader?: string;
-  };
 }
 
 export interface ComposeTeamDeps {
@@ -54,12 +50,15 @@ interface WeightedDimension {
   weight: number;
 }
 
-export const LEADER_DIMS: WeightedDimension[] = [
+export const SELECTION_DIMS: WeightedDimension[] = [
   { dimension: "JUDGMENT", weight: 0.4 },
   { dimension: "ANALYSIS", weight: 0.3 },
   { dimension: "REASONING", weight: 0.2 },
   { dimension: "SELF_CONSISTENCY", weight: 0.1 },
 ];
+
+/** @deprecated Use SELECTION_DIMS instead. Kept for backward compatibility during migration. */
+export const LEADER_DIMS = SELECTION_DIMS;
 
 // -- Helper functions --
 
@@ -119,12 +118,8 @@ export function selectTopModel(
 // -- Capability Filtering --
 
 /**
- * Filter models by minimum capability score across LEADER_DIMS.
+ * Filter models by minimum capability score across SELECTION_DIMS.
  * Soft fallback: returns all models if fewer than `minCount` qualify.
- *
- * @param models - Models to filter.
- * @param minScore - Minimum scoreDimensions() threshold.
- * @param minCount - Minimum models required; falls back to unfiltered if not met.
  */
 export function filterByCapability(
   models: readonly ModelInfo[],
@@ -132,12 +127,11 @@ export function filterByCapability(
   minCount: number = 2,
 ): ModelInfo[] {
   const qualifying = models.filter((m) => {
-    // Skip models without proper capabilities (graceful degradation)
-    const hasCapabilities = LEADER_DIMS.every(
+    const hasCapabilities = SELECTION_DIMS.every(
       ({ dimension }) => m.capabilities[dimension] != null,
     );
     if (!hasCapabilities) return true; // include uncalibrated models
-    return scoreDimensions(m, LEADER_DIMS) >= minScore;
+    return scoreDimensions(m, SELECTION_DIMS) >= minScore;
   });
   if (qualifying.length >= minCount) return qualifying;
   return [...models];
@@ -150,29 +144,18 @@ export function filterByCapability(
  *
  * Algorithm: round-robin across providers, picking the best model
  * (by JUDGMENT composite) from each provider per round.
- * This ensures teams span multiple LLM providers, reducing correlated
- * errors from shared training data.
- *
- * @param models - Available models to select from.
- * @param count - Maximum team size.
- * @returns Selected models with provider diversity guarantee.
  */
 export function selectDiverseModels(
   models: readonly ModelInfo[],
   count: number,
 ): ModelInfo[] {
   if (models.length <= count) {
-    // Even when all models fit, still sort by provider diversity
-    // to ensure team-composer sees providers in round-robin order.
     if (models.length <= 1) return [...models];
-    // Fall through to diversity selection logic
     count = models.length;
   }
 
-  // Apply capability filter before diversity selection (soft: falls back to all if too few qualify)
   const qualified = filterByCapability(models, 300, count);
 
-  // Group by provider, sorted by JUDGMENT composite within each group
   const byProvider = new Map<string, ModelInfo[]>();
   for (const model of qualified) {
     const provider = extractProvider(model.id);
@@ -181,12 +164,10 @@ export function selectDiverseModels(
     byProvider.set(provider, group);
   }
 
-  // Sort each provider's models by LEADER_DIMS score descending
   for (const group of byProvider.values()) {
-    group.sort((a, b) => scoreDimensions(b, LEADER_DIMS) - scoreDimensions(a, LEADER_DIMS));
+    group.sort((a, b) => scoreDimensions(b, SELECTION_DIMS) - scoreDimensions(a, SELECTION_DIMS));
   }
 
-  // Round-robin: take best from each provider, then second-best, etc.
   const selected: ModelInfo[] = [];
   const providers = [...byProvider.keys()];
   let round = 0;
@@ -211,9 +192,9 @@ export function selectDiverseModels(
 // -- Main function --
 
 /**
- * Compose a deliberation team: leader (best judgment) + workers (rest).
+ * Compose a deliberation team: all models become workers.
  *
- * @param options - Task, model IDs to use, optional leader override.
+ * @param options - Task, model IDs to use.
  * @param deps - Model registry access.
  * @throws Error if task is empty or no models available.
  */
@@ -242,36 +223,17 @@ export function composeTeam(
     return found;
   };
 
-  // Resolve all requested models, filtering by capability
   const requestedModels = filterByCapability(
     options.modelIds.map(resolveModel),
-    300, // minimum LEADER_DIMS composite score
+    300,
   );
 
-  // Leader selection
-  let leader: TeamMember;
-  if (options.overrides?.leader) {
-    const leaderModel = resolveModel(options.overrides.leader);
-    leader = { model: leaderModel.id, role: "leader" };
-  } else {
-    // Auto-select: best JUDGMENT composite score
-    const best = selectTopModel(requestedModels, LEADER_DIMS);
-    leader = { model: best!.id, role: "leader" };
-  }
-
-  // Workers: everyone except leader
-  const workerModels = requestedModels.filter((m) => m.id !== leader.model);
-  // If only 1 model, it's both leader and the sole worker
-  if (workerModels.length === 0) {
-    workerModels.push(requestedModels[0]!);
-  }
-
-  const workers: TeamMember[] = workerModels.map((m) => ({
+  const workers: TeamMember[] = requestedModels.map((m) => ({
     model: m.id,
     role: "worker" as const,
   }));
 
-  return { workers, leader };
+  return { workers };
 }
 
 // -- Capability-Based Role Ordering --
@@ -291,15 +253,6 @@ const ROLE_DIMS: readonly { dimension: CapabilityDimension; weight: number }[][]
 /**
  * Reorder workers so that each worker's capability profile best matches
  * the deliberation role assigned to its index position.
- *
- * Index 0 = advocate (REASONING), Index 1 = critic (ANALYSIS), Index 2 = wildcard (CREATIVITY).
- * Wraps for 4+ workers (index 3 = advocate, etc.).
- *
- * Uses greedy assignment: for each role slot, pick the best-scoring unassigned worker.
- *
- * @param workers - Worker team members to reorder.
- * @param getById - Model lookup function.
- * @returns Reordered workers array.
  */
 export function orderWorkersByRole(
   workers: readonly TeamMember[],
@@ -309,7 +262,6 @@ export function orderWorkersByRole(
 
   const infos = workers.map((w, i) => ({ member: w, info: getById(w.model), origIdx: i }));
 
-  // If registry can't resolve models, keep original order
   if (infos.some((x) => !x.info)) return [...workers];
 
   const assigned = new Set<number>();

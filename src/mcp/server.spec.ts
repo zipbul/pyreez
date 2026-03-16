@@ -91,12 +91,11 @@ const DEFAULT_TRACE_RESULT: SlotTrace = {
 };
 
 const DEFAULT_RUN_RESULT: DeliberationResult = {
-  result: "function add(a, b) { return a + b; }",
   roundsExecuted: 1,
-  consensusReached: null,
   totalLLMCalls: 1,
   modelsUsed: ["openai/gpt-4.1"],
   protocol: "single",
+  rounds: [{ number: 1, responses: [{ model: "openai/gpt-4.1", content: "function add(a, b) { return a + b; }" }] }],
 };
 
 function stubEngine(overrides: Partial<PyreezEngine> = {}): PyreezEngine {
@@ -669,12 +668,10 @@ describe("PyreezMcpServer", () => {
 
   describe("pyreez_deliberate", () => {
     const DELIBERATE_OUTPUT: DeliberateOutput = {
-      result: "function add(a, b) { return a + b; }",
       roundsExecuted: 2,
-      consensusReached: null,
       totalTokens: { input: 100, output: 200 },
       totalLLMCalls: 8,
-      modelsUsed: ["worker/a", "worker/b", "leader/m"],
+      modelsUsed: ["worker/a", "worker/b"],
     };
 
     function stubDeliberateFn(
@@ -698,9 +695,7 @@ describe("PyreezMcpServer", () => {
       expect(result.isError).toBeUndefined();
       expect(result.content).toHaveLength(1);
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.result).toBe("function add(a, b) { return a + b; }");
       expect(parsed.roundsExecuted).toBe(2);
-      expect(parsed.consensusReached).toBeNull();
       expect(parsed.totalLLMCalls).toBe(8);
     });
 
@@ -723,26 +718,24 @@ describe("PyreezMcpServer", () => {
 
       await server.handleDeliberate({
         task: "task",
-        leader_instructions: "Be strict",
+        worker_instructions: "Be strict",
       });
 
       const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
-      expect(callArg.leaderInstructions).toBe("Be strict");
+      expect(callArg.workerInstructions).toBe("Be strict");
     });
 
-    it("should forward max_rounds and consensus to deliberateFn", async () => {
+    it("should forward max_rounds to deliberateFn", async () => {
       const deliberateFn = stubDeliberateFn();
       const server = new PyreezMcpServer(validConfig({ deliberateFn }));
 
       await server.handleDeliberate({
         task: "task",
         max_rounds: 5,
-        consensus: "leader_decides",
       });
 
       const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
       expect(callArg.maxRounds).toBe(5);
-      expect(callArg.consensus).toBe("leader_decides");
     });
 
     it("should return isError undefined on success", async () => {
@@ -843,7 +836,7 @@ describe("PyreezMcpServer", () => {
       expect(call[2].taskType).toBe("IMPLEMENT_ALGORITHM");
       expect(call[2].complexity).toBe("moderate");
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.result).toBe(DEFAULT_RUN_RESULT.result);
+      expect(parsed.roundsExecuted).toBe(DEFAULT_RUN_RESULT.roundsExecuted);
     });
 
     it("should return error when auto_route=true but domain is missing", async () => {

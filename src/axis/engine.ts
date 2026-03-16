@@ -91,13 +91,12 @@ export class PyreezEngine {
     if (plan.models.length === 1) {
       const chatResult = await this.chat(plan.models[0]!.modelId, prompt);
       result = {
-        result: chatResult.content,
         roundsExecuted: 0,
-        consensusReached: null,
         totalLLMCalls: 1,
         modelsUsed: [plan.models[0]!.modelId],
         protocol: "single",
         sessionId,
+        rounds: [{ number: 1, responses: [{ model: plan.models[0]!.modelId, content: chatResult.content }] }],
       };
     } else {
       // Stage 3: deliberate

@@ -19,7 +19,6 @@ import type { EngineDeps, EngineConfig } from "../src/deliberation/engine";
 import { composeTeam, selectDiverseModels } from "../src/deliberation/team-composer";
 import {
   buildWorkerMessages,
-  buildLeaderMessages,
   buildDebateWorkerMessages,
 } from "../src/deliberation/prompts";
 import type { GenerationParams } from "../src/deliberation/types";
@@ -250,9 +249,6 @@ async function runDeliberation(
     buildWorkerMessages: variant === "baseline"
       ? (ctx, inst?, ri?, idx?) => stripConfidence(buildWorkerMessages(ctx, inst, ri, idx))
       : buildWorkerMessages,
-    buildLeaderMessages: variant === "baseline"
-      ? (ctx, inst?, ri?, cons?, proto?) => stripConfidence(buildLeaderMessages(ctx, inst, ri, cons, proto))
-      : buildLeaderMessages,
     buildDebateWorkerMessages: variant === "baseline"
       ? (ctx, inst?, ri?, wm?, idx?) => stripConfidence(buildDebateWorkerMessages(ctx, inst, ri, wm, idx))
       : buildDebateWorkerMessages,
@@ -260,15 +256,16 @@ async function runDeliberation(
 
   const config: EngineConfig = {
     maxRounds: 1,
-    structuralTags: nature === "critique"
-      ? ["verification", "adopted", "novel", "result"]
-      : undefined,
     workerGenParams: { temperature: 1.0, top_p: 0.9, max_tokens: nature === "artifact" ? 2048 : 1536 },
-    leaderGenParams: { temperature: 0.7, ...(nature === "artifact" ? {} : { max_tokens: 8192 }) },
   };
 
   const output = await deliberate(team, { task, taskNature: nature }, engineDeps, config);
-  return { result: output.result, tokens: output.totalTokens };
+  // Use the best (longest) worker response as the representative output
+  const bestResponse = output.rounds
+    ?.flatMap((r) => r.responses ?? [])
+    .sort((a, b) => (b.content?.length ?? 0) - (a.content?.length ?? 0))[0];
+  const result = bestResponse?.content ?? "";
+  return { result, tokens: output.totalTokens };
 }
 
 // ================================================================

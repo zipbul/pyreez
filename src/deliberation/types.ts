@@ -1,7 +1,7 @@
 /**
- * Deliberation types — Diverge-Synth model.
+ * Deliberation types — Leaderless multi-model deliberation.
  *
- * Workers respond independently (diverge), Leader synthesizes (synth).
+ * Workers respond independently (diverge), Host synthesizes.
  * Host provides all role prompts; pyreez provides infrastructure only.
  *
  * @module Deliberation Types
@@ -24,10 +24,9 @@ export interface GenerationParams {
 // -- Team Composition --
 
 /**
- * Roles within a deliberation team.
- * Worker = independent responder, Leader = synthesizer.
+ * Role within a deliberation team. All members are workers.
  */
-export type TeamRole = "worker" | "leader";
+export type TeamRole = "worker";
 
 /**
  * Deliberation role assigned to workers for diversity of perspective.
@@ -52,7 +51,6 @@ export interface TeamMember {
  */
 export interface TeamComposition {
   readonly workers: readonly TeamMember[];
-  readonly leader: TeamMember;
 }
 
 // -- Round Structure --
@@ -69,22 +67,11 @@ export interface WorkerResponse {
 }
 
 /**
- * Leader's synthesis for a round.
- */
-export interface Synthesis {
-  readonly model: string;
-  readonly content: string;
-  /** Only present when consensus mode is enabled. */
-  readonly decision?: "continue" | "approve";
-}
-
-/**
  * A single deliberation round.
  */
 export interface Round {
   readonly number: number;
   readonly responses: readonly WorkerResponse[];
-  readonly synthesis?: Synthesis;
   /** Workers that failed during this round (partial failure tracking). */
   readonly failedWorkers?: readonly { model: string; error: string }[];
 }
@@ -102,15 +89,6 @@ export interface SharedContext {
   readonly taskNature?: TaskNature;
 }
 
-// -- Consensus Mode --
-
-/**
- * How consensus is determined.
- * "leader_decides": leader outputs JSON with decision field.
- * Omit for fixed-round execution (always runs maxRounds).
- */
-export type ConsensusMode = "leader_decides";
-
 // -- Token Usage --
 
 /**
@@ -125,27 +103,20 @@ export interface TokenUsage {
 
 /**
  * Input for the deliberation engine.
- * Host provides task + optional instructions for workers/leader.
+ * Host provides task + optional instructions for workers.
  */
 export interface DeliberateInput {
   readonly task: string;
   readonly workerInstructions?: string;
-  readonly leaderInstructions?: string;
   readonly maxRounds?: number;
-  readonly consensus?: ConsensusMode;
   /** Per-request quality weight override. */
   readonly qualityWeight?: number;
   /** Per-request cost weight override. */
   readonly costWeight?: number;
   /** Deliberation protocol. Default: "diverge-synth". */
   readonly protocol?: "diverge-synth" | "debate";
-  /** Explicit model IDs to use. First N-1 are workers, last is leader. Bypasses auto team composition. */
+  /** Explicit model IDs to use as workers. Bypasses auto team composition. */
   readonly models?: readonly string[];
-  /**
-   * When true, the leader also responds independently in the diverge phase
-   * before synthesizing. Default: false.
-   */
-  readonly leaderContributes?: boolean;
   /** Task nature for prompt selection. Artifact = deliverable output, Critique = analysis. */
   readonly taskNature?: TaskNature;
 }
@@ -154,17 +125,14 @@ export interface DeliberateInput {
  * Output from the deliberation engine.
  */
 export interface DeliberateOutput {
-  readonly result: string;
   readonly roundsExecuted: number;
-  readonly consensusReached: boolean | null;
   readonly totalTokens: TokenUsage;
   readonly totalLLMCalls: number;
   readonly modelsUsed: readonly string[];
   /** Per-round details for diagnostics. */
   readonly rounds?: readonly {
     number: number;
-    responses?: readonly { model: string; content: string }[];
-    synthesis?: string;
+    responses?: readonly { model: string; content: string; role?: string }[];
     failedWorkers?: readonly { model: string; error: string }[];
   }[];
   /** PoLL judge scores per worker model. */

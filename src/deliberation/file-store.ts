@@ -64,11 +64,6 @@ export class FileDeliberationStore implements DeliberationStore {
         r.modelsUsed.some((m) => m === q.model),
       );
     }
-    if (q.consensusReached != null) {
-      results = results.filter(
-        (r) => r.consensusReached === q.consensusReached,
-      );
-    }
     if (q.limit != null) {
       results = results.slice(0, q.limit);
     }

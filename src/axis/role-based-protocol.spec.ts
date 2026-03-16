@@ -18,9 +18,7 @@ import type { EngineDeps, EngineConfig } from "../deliberation/engine";
 // -- Fake deliberate function (injected via DI) --
 
 type FakeDeliberateOutput = {
-  result: string;
   roundsExecuted: number;
-  consensusReached: boolean;
   totalTokens: { input: number; output: number };
   totalLLMCalls: number;
   modelsUsed: string[];
@@ -28,11 +26,10 @@ type FakeDeliberateOutput = {
 
 /**
  * Create a fake deliberateFn that records calls and exercises the chat deps.
- * Each invocation calls chat through deps.buildWorkerMessages / buildLeaderMessages
+ * Each invocation calls chat through deps.buildWorkerMessages
  * to verify the full wiring chain, then returns a configurable DeliberateOutput.
  */
 function makeFakeDeliberate(opts?: {
-  consensusReached?: boolean;
   throwError?: string;
 }) {
   const calls: Array<{
@@ -62,20 +59,10 @@ function makeFakeDeliberate(opts?: {
       await deps.chat(w.model, workerMsgs);
     }
 
-    const leaderMsgs = deps.buildLeaderMessages(ctx);
-    await deps.chat(team.leader.model, leaderMsgs);
-
-    const allModels = new Set([
-      ...team.workers.map((w) => w.model),
-      team.leader.model,
-    ]);
-
-    const consensusReached = opts?.consensusReached ?? true;
+    const allModels = new Set(team.workers.map((w) => w.model));
 
     return {
-      result: "deliberation result",
-      roundsExecuted: consensusReached ? 1 : (config?.maxRounds ?? 3),
-      consensusReached,
+      roundsExecuted: config?.maxRounds ?? 1,
       totalTokens: { input: allModels.size * 50, output: allModels.size * 50 },
       totalLLMCalls: allModels.size,
       modelsUsed: [...allModels],
@@ -109,7 +96,7 @@ function makePlan(
 ): EnsemblePlan {
   return {
     models,
-    strategy: "leader_decides",
+    strategy: "composite",
     estimatedCost: 0.05,
     reason: "test plan",
   };
@@ -134,15 +121,15 @@ describe("DivergeSynthProtocol", () => {
 
   beforeEach(() => {
     fakeDelib = makeFakeDeliberate();
-    protocol = new DivergeSynthProtocol({ consensus: "leader_decides", maxRounds: 3, deliberateFn: fakeDelib.fn });
+    protocol = new DivergeSynthProtocol({ maxRounds: 3, deliberateFn: fakeDelib.fn });
   });
 
-  // 1. Auto-assign roles from scores (leader=JUDGMENT highest, rest=workers)
-  it("should auto-assign roles from scores when plan.models lack role field", async () => {
+  // 1. All models become workers when plan.models lack role field
+  it("should assign all models as workers when plan.models lack role field", async () => {
     const scores = makeScores(
       { id: "model-a", judgment: 500, codeGen: 800 },
       { id: "model-b", judgment: 600, codeGen: 600 },
-      { id: "model-c", judgment: 900, codeGen: 500 }, // best JUDGMENT → leader
+      { id: "model-c", judgment: 900, codeGen: 500 },
     );
     const plan = makePlan([
       { modelId: "model-a" },
@@ -158,8 +145,8 @@ describe("DivergeSynthProtocol", () => {
     expect(result.roundsExecuted).toBeGreaterThan(0);
   });
 
-  // 2. Explicit roles from plan.models (worker/leader)
-  it("should use explicit roles from plan.models when role field is present", async () => {
+  // 2. All models become workers regardless of role field
+  it("should assign all models as workers regardless of role field", async () => {
     const scores = makeScores(
       { id: "model-x", judgment: 500, codeGen: 500 },
       { id: "model-y", judgment: 500, codeGen: 500 },
@@ -168,7 +155,7 @@ describe("DivergeSynthProtocol", () => {
     const plan = makePlan([
       { modelId: "model-x", role: "worker" },
       { modelId: "model-y", role: "worker" },
-      { modelId: "model-z", role: "leader" },
+      { modelId: "model-z", role: "worker" },
     ]);
     const chat = makeChatFn();
 
@@ -179,8 +166,8 @@ describe("DivergeSynthProtocol", () => {
     expect(result.protocol).toBe("diverge-synth");
   });
 
-  // 3. Consensus reached
-  it("should return consensusReached=true when deliberation reaches consensus", async () => {
+  // 3. roundsExecuted tracks execution
+  it("should return roundsExecuted > 0 after deliberation", async () => {
     const scores = makeScores(
       { id: "m1", judgment: 700, codeGen: 800 },
       { id: "m2", judgment: 600, codeGen: 600 },
@@ -195,29 +182,7 @@ describe("DivergeSynthProtocol", () => {
 
     const result = await protocol.deliberate("Implement feature X", plan, scores, chat);
 
-    expect(result.consensusReached).toBe(true);
     expect(result.roundsExecuted).toBeGreaterThan(0);
-  });
-
-  // 4. Consensus not reached (maxRounds exhausted)
-  it("should return consensusReached=false when maxRounds exhausted", async () => {
-    const scores = makeScores(
-      { id: "m1", judgment: 700, codeGen: 800 },
-      { id: "m2", judgment: 600, codeGen: 600 },
-      { id: "m3", judgment: 900, codeGen: 500 },
-    );
-    const plan = makePlan([
-      { modelId: "m1" },
-      { modelId: "m2" },
-      { modelId: "m3" },
-    ]);
-    const chat = makeChatFn();
-    const noConsensus = makeFakeDeliberate({ consensusReached: false });
-    const proto = new DivergeSynthProtocol({ consensus: "leader_decides", deliberateFn: noConsensus.fn });
-
-    const result = await proto.deliberate("Hard task", plan, scores, chat);
-
-    expect(result.consensusReached).toBe(false);
   });
 
   // 5. protocol="diverge-synth"
@@ -313,7 +278,7 @@ describe("DivergeSynthProtocol", () => {
     ]);
     const chat = makeChatFn();
     const errDelib = makeFakeDeliberate({ throwError: "LLM service unavailable" });
-    const proto = new DivergeSynthProtocol({ consensus: "leader_decides", maxRounds: 3, deliberateFn: errDelib.fn });
+    const proto = new DivergeSynthProtocol({ maxRounds: 3, deliberateFn: errDelib.fn });
 
     await expect(
       proto.deliberate("Task", plan, scores, chat),
@@ -334,13 +299,13 @@ describe("DivergeSynthProtocol", () => {
     expect(fakeDelib.calls.length).toBeGreaterThan(0);
   });
 
-  // 11. 2 models (1 worker + 1 leader)
-  it("should run deliberation with 1 worker + 1 leader when 2 models in plan", async () => {
+  // 11. 2 models (both workers)
+  it("should run deliberation with 2 workers when 2 models in plan", async () => {
     const scores = makeScores(
       { id: "worker-m", judgment: 500, codeGen: 800 },
-      { id: "leader-m", judgment: 900, codeGen: 500 },
+      { id: "worker-m2", judgment: 900, codeGen: 500 },
     );
-    const plan = makePlan([{ modelId: "worker-m" }, { modelId: "leader-m" }]);
+    const plan = makePlan([{ modelId: "worker-m" }, { modelId: "worker-m2" }]);
     const chat = makeChatFn();
 
     const result = await protocol.deliberate("Task", plan, scores, chat);
@@ -374,7 +339,7 @@ describe("DivergeSynthProtocol", () => {
     const plan = makePlan([
       { modelId: "w1", role: "worker" },
       { modelId: "w2", role: "worker" },
-      { modelId: "l1", role: "leader" },
+      { modelId: "w3", role: "worker" },
     ]);
     const chat = makeChatFn();
 
@@ -387,7 +352,7 @@ describe("DivergeSynthProtocol", () => {
   it("should run deliberation even for 1-model plan", async () => {
     const scores = makeScores({ id: "only", judgment: 700, codeGen: 700 });
     const plan = makePlan([{ modelId: "only" }]);
-    const proto = new DivergeSynthProtocol({ consensus: "leader_decides", maxRounds: 3, deliberateFn: fakeDelib.fn });
+    const proto = new DivergeSynthProtocol({ maxRounds: 3, deliberateFn: fakeDelib.fn });
     const chat = makeChatFn();
 
     const result = await proto.deliberate("Task", plan, scores, chat);
@@ -415,8 +380,7 @@ describe("DivergeSynthProtocol", () => {
     const result2 = await protocol.deliberate("Same task", plan, scores, chat);
 
     expect(result1.protocol).toBe(result2.protocol);
-    expect(typeof result1.result).toBe(typeof result2.result);
     expect(typeof result1.roundsExecuted).toBe(typeof result2.roundsExecuted);
-    expect(typeof result1.consensusReached).toBe(typeof result2.consensusReached);
+    expect(result1.modelsUsed.length).toBe(result2.modelsUsed.length);
   });
 });

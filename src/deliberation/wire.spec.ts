@@ -1,5 +1,5 @@
 /**
- * Unit tests for wire.ts — Integration Wiring (Diverge-Synth model).
+ * Unit tests for wire.ts — Integration Wiring (Leaderless model).
  *
  * SUT: stripThinkTags, createChatAdapter, createDeliberateFn
  * All external dependencies (composeTeam, deliberate, prompts) are test-doubled.
@@ -43,7 +43,6 @@ mock.module("./engine", () => ({
 
 // Import SUT after mocks
 const { createChatAdapter, createDeliberateFn, stripThinkTags } = await import("./wire");
-const { buildWorkerMessages: _buildWorkerMessages, buildLeaderMessages: _buildLeaderMessages } = await import("./prompts");
 
 // -- Fixtures --
 
@@ -52,16 +51,13 @@ const STUB_TEAM: TeamComposition = {
     { model: "openai/gpt-4.1", role: "worker" },
     { model: "deepseek/deepseek-r1", role: "worker" },
   ],
-  leader: { model: "anthropic/claude-sonnet-4.6", role: "leader" },
 };
 
 const STUB_DELIBERATE_OUTPUT: DeliberateOutput = {
-  result: "deliberation result",
   roundsExecuted: 1,
-  consensusReached: null,
   totalTokens: { input: 100, output: 200 },
-  totalLLMCalls: 3,
-  modelsUsed: ["openai/gpt-4.1", "deepseek/deepseek-r1", "anthropic/claude-sonnet-4.6"],
+  totalLLMCalls: 2,
+  modelsUsed: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
 };
 
 function makeModelInfo(id: string): ModelInfo {
@@ -386,9 +382,7 @@ describe("createDeliberateFn", () => {
     const input: DeliberateInput = {
       task: "Review this code",
       workerInstructions: "Focus on security",
-      leaderInstructions: "Synthesize findings",
       maxRounds: 2,
-      consensus: "leader_decides",
     };
 
     // Act
@@ -401,10 +395,7 @@ describe("createDeliberateFn", () => {
     expect(passedInput).toEqual(input);
     expect(typeof engineDeps.chat).toBe("function");
     expect(typeof engineDeps.buildWorkerMessages).toBe("function");
-    expect(typeof engineDeps.buildLeaderMessages).toBe("function");
-    expect(config).toMatchObject({ maxRounds: 2, consensus: "leader_decides" });
-    // Default taskNature is "critique" → structuralTags should be set
-    expect(config.structuralTags).toEqual(["verification", "adopted", "novel", "result"]);
+    expect(config).toMatchObject({ maxRounds: 2 });
   });
 
   it("should return deliberation output", async () => {
@@ -418,15 +409,12 @@ describe("createDeliberateFn", () => {
     const result = await deliberateFn({ task: "Build something" });
 
     // Assert
-    expect(result.result).toBe("deliberation result");
     expect(result.roundsExecuted).toBe(1);
-    expect(result.consensusReached).toBeNull();
     expect(result.totalTokens).toEqual({ input: 100, output: 200 });
-    expect(result.totalLLMCalls).toBe(3);
+    expect(result.totalLLMCalls).toBe(2);
     expect(result.modelsUsed).toEqual([
       "openai/gpt-4.1",
       "deepseek/deepseek-r1",
-      "anthropic/claude-sonnet-4.6",
     ]);
   });
 
@@ -443,27 +431,20 @@ describe("createDeliberateFn", () => {
     await deliberateFn({
       task: "Test task",
       workerInstructions: "worker instructions",
-      leaderInstructions: "leader instructions",
-      consensus: "leader_decides",
     });
 
     // Assert
     expect(mockSave).toHaveBeenCalledTimes(1);
     const savedRecord = mockSave.mock.calls[0]![0] as any;
     expect(savedRecord.task).toBe("Test task");
-    expect(savedRecord.result).toBe("deliberation result");
-    expect(savedRecord.consensusReached).toBeNull();
     expect(savedRecord.roundsExecuted).toBe(1);
     expect(savedRecord.modelsUsed).toEqual([
       "openai/gpt-4.1",
       "deepseek/deepseek-r1",
-      "anthropic/claude-sonnet-4.6",
     ]);
-    expect(savedRecord.totalLLMCalls).toBe(3);
+    expect(savedRecord.totalLLMCalls).toBe(2);
     expect(savedRecord.totalTokens).toEqual({ input: 100, output: 200 });
     expect(savedRecord.workerInstructions).toBe("worker instructions");
-    expect(savedRecord.leaderInstructions).toBe("leader instructions");
-    expect(savedRecord.consensus).toBe("leader_decides");
     expect(savedRecord.id).toBeDefined();
     expect(savedRecord.timestamp).toBeGreaterThan(0);
   });
@@ -490,53 +471,5 @@ describe("createDeliberateFn", () => {
 
     const [, , , config] = mockDeliberate.mock.calls[0]!;
     expect(config.workerGenParams.max_tokens).toBe(2048);
-  });
-
-  it("should not set max_tokens for artifact leader (unconstrained output)", async () => {
-    mockComposeTeam.mockImplementation(() => STUB_TEAM);
-    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
-    const deps = makeWireDeps();
-    const deliberateFn = createDeliberateFn(deps);
-
-    await deliberateFn({ task: "Write code", taskNature: "artifact" });
-
-    const [, , , config] = mockDeliberate.mock.calls[0]!;
-    expect(config.leaderGenParams.max_tokens).toBeUndefined();
-  });
-
-  it("should set critique leader max_tokens to 8192", async () => {
-    mockComposeTeam.mockImplementation(() => STUB_TEAM);
-    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
-    const deps = makeWireDeps();
-    const deliberateFn = createDeliberateFn(deps);
-
-    await deliberateFn({ task: "Review code", taskNature: "critique" });
-
-    const [, , , config] = mockDeliberate.mock.calls[0]!;
-    expect(config.leaderGenParams.max_tokens).toBe(8192);
-  });
-
-  it("should set structuralTags to undefined for artifact tasks", async () => {
-    mockComposeTeam.mockImplementation(() => STUB_TEAM);
-    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
-    const deps = makeWireDeps();
-    const deliberateFn = createDeliberateFn(deps);
-
-    await deliberateFn({ task: "Write code", taskNature: "artifact" });
-
-    const [, , , config] = mockDeliberate.mock.calls[0]!;
-    expect(config.structuralTags).toBeUndefined();
-  });
-
-  it("should set structuralTags to critique tags for critique tasks", async () => {
-    mockComposeTeam.mockImplementation(() => STUB_TEAM);
-    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
-    const deps = makeWireDeps();
-    const deliberateFn = createDeliberateFn(deps);
-
-    await deliberateFn({ task: "Review code", taskNature: "critique" });
-
-    const [, , , config] = mockDeliberate.mock.calls[0]!;
-    expect(config.structuralTags).toEqual(["verification", "adopted", "novel", "result"]);
   });
 });

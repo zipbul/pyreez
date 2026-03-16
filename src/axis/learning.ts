@@ -176,9 +176,12 @@ export class LocalLearningLayer implements LearningLayer {
     // Phase 6: T3 LLM-as-Judge → L3/L4 learning
     if (this.judge) {
       try {
+        // Use last round's first response content as the result to evaluate
+        const lastRound = result.rounds?.[result.rounds.length - 1];
+        const resultContent = lastRound?.responses?.[0]?.content ?? "";
         const quality = await this.judge.evaluate(
           classified.taskType,
-          result.result,
+          resultContent,
         );
         // L4: Train MF factors with proper indices
         if (this.mfLearner && this.taskTypeIndex && this.modelIndex) {

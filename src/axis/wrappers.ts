@@ -5,7 +5,7 @@
  * - BtScoringSystem — Bradley-Terry 21-dimension scoring
  * - DomainOverrideProfiler — domain → capability weight lookup
  * - TwoTrackCeSelector — hard filter + composite score + cost-efficiency
- * - RoleBasedProtocol — Producer → Reviewer → Leader deliberation
+ * - DivergeSynthProtocol — Workers (parallel) → Host (synthesis)
  */
 
 import type { ClassifyResult, TaskDomain, TaskType } from "../classify/types";
@@ -35,13 +35,11 @@ import { selectDiverseModels } from "../deliberation/team-composer";
 import type { DeliberateOutput } from "../deliberation/types";
 import {
   buildWorkerMessages,
-  buildLeaderMessages,
   buildDebateWorkerMessages,
 } from "../deliberation/prompts";
 import type {
   TeamComposition,
   TeamMember,
-  ConsensusMode,
   DeliberateInput,
   GenerationParams,
 } from "../deliberation/types";
@@ -98,9 +96,6 @@ function computeOverall(dimensions: Record<string, { mu: number; sigma: number }
   return entries.reduce((sum, d) => sum + d.mu, 0) / entries.length;
 }
 
-// Role assignment removed — Selector only picks models.
-// DivergeSynthProtocol.buildAutoTeam() assigns leader based on JUDGMENT composite.
-
 // ============================================================
 // BtScoringSystem — Bradley-Terry 21-dimension scoring
 // ============================================================
@@ -147,8 +142,6 @@ export class BtScoringSystem implements ScoringSystem {
     const models = registry.getAll();
     const ratings = extractRatingsMap(models);
 
-    // Compute bootstrap μ floors: for each model×dim, floor = bootstrap_μ × MU_FLOOR_RATIO.
-    // Bootstrap μ is the original μ when comparisons === 0, or the current μ as fallback.
     const bootstrapFloors = new Map<string, Map<string, number>>();
     for (const model of models) {
       const dimFloors = new Map<string, number>();
@@ -261,7 +254,6 @@ export class TwoTrackCeSelector implements Selector {
       if (req.constraints.requiresToolCalling && !info.supportsToolCalling) return false;
       return true;
     });
-    // Soft fallback: if constraints filter everything, use all scores with warning
     if (filteredScores.length === 0) {
       console.warn(
         "TwoTrackCeSelector: all models filtered by constraints (contextWindow=%d, toolCalling=%s), falling back to unfiltered set",
@@ -271,7 +263,6 @@ export class TwoTrackCeSelector implements Selector {
       filteredScores = scores;
     }
 
-    // Priority: user per-request > criticality-based (when set) > config file
     const critW = req.criticality ? CRITICALITY_WEIGHTS[req.criticality] : undefined;
     const qw = req.budget.qualityWeight ?? critW?.qw ?? this.weights.qualityWeight;
     const cw = req.budget.costWeight ?? critW?.cw ?? this.weights.costWeight;
@@ -317,7 +308,6 @@ export class TwoTrackCeSelector implements Selector {
         }
       }
 
-      // Average sigma for exploration
       const sigmaValues = Object.values(ms.dimensions).map((d) => d.sigma);
       const avgSigma = sigmaValues.length > 0
         ? sigmaValues.reduce((a, b) => a + b, 0) / sigmaValues.length
@@ -326,15 +316,11 @@ export class TwoTrackCeSelector implements Selector {
       ranked.push({ modelId: ms.modelId, weighted, cost, avgSigma, info });
     }
 
-    // Budget hard filter (if set)
     if (budget.perRequest > 0) {
       const filtered = ranked.filter((r) => r.cost <= budget.perRequest);
-      // Fallback: if budget filters everything, ignore budget constraint
       if (filtered.length > 0) ranked = filtered;
     }
 
-    // Unified composite scoring: quality × qw + costEfficiency × cw + latencyEff × lw
-    // Cost efficiency is pool-relative: cheapest=1.0, most expensive=0.0
     const lw = this.weights.latencyWeight ?? 0;
     const maxWeighted = Math.max(...ranked.map((r) => r.weighted), 1);
     const minCost = ranked.length > 0 ? Math.min(...ranked.map((r) => r.cost)) : 0;
@@ -357,10 +343,9 @@ export class TwoTrackCeSelector implements Selector {
 
     let topN = ranked.slice(0, Math.min(take, ranked.length));
 
-    // Provider diversity: ensure no single provider dominates the team.
-    // Allow at most 1 model per provider initially; fill remaining slots round-robin.
+    // Provider diversity
     if (topN.length >= 2) {
-      const seen = new Map<string, number>(); // provider → count in topN
+      const seen = new Map<string, number>();
       const diverse: typeof topN = [];
       const displaced: typeof topN = [];
 
@@ -375,7 +360,6 @@ export class TwoTrackCeSelector implements Selector {
         }
       }
 
-      // Fill remaining slots from ranked models not yet selected, preferring new providers
       if (diverse.length < topN.length) {
         const selectedIds = new Set(diverse.map((r) => r.modelId));
         const candidates = ranked.filter((r) => !selectedIds.has(r.modelId));
@@ -390,12 +374,10 @@ export class TwoTrackCeSelector implements Selector {
           }
         }
 
-        // If still not enough (few providers available), add back displaced models
         for (const d of displaced) {
           if (diverse.length >= topN.length) break;
           diverse.push(d);
         }
-        // Last resort: fill from remaining candidates
         for (const c of candidates) {
           if (diverse.length >= topN.length) break;
           if (!diverse.some((r) => r.modelId === c.modelId)) {
@@ -408,7 +390,6 @@ export class TwoTrackCeSelector implements Selector {
     }
 
     // Exploration: in greedy mode, swap in an uncalibrated model.
-    // Thompson mode doesn't need this — sigma-based sampling naturally explores.
     if (!useThompson && topN.length >= 2) {
       const topNHasCalibrated = topN.some((r) => r.avgSigma < SIGMA_BASE * 0.9);
       if (topNHasCalibrated) {
@@ -421,7 +402,7 @@ export class TwoTrackCeSelector implements Selector {
       }
     }
 
-    // Single model: no ensemble, no effectiveCost
+    // Single model: no ensemble
     if (take <= 1) {
       const best = topN[0];
       if (!best) {
@@ -457,12 +438,11 @@ export class TwoTrackCeSelector implements Selector {
 }
 
 // ============================================================
-// DivergeSynthProtocol — Workers (parallel) → Leader (synthesis)
+// DivergeSynthProtocol — Workers (parallel) → Host (synthesis)
 // ============================================================
 
 /** Options for DivergeSynthProtocol constructor. */
 export interface DivergeSynthProtocolOptions {
-  readonly consensus?: ConsensusMode | string;
   readonly maxRounds?: number;
   readonly deliberateFn?: (
     team: TeamComposition,
@@ -479,7 +459,6 @@ export interface DivergeSynthProtocolOptions {
 }
 
 export class DivergeSynthProtocol implements DeliberationProtocol {
-  private readonly consensus?: ConsensusMode;
   private readonly maxRounds: number;
   private readonly protocol?: "diverge-synth" | "debate";
   private readonly retryDeps?: RetryDeps;
@@ -494,7 +473,6 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
   ) => Promise<DeliberateOutput>;
 
   constructor(opts?: DivergeSynthProtocolOptions) {
-    this.consensus = opts?.consensus === "leader_decides" ? "leader_decides" : undefined;
     this.maxRounds = opts?.maxRounds ?? 1;
     this.protocol = opts?.protocol;
     this.runDeliberation = opts?.deliberateFn ?? defaultDeliberateFn;
@@ -506,7 +484,7 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
   async deliberate(
     task: string,
     plan: EnsemblePlan,
-    scores: ModelScore[],
+    _scores: ModelScore[],
     chat: ChatFn,
     overrides?: DeliberationOverrides,
   ): Promise<DeliberationResult> {
@@ -514,27 +492,25 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
       throw new Error("DivergeSynthProtocol: plan.models must not be empty");
     }
 
-    let team = this.buildTeam(plan, scores);
+    let team = this.buildTeam(plan);
 
-    // Critique tasks need more workers for perspective diversity (4 workers + 1 leader = 5).
-    // Selector may return fewer models — augment from registry if available.
+    // Critique tasks need more workers for perspective diversity.
     const nature = overrides?.taskNature ?? "critique";
     const minTeamSize = nature === "critique" ? 5 : 3;
-    if (this.registry && team.workers.length + 1 < minTeamSize) {
-      const currentIds = new Set([...team.workers.map((w) => w.model), team.leader.model]);
+    if (this.registry && team.workers.length < minTeamSize) {
+      const currentIds = new Set(team.workers.map((w) => w.model));
       const available = this.registry.getAvailable().filter((m) => !currentIds.has(m.id));
-      const needed = minTeamSize - (team.workers.length + 1);
+      const needed = minTeamSize - team.workers.length;
       const extra = selectDiverseModels(available, needed);
       if (extra.length > 0) {
         const extraWorkers: TeamMember[] = extra.map((m) => ({ model: m.id, role: "worker" as const }));
-        team = { ...team, workers: [...team.workers, ...extraWorkers] };
+        team = { workers: [...team.workers, ...extraWorkers] };
       }
     }
 
     const input: DeliberateInput = {
       task,
       ...(overrides?.workerInstructions ? { workerInstructions: overrides.workerInstructions } : {}),
-      ...(overrides?.leaderInstructions ? { leaderInstructions: overrides.leaderInstructions } : {}),
       ...(overrides?.taskNature ? { taskNature: overrides.taskNature } : {}),
     };
 
@@ -547,44 +523,26 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
     };
 
     const effectiveProtocol = overrides?.protocol ?? this.protocol;
-    // Only use constructor consensus as default when overrides exist but didn't specify consensus.
-    // When user provides NO overrides at all, don't force consensus mode.
-    const effectiveConsensus = overrides?.consensus !== undefined
-      ? overrides.consensus
-      : (overrides ? this.consensus : undefined);
     const isDebate = effectiveProtocol === "debate";
-    // For debate: default to 3 rounds, but respect explicit user input
     const effectiveMaxRounds = overrides?.maxRounds
       ?? (isDebate ? 3 : this.maxRounds);
 
     const deps: EngineDeps = {
       chat: engineChat,
       buildWorkerMessages,
-      buildLeaderMessages,
       ...(isDebate ? { buildDebateWorkerMessages } : {}),
     };
 
-    // Derive generation params and structural tags from taskNature (parity with wire.ts)
     const workerGenParams: GenerationParams = {
       temperature: 1.0,
       top_p: 0.9,
       max_tokens: 2048,
     };
-    const leaderGenParams: GenerationParams = {
-      temperature: 0.7,
-      ...(nature === "artifact" ? {} : { max_tokens: 8192 }),
-    };
 
     const config: EngineConfig = {
       maxRounds: effectiveMaxRounds,
-      consensus: effectiveConsensus,
-      leaderContributes: overrides?.leaderContributes,
       protocol: effectiveProtocol,
-      structuralTags: nature === "critique"
-        ? ["verification", "adopted", "novel", "result"]
-        : undefined,
       workerGenParams,
-      leaderGenParams,
     };
 
     // Build retryDeps: prefer shared cooldown from constructor, create per-call fallback
@@ -596,9 +554,7 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
     const output = await this.runDeliberation(team, input, deps, config, effectiveRetryDeps);
 
     return {
-      result: output.result,
       roundsExecuted: output.roundsExecuted,
-      consensusReached: output.consensusReached,
       totalLLMCalls: output.totalLLMCalls,
       modelsUsed: [...output.modelsUsed],
       protocol: isDebate ? "debate" : "diverge-synth",
@@ -607,76 +563,14 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
     };
   }
 
-  private buildTeam(plan: EnsemblePlan, scores: ModelScore[]): TeamComposition {
-    const hasExplicitRoles = plan.models.some((m) => m.role);
-    if (hasExplicitRoles) return this.buildExplicitTeam(plan);
-    return this.buildAutoTeam(plan, scores);
-  }
-
-  private buildExplicitTeam(plan: EnsemblePlan): TeamComposition {
-    const workers: TeamMember[] = [];
-    let leader: TeamMember | undefined;
-
-    for (const m of plan.models) {
-      if (m.role === "leader" && !leader) {
-        leader = { model: m.modelId, role: "leader" };
-      } else {
-        workers.push({ model: m.modelId, role: "worker" });
-      }
-    }
-
-    if (!leader) leader = { model: plan.models[plan.models.length - 1]!.modelId, role: "leader" };
-    // If the auto-assigned leader was already in workers, remove it
-    const finalWorkers = workers.filter((w) => w.model !== leader!.model);
-    if (finalWorkers.length === 0) {
-      finalWorkers.push({ model: plan.models[0]!.modelId, role: "worker" });
-    }
-
-    return { workers: finalWorkers, leader };
-  }
-
-  private buildAutoTeam(plan: EnsemblePlan, scores: ModelScore[]): TeamComposition {
-    const scoreMap = new Map(scores.map((s) => [s.modelId, s]));
-    const modelIds = plan.models.map((m) => m.modelId);
-
-    // Leader selection via Thompson sampling on LEADER_DIMS.
-    // Stochastic sampling ensures leader rotation across calls,
-    // preventing a single model from always being selected.
-    const leaderCapabilities: Record<string, number> = {};
-    for (const { dimension, weight } of [
-      { dimension: "JUDGMENT", weight: 0.4 },
-      { dimension: "ANALYSIS", weight: 0.3 },
-      { dimension: "REASONING", weight: 0.2 },
-      { dimension: "SELF_CONSISTENCY", weight: 0.1 },
-    ]) {
-      leaderCapabilities[dimension] = weight;
-    }
-
-    let leaderId = modelIds[modelIds.length - 1]!;
-    let bestScore = -Infinity;
-    for (const id of modelIds) {
-      const ms = scoreMap.get(id);
-      if (!ms) continue;
-      const sampled = computeWeightedThompson(ms, leaderCapabilities);
-      if (sampled > bestScore) {
-        bestScore = sampled;
-        leaderId = id;
-      }
-    }
-
-    // Workers: everyone else
-    const workerIds = modelIds.filter((id) => id !== leaderId);
-    if (workerIds.length === 0) workerIds.push(leaderId);
-
-    const workers: TeamMember[] = workerIds.map((id) => ({
-      model: id,
+  private buildTeam(plan: EnsemblePlan): TeamComposition {
+    // All models are workers
+    const workers: TeamMember[] = plan.models.map((m) => ({
+      model: m.modelId,
       role: "worker" as const,
     }));
 
-    return {
-      workers,
-      leader: { model: leaderId, role: "leader" },
-    };
+    return { workers };
   }
 }
 
