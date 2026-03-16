@@ -1,0 +1,23 @@
+{
+  "skill_name": "pyreez",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Redis vs Memcached를 세션 스토어로 비교해줘. 동시 10만 사용자, failover랑 운영 복잡도 중심으로",
+      "expected_output": "Multi-model deliberation with fact-checked comparison of Redis vs Memcached covering failover, persistence, memory efficiency, and operational complexity",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "이 프로젝트의 deliberation 아키텍처를 리뷰해줘. 약점이랑 개선안을 다각도로 분석해줘",
+      "expected_output": "Multi-perspective architecture review using pyreez deliberation, with fact-verified claims about the codebase",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "마이크로서비스 vs 모놀리스, 5명 스타트업 MVP에 뭐가 맞는지 토론해봐",
+      "expected_output": "Structured debate with multiple worker perspectives, fact-checked claims, and host synthesis with acceptance verification",
+      "files": []
+    }
+  ]
+}

@@ -217,7 +217,7 @@ After:
 > `/skill-creator` (anthropics/skills)를 사용하여 스킬 재생성 + eval + A/B 비교를 단일 루프로 수행.
 > 새 대화에서 `/skill-creator`를 실행하여 진행.
 
-- [ ] **5.1** `/skill-creator`로 pyreez 스킬 재생성
+- [x] **5.1** `/skill-creator`로 pyreez 스킬 재생성
   - 새 대화에서 `/skill-creator` 실행
   - 현재 SKILL.md + 새 MCP 도구(acceptance, feedback) 컨텍스트 제공
   - skill-creator가 interview → draft → test case 생성
@@ -226,23 +226,23 @@ After:
   - SKILL.md 본문 500줄 이하 유지
   - `references/` 분할: fact-check 패턴, 토큰 예산, worker instruction 템플릿
 
-- [ ] **5.2** eval 테스트 케이스 구성 (skill-creator 루프 내)
+- [x] **5.2** eval 테스트 케이스 구성 (skill-creator 루프 내)
   - skill-creator가 test prompt 생성 → human 리뷰
   - with-skill vs without-skill baseline 병렬 실행
   - eval-viewer로 정성적 리뷰 + benchmark로 정량적 비교
 
-- [ ] **5.3** 스킬 변형 A/B 비교 (skill-creator Comparator)
+- [x] **5.3** 스킬 변형 A/B 비교 (skill-creator Comparator)
   - 변형 A: digest 공유 (Phase 2) 포함 스킬
   - 변형 B: acceptance 라운드 (Phase 3) 포함 스킬
   - blind comparison으로 품질 판정
   - 결과 기반 최종 스킬 확정
 
-- [ ] **5.4** description 최적화 (skill-creator run_loop)
+- [x] **5.4** description 최적화 (skill-creator run_loop)
   - trigger eval query 20개 생성 (should-trigger 10 + should-not-trigger 10)
   - `run_loop.py`로 description 자동 최적화
   - train/test split으로 overfitting 방지
 
-- [ ] **5.5** `scripts/available-models.ts` 추가 (선택적)
+- [x] **5.5** `scripts/available-models.ts` 추가 (선택적)
   - `!command` 동적 컨텍스트 주입용
   - scores/models.json에서 available 모델 목록 출력
 
