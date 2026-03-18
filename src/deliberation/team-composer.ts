@@ -1,5 +1,5 @@
 /**
- * Team Composer — builds worker team for leaderless deliberation.
+ * Team Composer — builds worker team for deliberation.
  *
  * All models are workers. Host handles synthesis.
  *

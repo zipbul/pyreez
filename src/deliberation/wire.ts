@@ -11,10 +11,10 @@
  */
 
 import type { ChatMessage, ChatCompletionResponse } from "../llm/types";
-import { LLMClientError } from "../llm/errors";
 import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput, GenerationParams } from "./types";
-import type { ChatResult, EngineDeps, EngineConfig, RetryDeps } from "./engine";
+import type { ChatResult, EngineDeps, EngineConfig, FallbackDeps } from "./engine";
+import { createFallbackPool } from "./engine";
 import type { DeliberationStore } from "./store-types";
 import type { ScoringSystem } from "../axis/interfaces";
 import type { PollJudgeConfig } from "./poll-judge";
@@ -25,6 +25,7 @@ import { evaluateWithPoll } from "./poll-judge";
 import {
   buildWorkerMessages,
   buildDebateWorkerMessages,
+  buildColdJoinMessages,
 } from "./prompts";
 
 // -- Public types --
@@ -71,100 +72,32 @@ type RawChatFn = (
 ) => Promise<ChatCompletionResponse>;
 
 /**
- * Retry configuration for the chat adapter.
- */
-export interface ChatAdapterOptions {
-  readonly maxRetries?: number;
-  readonly baseDelayMs?: number;
-  readonly retryableStatuses?: readonly number[];
-  readonly randomFn?: () => number;
-  readonly onRetry?: (event: RetryEvent) => void;
-  readonly maxRetryAfterMs?: number;
-}
-
-export interface RetryEvent {
-  readonly status: number;
-  readonly attempt: number;
-  readonly delayMs: number;
-  readonly model: string;
-  readonly willRetry: boolean;
-}
-
-const DEFAULT_ADAPTER_OPTIONS = {
-  maxRetries: 3,
-  baseDelayMs: 1000,
-  retryableStatuses: [429] as readonly number[],
-  randomFn: Math.random,
-};
-
-/**
  * Wrap a raw LLMClient-style chat function into the
  * `(model, messages) => Promise<ChatResult>` signature required by EngineDeps.
+ *
+ * No retry logic — errors are thrown immediately.
+ * Per-worker fallback is handled by the deliberation engine (FallbackPool).
  */
 export function createChatAdapter(
   chatFn: RawChatFn,
-  options?: ChatAdapterOptions,
 ): (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<ChatResult> {
-  const opts = { ...DEFAULT_ADAPTER_OPTIONS, ...options };
-
   return async (model, messages, params) => {
-    let lastError: unknown;
-
-    for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
-      try {
-        const response = await chatFn({
-          model,
-          messages,
-          ...(params?.temperature != null ? { temperature: params.temperature } : {}),
-          ...(params?.max_tokens != null ? { max_tokens: params.max_tokens } : {}),
-          ...(params?.top_p != null ? { top_p: params.top_p } : {}),
-        });
-        const choice = response.choices[0];
-        const raw = choice?.message?.content ?? "";
-        const truncated = choice?.finish_reason === "length";
-        return {
-          content: stripThinkTags(raw),
-          inputTokens: response.usage?.prompt_tokens ?? 0,
-          outputTokens: response.usage?.completion_tokens ?? 0,
-          ...(truncated ? { truncated } : {}),
-        };
-      } catch (error) {
-        lastError = error;
-
-        if (
-          error instanceof LLMClientError &&
-          opts.retryableStatuses.includes(error.status)
-        ) {
-          const willRetry = attempt < opts.maxRetries;
-          const rawDelay = willRetry
-            ? (error.retryAfterMs ?? opts.baseDelayMs * 2 ** attempt)
-            : 0;
-          const baseDelay =
-            willRetry && opts.maxRetryAfterMs != null
-              ? Math.min(rawDelay, opts.maxRetryAfterMs)
-              : rawDelay;
-          const jitter = willRetry ? 0.5 + opts.randomFn() * 0.5 : 1;
-          const delay = baseDelay * jitter;
-
-          opts.onRetry?.({
-            status: error.status,
-            attempt: attempt + 1,
-            delayMs: delay,
-            model,
-            willRetry,
-          });
-
-          if (willRetry) {
-            await new Promise((resolve) => setTimeout(resolve, delay));
-            continue;
-          }
-        }
-
-        throw error;
-      }
-    }
-
-    throw lastError;
+    const response = await chatFn({
+      model,
+      messages,
+      ...(params?.temperature != null ? { temperature: params.temperature } : {}),
+      ...(params?.max_tokens != null ? { max_tokens: params.max_tokens } : {}),
+      ...(params?.top_p != null ? { top_p: params.top_p } : {}),
+    });
+    const choice = response.choices[0];
+    const raw = choice?.message?.content ?? "";
+    const truncated = choice?.finish_reason === "length";
+    return {
+      content: stripThinkTags(raw),
+      inputTokens: response.usage?.prompt_tokens ?? 0,
+      outputTokens: response.usage?.completion_tokens ?? 0,
+      ...(truncated ? { truncated } : {}),
+    };
   };
 }
 
@@ -225,6 +158,7 @@ export function createDeliberateFn(
       chat: deps.chat,
       buildWorkerMessages,
       buildDebateWorkerMessages,
+      buildColdJoinMessages,
     };
 
     // 4. Build engine config
@@ -241,14 +175,17 @@ export function createDeliberateFn(
       workerGenParams,
     };
 
-    // 5. Build retryDeps for automatic team recomposition on failure
-    const retryDeps: RetryDeps = {
-      cooldown: deps.cooldown ?? createCooldownManager(),
-      getModels: () => deps.registry.getAvailable(),
-    };
+    // 5. Build fallback pool (auto mode only; manual mode = no fallback per D8)
+    let fallbackDeps: FallbackDeps | undefined;
+    if (!input.models) {
+      const cooldown = deps.cooldown ?? createCooldownManager();
+      const available = deps.registry.getAvailable();
+      const pool = createFallbackPool(available, cooldown);
+      fallbackDeps = { pool };
+    }
 
     // 6. Run deliberation
-    let result = await deliberate(team, input, engineDeps, config, retryDeps);
+    let result = await deliberate(team, input, engineDeps, config, fallbackDeps);
 
     // 7. PoLL quality evaluation + BT update (best-effort)
     if (deps.pollJudge && deps.scoring && result.rounds) {
@@ -256,9 +193,10 @@ export function createDeliberateFn(
         const lastRound = result.rounds[result.rounds.length - 1];
         if (lastRound?.responses && lastRound.responses.length >= 2) {
           const teamIds = new Set(result.modelsUsed as string[]);
-          const workerResponses = lastRound.responses.map(r => ({
+          const workerResponses = lastRound.responses.map((r, idx) => ({
             model: r.model,
             content: r.content,
+            workerIndex: idx,
             ...(r.role ? { role: r.role as import("./types").DeliberationRole } : {}),
           }));
           const pollResult = await evaluateWithPoll(
@@ -290,6 +228,7 @@ export function createDeliberateFn(
           workerInstructions: input.workerInstructions,
           protocol: input.protocol,
           ...(result.rounds ? { roundsSummary: result.rounds.map(r => ({ number: r.number })) } : {}),
+          ...(result.modelSwaps?.length ? { modelSwaps: result.modelSwaps } : {}),
         });
       } catch {
         // best-effort save — do not fail the deliberation

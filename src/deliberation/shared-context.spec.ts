@@ -4,7 +4,7 @@
  * SUT: createSharedContext, addRound, latestRound,
  *      totalLLMCalls, modelsUsed
  *
- * Leaderless model: Workers only (no leader/synthesis).
+ * Workers only (no leader/synthesis in test scope).
  */
 
 import { describe, expect, it } from "bun:test";
@@ -38,8 +38,9 @@ function makeTeam(overrides?: Partial<TeamComposition>): TeamComposition {
 function makeResponse(
   model = "openai/gpt-4.1",
   content = "function hello() { return 'world'; }",
+  workerIndex = 0,
 ): WorkerResponse {
-  return { model, content };
+  return { model, content, workerIndex };
 }
 
 function makeRound(

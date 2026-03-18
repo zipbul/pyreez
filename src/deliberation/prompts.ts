@@ -1,5 +1,5 @@
 /**
- * Deliberation prompt builders — Leaderless multi-model deliberation.
+ * Deliberation prompt builders — multi-model deliberation.
  *
  * Exported functions:
  *   buildWorkerMessages — build ChatMessage[] for a worker LLM (per-worker, role-aware)
@@ -251,7 +251,6 @@ export function buildDebateWorkerMessages(
   ctx: SharedContext,
   instructions?: string,
   roundInfo?: RoundInfo,
-  _workerModel?: string,
   workerIndex?: number,
 ): ChatMessage[] {
   const userParts: string[] = [`## Task\n${ctx.task}`];
@@ -326,6 +325,86 @@ Structure your response. Min 200 characters, max 600 words.
 
   return [
     { role: "system", content: debateContext + outputStructure },
+    { role: "user", content: userParts.join("\n\n") },
+  ];
+}
+
+// -- Cold Join (Replacement Worker in Debate R2+) --
+
+/**
+ * Build messages for a replacement worker joining a debate mid-round.
+ *
+ * Unlike buildDebateWorkerMessages, this shows the FULL debate transcript
+ * (all rounds, all workers) instead of just the last round's positions.
+ * No "Your Previous Response" section — the replacement has no prior participation.
+ */
+export function buildColdJoinMessages(
+  ctx: SharedContext,
+  instructions?: string,
+  roundInfo?: RoundInfo,
+  workerIndex?: number,
+): ChatMessage[] {
+  const userParts: string[] = [`## Task\n${ctx.task}`];
+
+  // Full debate transcript — all rounds, all workers
+  if (ctx.rounds.length > 0) {
+    const transcriptParts: string[] = [];
+    for (const round of ctx.rounds) {
+      const header = `### Round ${round.number}`;
+      const workers = round.responses
+        .map((r) => `<worker role="${r.role ?? "worker"}">\n${escapeXmlContent(extractDebateDigest(r.content))}\n</worker>`)
+        .join("\n\n");
+      transcriptParts.push(`${header}\n${workers}`);
+    }
+    userParts.push(`## Full Debate Transcript\n${transcriptParts.join("\n\n")}`);
+  }
+
+  if (roundInfo) {
+    const budget = `## Round Budget\nRound ${roundInfo.current} of ${roundInfo.max}`;
+    if (roundInfo.current === roundInfo.max) {
+      userParts.push(`${budget}\n⚠️ This is the FINAL round. State your position clearly.`);
+    } else {
+      userParts.push(budget);
+    }
+  }
+
+  const idx = workerIndex ?? 0;
+  const roleConfig = WORKER_ROLES[idx % WORKER_ROLES.length]!;
+  const nature = ctx.taskNature ?? "critique";
+
+  const coldJoinInstructions = instructions
+    ? `<host-instructions>${instructions}</host-instructions>\n\n`
+    : "";
+
+  const coldJoinContext =
+    `${coldJoinInstructions}` +
+    `<role>You are a ${roleConfig.role} joining an ongoing multi-round debate as a new participant.</role>\n\n` +
+    `<rules>\n` +
+    `- Read the full debate transcript carefully before responding.\n` +
+    `- You have no prior position to defend — this is your advantage.\n` +
+    `- Identify what ALL existing participants missed or got wrong.\n` +
+    `- Bring fresh perspective: challenge consensus, surface overlooked angles.\n` +
+    `- If you agree with an existing position, add NEW evidence or reasoning not yet presented.\n` +
+    `</rules>`;
+
+  const outputStructure = nature === "artifact"
+    ? "\n\nYour response MUST be at least 200 characters."
+    : `\n\n<output-structure>
+Structure your response. Min 200 characters, max 600 words.
+<response>
+  <position>[Core claim, 1-2 sentences]</position>
+  <evidence>[Key evidence, max 3 points]</evidence>
+  <concerns>[Risks or counterarguments]</concerns>
+  <certainty>
+    <verifiable_claims>[Claims that can be fact-checked]</verifiable_claims>
+    <assumptions>[Unstated assumptions your analysis depends on]</assumptions>
+    <uncertainty>[What you're least sure about and why]</uncertainty>
+  </certainty>
+</response>
+</output-structure>`;
+
+  return [
+    { role: "system", content: coldJoinContext + outputStructure },
     { role: "user", content: userParts.join("\n\n") },
   ];
 }

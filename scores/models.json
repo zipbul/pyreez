@@ -27,9 +27,9 @@
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 971,
-          "sigma": 100,
-          "comparisons": 0
+          "mu": 983.4622271345676,
+          "sigma": 98.12185686653771,
+          "comparisons": 1
         },
         "ANALYSIS": {
           "mu": 1000,
@@ -37,9 +37,9 @@
           "comparisons": 3
         },
         "JUDGMENT": {
-          "mu": 988.4187866396793,
-          "sigma": 308.39173600543734,
-          "comparisons": 5
+          "mu": 925.4090302537251,
+          "sigma": 290.7064433961693,
+          "comparisons": 8
         },
         "CODE_GENERATION": {
           "mu": 946.6666666666666,
@@ -58,8 +58,8 @@
         },
         "SYSTEM_THINKING": {
           "mu": 1000,
-          "sigma": 332.35174807533804,
-          "comparisons": 2
+          "sigma": 326.0412718460595,
+          "comparisons": 3
         },
         "TOOL_USE": {
           "mu": 971,
@@ -4168,9 +4168,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 694.0730751701483,
-          "sigma": 99.24251969275721,
-          "comparisons": 10
+          "mu": 707.8875874578678,
+          "sigma": 103.91140958625171,
+          "comparisons": 7
         },
         "CODE_GENERATION": {
           "mu": 743,
@@ -4286,9 +4286,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 400,
-          "sigma": 157,
-          "comparisons": 0
+          "mu": 430.1073199273117,
+          "sigma": 146.22337665587114,
+          "comparisons": 3
         },
         "CODE_GENERATION": {
           "mu": 400,
@@ -4404,9 +4404,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 755.2901327175543,
-          "sigma": 112.291493526859,
-          "comparisons": 7
+          "mu": 697.7059491802486,
+          "sigma": 117.70561952270496,
+          "comparisons": 4
         },
         "CODE_GENERATION": {
           "mu": 700,
@@ -4522,9 +4522,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 606.1257524410034,
-          "sigma": 136.5612750949076,
-          "comparisons": 1
+          "mu": 600,
+          "sigma": 140,
+          "comparisons": 0
         },
         "CODE_GENERATION": {
           "mu": 600,
@@ -4640,9 +4640,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 687.9325634659536,
-          "sigma": 99.00268062463817,
-          "comparisons": 14
+          "mu": 733.3275105726793,
+          "sigma": 100.07719607020499,
+          "comparisons": 12
         },
         "CODE_GENERATION": {
           "mu": 680,
@@ -4748,9 +4748,9 @@
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 580,
-          "sigma": 143,
-          "comparisons": 0
+          "mu": 567.5377728654324,
+          "sigma": 140.31425531914894,
+          "comparisons": 1
         },
         "ANALYSIS": {
           "mu": 580,
@@ -4758,9 +4758,9 @@
           "comparisons": 0
         },
         "JUDGMENT": {
-          "mu": 580,
-          "sigma": 143,
-          "comparisons": 0
+          "mu": 617.4029130425065,
+          "sigma": 141.3872305300645,
+          "comparisons": 1
         },
         "CODE_GENERATION": {
           "mu": 580,
@@ -4779,8 +4779,8 @@
         },
         "SYSTEM_THINKING": {
           "mu": 580,
-          "sigma": 143,
-          "comparisons": 0
+          "sigma": 140.28481012658227,
+          "comparisons": 1
         },
         "TOOL_USE": {
           "mu": 580,

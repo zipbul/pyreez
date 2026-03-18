@@ -3,7 +3,7 @@
 Heterogeneous multi-model deliberation infrastructure exposed as an [MCP](https://modelcontextprotocol.io/) server.
 
 pyreez sits between a host agent (GitHub Copilot, Claude Desktop, etc.) and multiple LLM providers.
-It routes tasks to the optimal model, orchestrates leaderless multi-model deliberation,
+It routes tasks to the optimal model, orchestrates multi-model deliberation,
 and continuously calibrates model ratings via Bradley-Terry scoring.
 
 ## Key Features
@@ -36,7 +36,7 @@ and continuously calibrates model ratings via Bradley-Terry scoring.
 |------|-------------|
 | `pyreez_route` | Route a task through PROFILE → SCORE → SELECT to find the optimal model |
 | `pyreez_scores` | Query model capability scores (filter by model, dimension, top-N) |
-| `pyreez_deliberate` | Run leaderless multi-model deliberation |
+| `pyreez_deliberate` | Run multi-model deliberation |
 | `pyreez_acceptance` | Verify host synthesis by having workers check position accuracy |
 | `pyreez_feedback` | Submit pairwise quality preferences to update model BT ratings |
 

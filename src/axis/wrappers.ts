@@ -29,13 +29,15 @@ import {
 import type { PairwiseOutcome } from "../evaluation/types";
 import type { ChatMessage } from "../llm/types";
 import { deliberate as defaultDeliberateFn } from "../deliberation/engine";
-import type { EngineDeps, EngineConfig, RetryDeps } from "../deliberation/engine";
+import type { EngineDeps, EngineConfig, FallbackDeps } from "../deliberation/engine";
+import { createFallbackPool } from "../deliberation/engine";
 import type { ChatResult } from "../axis/types";
 import { selectDiverseModels } from "../deliberation/team-composer";
 import type { DeliberateOutput } from "../deliberation/types";
 import {
   buildWorkerMessages,
   buildDebateWorkerMessages,
+  buildColdJoinMessages,
 } from "../deliberation/prompts";
 import type {
   TeamComposition,
@@ -455,9 +457,9 @@ export interface DivergeSynthProtocolOptions {
     input: DeliberateInput,
     deps: EngineDeps,
     config?: EngineConfig,
-    retryDeps?: RetryDeps,
+    fallbackDeps?: FallbackDeps,
   ) => Promise<DeliberateOutput>;
-  readonly retryDeps?: RetryDeps;
+  readonly fallbackDeps?: FallbackDeps;
   readonly protocol?: "diverge-synth" | "debate";
   readonly registry?: DspRegistryLike;
   /** Shared CooldownManager (process-scoped). When omitted, per-call instance is created. */
@@ -467,7 +469,7 @@ export interface DivergeSynthProtocolOptions {
 export class DivergeSynthProtocol implements DeliberationProtocol {
   private readonly maxRounds: number;
   private readonly protocol?: "diverge-synth" | "debate";
-  private readonly retryDeps?: RetryDeps;
+  private readonly fallbackDeps?: FallbackDeps;
   private readonly registry?: DspRegistryLike;
   private readonly sharedCooldown?: import("../deliberation/cooldown").CooldownManager;
   private readonly runDeliberation: (
@@ -475,14 +477,14 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
     input: DeliberateInput,
     deps: EngineDeps,
     config?: EngineConfig,
-    retryDeps?: RetryDeps,
+    fallbackDeps?: FallbackDeps,
   ) => Promise<DeliberateOutput>;
 
   constructor(opts?: DivergeSynthProtocolOptions) {
     this.maxRounds = opts?.maxRounds ?? 1;
     this.protocol = opts?.protocol;
     this.runDeliberation = opts?.deliberateFn ?? defaultDeliberateFn;
-    this.retryDeps = opts?.retryDeps;
+    this.fallbackDeps = opts?.fallbackDeps;
     this.registry = opts?.registry;
     this.sharedCooldown = opts?.cooldown;
   }
@@ -536,7 +538,8 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
     const deps: EngineDeps = {
       chat: engineChat,
       buildWorkerMessages,
-      ...(isDebate ? { buildDebateWorkerMessages } : {}),
+      buildDebateWorkerMessages,
+      buildColdJoinMessages,
     };
 
     const workerGenParams: GenerationParams = {
@@ -550,13 +553,15 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
       workerGenParams,
     };
 
-    // Build retryDeps: prefer shared cooldown from constructor, create per-call fallback
-    const effectiveRetryDeps = this.retryDeps ?? (this.registry ? {
-      cooldown: this.sharedCooldown ?? createCooldownManager(),
-      getModels: () => this.registry!.getAvailable(),
+    // Build fallbackDeps: create FallbackPool from available models + shared cooldown
+    const effectiveFallbackDeps: FallbackDeps | undefined = this.fallbackDeps ?? (this.registry ? {
+      pool: createFallbackPool(
+        this.registry.getAvailable(),
+        this.sharedCooldown ?? createCooldownManager(),
+      ),
     } : undefined);
 
-    const output = await this.runDeliberation(team, input, deps, config, effectiveRetryDeps);
+    const output = await this.runDeliberation(team, input, deps, config, effectiveFallbackDeps);
 
     return {
       roundsExecuted: output.roundsExecuted,
@@ -565,6 +570,7 @@ export class DivergeSynthProtocol implements DeliberationProtocol {
       protocol: isDebate ? "debate" : "diverge-synth",
       totalTokens: output.totalTokens,
       rounds: output.rounds,
+      ...(output.modelSwaps?.length ? { modelSwaps: output.modelSwaps } : {}),
     };
   }
 

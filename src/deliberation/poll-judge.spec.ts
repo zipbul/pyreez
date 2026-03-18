@@ -26,8 +26,8 @@ function makeModel(id: string, cost = 1): ModelInfo {
 }
 
 const WORKER_RESPONSES: WorkerResponse[] = [
-  { model: "anthropic/claude-sonnet-4.6", content: "Response A content" },
-  { model: "google/gemini-2.5-pro", content: "Response B content" },
+  { model: "anthropic/claude-sonnet-4.6", content: "Response A content", workerIndex: 0 },
+  { model: "google/gemini-2.5-pro", content: "Response B content", workerIndex: 1 },
 ];
 
 function makeJudgeResponse(scores: { id: number; score: number }[]): string {

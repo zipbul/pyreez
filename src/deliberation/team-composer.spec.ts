@@ -1,5 +1,5 @@
 /**
- * Unit tests for team-composer.ts — Leaderless Team Composer.
+ * Unit tests for team-composer.ts — Team Composer.
  *
  * SUT: extractProvider, scoreDimensions, selectTopModel, composeTeam
  * @module Team Composer Tests

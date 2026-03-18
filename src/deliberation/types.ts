@@ -1,5 +1,5 @@
 /**
- * Deliberation types — Leaderless multi-model deliberation.
+ * Deliberation types — multi-model deliberation.
  *
  * Workers respond independently (diverge), Host synthesizes.
  * Host provides all role prompts; pyreez provides infrastructure only.
@@ -63,7 +63,7 @@ export interface WorkerResponse {
   readonly content: string;
   readonly role?: DeliberationRole;
   /** Positional index in the diverge phase. Used for identity in debates (role can collide with 4+ workers). */
-  readonly workerIndex?: number;
+  readonly workerIndex: number;
 }
 
 /**
@@ -97,6 +97,21 @@ export interface SharedContext {
 export interface TokenUsage {
   readonly input: number;
   readonly output: number;
+}
+
+// -- Model Swap --
+
+/**
+ * Records a worker model swap during deliberation.
+ * Created when a worker fails and is replaced by a fallback model.
+ * `replacement` is undefined when no fallback is available (pool exhausted or manual mode).
+ */
+export interface ModelSwap {
+  readonly original: string;
+  readonly replacement?: string;
+  readonly round: number;
+  readonly error: string;
+  readonly httpStatus?: number;
 }
 
 // -- Deliberate Tool I/O --
@@ -139,4 +154,6 @@ export interface DeliberateOutput {
   readonly pollScores?: readonly { model: string; score: number }[];
   /** Warnings about deliberation quality (e.g., low provider diversity). */
   readonly warnings?: readonly string[];
+  /** Model swaps that occurred during deliberation (worker failure → fallback). */
+  readonly modelSwaps?: readonly ModelSwap[];
 }

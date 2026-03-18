@@ -215,6 +215,7 @@ async function main(): Promise<void> {
   const server = new PyreezMcpServer({
     mcpServer,
     registry,
+    filteredRegistry,
     deliberateFn,
     deliberationStore,
     runLogger,

@@ -1,20 +1,19 @@
 /**
- * Cooldown Manager — tracks failed models with TTL-based cooldown.
+ * Cooldown Manager — tracks failed models with session-level permanent exclusion.
  *
- * Used by the deliberation engine to exclude recently-failed models
- * during team recomposition after LLM provider errors.
+ * Used by the deliberation engine to exclude failed models
+ * during per-worker fallback after LLM provider errors.
  *
  * Features:
- *   - Error-type-aware TTL (rate_limit, server_error, timeout, auth_error, degenerate)
- *   - Escalating cooldown via failCount (TTL × 2^(failCount-1), capped)
- *   - Provider-level propagation for rate limits (429 affects all models from same provider)
+ *   - Session-level permanent exclusion (no TTL — failed models stay excluded)
+ *   - Provider-level propagation (failure affects all models from same provider)
  *
  * Pure in-memory, no I/O.
  * @module Cooldown Manager
  */
 
 /**
- * Classified error types for cooldown TTL differentiation.
+ * Classified error types for cooldown differentiation.
  */
 export type CooldownErrorType =
   | "rate_limit"
@@ -36,161 +35,85 @@ export interface CooldownEntry {
 }
 
 /**
- * Manages per-model cooldown state with TTL expiry.
+ * Manages per-model cooldown state.
  */
 export interface CooldownManager {
-  /** Add a model to cooldown with error-type-aware TTL and escalation. */
+  /** Add a model to cooldown (session-level permanent). */
   add(modelId: string, reason: string, errorType?: CooldownErrorType, ttlMs?: number): void;
-  /** Add all models from the same provider to cooldown (for rate limits). */
+  /** Add all models from the same provider to cooldown. */
   addProvider(modelId: string, reason: string, ttlMs?: number): void;
   /** Check if a model is currently on cooldown. */
   isOnCooldown(modelId: string): boolean;
-  /** Get all currently-cooled-down model IDs (cleans expired entries). */
+  /** Get all currently-cooled-down model IDs. */
   getCooledDownIds(): ReadonlySet<string>;
-  /** Get the cooldown entry for a model (undefined if not on cooldown or expired). */
+  /** Get the cooldown entry for a model (undefined if not on cooldown). */
   getEntry(modelId: string): CooldownEntry | undefined;
   /** Clear all cooldown entries. */
   clear(): void;
 }
 
-/** Default TTL per error type (milliseconds). */
-const ERROR_TYPE_TTL: Record<CooldownErrorType, number> = {
-  rate_limit: 30_000,     // 30 seconds
-  server_error: 60_000,   // 1 minute
-  timeout: 120_000,       // 2 minutes
-  auth_error: 1_800_000,  // 30 minutes (finite, not permanent)
-  degenerate: 300_000,    // 5 minutes
-  unknown: 300_000,       // 5 minutes (legacy default)
-};
-
-/** Maximum escalation multiplier cap (prevents absurd cooldowns). */
-const MAX_ESCALATION_FACTOR = 8; // 2^3 — after 4 failures, TTL stops growing
-
-const DEFAULT_TTL_MS = 600_000; // 10 minutes (fallback)
-
 import { extractProvider } from "./provider-util";
 
 /**
  * Create a CooldownManager instance.
- *
- * @param defaultTtlMs - Default TTL in milliseconds (default: 600,000 = 10 minutes).
- *                       Used when no error type is provided.
+ * Session-level: once added, models stay excluded until clear() is called.
  */
 export function createCooldownManager(
-  defaultTtlMs?: number,
+  _defaultTtlMs?: number,
 ): CooldownManager {
+  const cooledModels = new Set<string>();
+  const cooledProviders = new Set<string>();
   const entries = new Map<string, CooldownEntry>();
-  /** Provider-level cooldown: provider name → cooldownUntil timestamp. */
-  const cooledProviders = new Map<string, number>();
-  const fallbackTtl = defaultTtlMs ?? DEFAULT_TTL_MS;
-
-  function computeTtl(errorType: CooldownErrorType | undefined, explicitTtlMs: number | undefined, failCount: number): number {
-    const baseTtl = explicitTtlMs ?? (errorType ? ERROR_TYPE_TTL[errorType] : fallbackTtl);
-    const escalation = Math.min(2 ** (failCount - 1), MAX_ESCALATION_FACTOR);
-    return baseTtl * escalation;
-  }
 
   return {
-    add(modelId: string, reason: string, errorType?: CooldownErrorType, ttlMs?: number): void {
-      // Read-modify-write: preserve and increment failCount
-      const existing = entries.get(modelId);
-      const failCount = (existing ? existing.failCount : 0) + 1;
-      const effectiveType = errorType ?? "unknown";
-      const effectiveTtl = computeTtl(errorType, ttlMs, failCount);
-
+    add(modelId: string, reason: string, errorType?: CooldownErrorType): void {
+      cooledModels.add(modelId);
       entries.set(modelId, {
         modelId,
         reason,
-        cooldownUntil: Date.now() + effectiveTtl,
-        failCount,
-        errorType: effectiveType,
+        cooldownUntil: Infinity,
+        failCount: (entries.get(modelId)?.failCount ?? 0) + 1,
+        errorType: errorType ?? "unknown",
       });
     },
 
-    addProvider(modelId: string, reason: string, ttlMs?: number): void {
+    addProvider(modelId: string, reason: string): void {
       const provider = extractProvider(modelId);
-      const effectiveTtl = ttlMs ?? ERROR_TYPE_TTL.rate_limit;
-      // Provider-level cooldown: affects ALL models from this provider (even untracked ones)
-      cooledProviders.set(provider, Date.now() + effectiveTtl);
-      // Also cool down individually-tracked models from the same provider
-      for (const [id] of entries) {
-        if (extractProvider(id) === provider && id !== modelId) {
-          const existing = entries.get(id);
-          const failCount = (existing ? existing.failCount : 0) + 1;
-          entries.set(id, {
-            modelId: id,
-            reason: `provider rate limit (from ${modelId})`,
-            cooldownUntil: Date.now() + effectiveTtl,
-            failCount,
-            errorType: "rate_limit",
-          });
-        }
-      }
-      // Also cool down the original model
-      this.add(modelId, reason, "rate_limit", ttlMs);
+      cooledProviders.add(provider);
+      this.add(modelId, reason, "rate_limit");
     },
 
     isOnCooldown(modelId: string): boolean {
-      // Individual model check
-      const entry = entries.get(modelId);
-      if (entry) {
-        if (Date.now() < entry.cooldownUntil) return true;
-        entries.delete(modelId);
-      }
-      // Provider-level check (catches untracked models from cooled providers)
+      if (cooledModels.has(modelId)) return true;
       const provider = extractProvider(modelId);
-      const until = cooledProviders.get(provider);
-      if (until != null) {
-        if (Date.now() < until) return true;
-        cooledProviders.delete(provider);
-      }
-      return false;
+      return cooledProviders.has(provider);
     },
 
     getCooledDownIds(): ReadonlySet<string> {
-      const now = Date.now();
-      const active = new Set<string>();
-      for (const [id, entry] of entries) {
-        if (now < entry.cooldownUntil) {
-          active.add(id);
-        } else {
-          entries.delete(id);
-        }
-      }
-      // Clean expired provider cooldowns
-      for (const [provider, until] of cooledProviders) {
-        if (now >= until) cooledProviders.delete(provider);
-      }
-      return active;
+      return cooledModels;
     },
 
     getEntry(modelId: string): CooldownEntry | undefined {
       const entry = entries.get(modelId);
-      if (entry) {
-        if (Date.now() < entry.cooldownUntil) return entry;
-        entries.delete(modelId);
-      }
+      if (entry) return entry;
       // Synthesize entry for provider-level cooldown
       const provider = extractProvider(modelId);
-      const until = cooledProviders.get(provider);
-      if (until != null) {
-        if (Date.now() < until) {
-          return {
-            modelId,
-            reason: `provider cooldown (${provider})`,
-            cooldownUntil: until,
-            failCount: 1,
-            errorType: "rate_limit",
-          };
-        }
-        cooledProviders.delete(provider);
+      if (cooledProviders.has(provider)) {
+        return {
+          modelId,
+          reason: `provider cooldown (${provider})`,
+          cooldownUntil: Infinity,
+          failCount: 1,
+          errorType: "rate_limit",
+        };
       }
       return undefined;
     },
 
     clear(): void {
-      entries.clear();
+      cooledModels.clear();
       cooledProviders.clear();
+      entries.clear();
     },
   };
 }
@@ -200,12 +123,10 @@ export function createCooldownManager(
  * Extracts HTTP status and error type from LLMClientError when available.
  */
 export function classifyError(error: unknown): CooldownErrorType {
-  // Direct LLMClientError
   const llmError = findLLMClientError(error);
   if (llmError) {
     return classifyByStatus(llmError.status, llmError.type);
   }
-  // Degenerate response detection
   if (error instanceof Error && error.message.includes("degenerate")) {
     return "degenerate";
   }
@@ -214,8 +135,9 @@ export function classifyError(error: unknown): CooldownErrorType {
 
 /**
  * Walk the cause chain to find an LLMClientError.
+ * Exported for ModelSwap.httpStatus extraction.
  */
-function findLLMClientError(error: unknown): { status: number; type?: string } | undefined {
+export function findLLMClientError(error: unknown): { status: number; type?: string } | undefined {
   let current: unknown = error;
   for (let depth = 0; depth < 5; depth++) {
     if (current && typeof current === "object" && "status" in current && typeof (current as { status: unknown }).status === "number") {

@@ -12,7 +12,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import type { ModelRegistry } from "../model/registry";
-import type { ModelInfo } from "../model/types";
+import { type ModelInfo, ALL_DIMENSIONS } from "../model/types";
 import type { RunLogger } from "../report/run-logger";
 import type { BudgetConfig } from "../axis/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
@@ -59,6 +59,8 @@ export interface PyreezMcpServerConfig {
   chatFn?: (model: string, messages: import("../llm/types").ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
   /** Scoring system for BT feedback updates. When omitted, pyreez_feedback is unavailable. */
   scoring?: ScoringSystem;
+  /** Filtered registry (configured providers only). Used by pyreez_scores configured_only. */
+  filteredRegistry?: { getAll(): ModelInfo[]; getById(id: string): ModelInfo | undefined };
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -86,6 +88,7 @@ export class PyreezMcpServer {
   private readonly engine: PyreezEngine;
   private readonly chatFn?: PyreezMcpServerConfig["chatFn"];
   private readonly scoring?: ScoringSystem;
+  private readonly filteredRegistry?: { getAll(): ModelInfo[]; getById(id: string): ModelInfo | undefined };
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -106,6 +109,7 @@ export class PyreezMcpServer {
     this.engine = config.engine;
     this.chatFn = config.chatFn;
     this.scoring = config.scoring;
+    this.filteredRegistry = config.filteredRegistry;
 
     this.registerTools();
   }
@@ -200,6 +204,10 @@ export class PyreezMcpServer {
             .number()
             .optional()
             .describe("Return top N models sorted by score DESC (requires dimension)"),
+          configured_only: z
+            .boolean()
+            .optional()
+            .describe("When true, return only models with configured API keys (available for deliberation)"),
         }),
       },
       async (args) => this.handleScores(args),
@@ -210,7 +218,7 @@ export class PyreezMcpServer {
       {
         title: "Pyreez Deliberate",
         description:
-          "Run leaderless multi-model deliberation on a task. Workers respond independently; host synthesizes. Submit task and instructions in English.",
+          "Run multi-model deliberation on a task. Workers respond independently; host synthesizes. Submit task and instructions in English.",
         inputSchema: z.object({
           task: z.string().max(100_000).describe("Task to deliberate on"),
           domain: z
@@ -312,7 +320,7 @@ export class PyreezMcpServer {
             .array(z.object({
               winner: z.string().describe("Model ID that produced the better response"),
               loser: z.string().describe("Model ID that produced the worse response"),
-              dimension: z.string().optional().describe("Capability dimension (default: JUDGMENT)"),
+              dimension: z.enum(ALL_DIMENSIONS).optional().describe("Capability dimension (default: JUDGMENT)"),
             }))
             .min(1)
             .describe("Pairwise preferences from the deliberation"),
@@ -428,15 +436,19 @@ export class PyreezMcpServer {
     model?: string;
     dimension?: string;
     top?: number;
+    configured_only?: boolean;
   }): Promise<CallToolResult> {
     return this.logRun("scores", async () => {
+    const reg = args.configured_only && this.filteredRegistry
+      ? this.filteredRegistry
+      : this.registry;
     let models: ModelInfo[];
 
     if (args.model) {
-      const found = this.registry.getById(args.model);
+      const found = reg.getById(args.model);
       models = found ? [found] : [];
     } else {
-      models = this.registry.getAll();
+      models = reg.getAll();
     }
 
     if (args.dimension) {
@@ -555,6 +567,7 @@ export class PyreezMcpServer {
               protocol: result.protocol as "diverge-synth" | "debate" | undefined,
               workerInstructions: args.worker_instructions,
               ...(result.rounds ? { roundsSummary: result.rounds.map(r => ({ number: r.number })) } : {}),
+              ...(result.modelSwaps?.length ? { modelSwaps: result.modelSwaps } : {}),
             });
           } catch {
             // best-effort save

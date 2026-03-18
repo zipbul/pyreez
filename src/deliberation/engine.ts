@@ -1,8 +1,8 @@
 /**
- * Deliberation Engine — Leaderless multi-model execution loop.
+ * Deliberation Engine — multi-model execution loop with per-worker fallback.
  *
  * Exported functions:
- *   executeRound — single round: workers respond in parallel
+ *   executeRound — single round: workers respond in parallel with per-worker fallback
  *   deliberate — multi-round loop
  *   RoundExecutionError — identifies which role failed
  *
@@ -16,6 +16,7 @@ import type {
   DeliberateInput,
   DeliberateOutput,
   GenerationParams,
+  ModelSwap,
   Round,
   SharedContext,
   TeamComposition,
@@ -28,9 +29,8 @@ import {
   createSharedContext,
   addRound,
 } from "./shared-context";
-import { selectTopModel, SELECTION_DIMS } from "./team-composer";
 import { extractProvider } from "./provider-util";
-import { classifyError, type CooldownManager } from "./cooldown";
+import { findLLMClientError, type CooldownManager } from "./cooldown";
 
 import type { RoundInfo } from "./prompts";
 
@@ -50,7 +50,7 @@ export const MIN_WORKER_RESPONSE_LENGTH = 200;
 // -- Public Interfaces --
 
 /**
- * Error thrown by executeRound when a worker's LLM call fails.
+ * Error thrown by executeRound when all workers (including fallbacks) fail.
  */
 export class RoundExecutionError extends Error {
   constructor(
@@ -59,6 +59,8 @@ export class RoundExecutionError extends Error {
     public override readonly cause: unknown,
     /** Tokens consumed before the error occurred. */
     public readonly tokensConsumed?: TokenUsage,
+    /** Model swaps attempted before total failure. */
+    public readonly modelSwaps?: readonly ModelSwap[],
   ) {
     super(
       `${role} (${modelId}) failed: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -68,7 +70,25 @@ export class RoundExecutionError extends Error {
 }
 
 /**
- * Optional retry dependencies for automatic team recomposition on failure.
+ * Fallback pool for per-worker model replacement.
+ * Uses claim semantics: getNext() removes the model from the pool (D12).
+ */
+export interface FallbackPool {
+  /** Get next available model. Claimed on return — removed from pool. */
+  getNext(excludeIds: Set<string>): ModelInfo | undefined;
+  /** Mark failure with provider-level propagation (all models from same provider cooled). */
+  markFailed(modelId: string, reason: string): void;
+}
+
+/**
+ * Dependencies for fallback during deliberation.
+ */
+export interface FallbackDeps {
+  readonly pool: FallbackPool;
+}
+
+/**
+ * @deprecated Use FallbackDeps instead. Kept for backward compatibility with wrappers.ts.
  */
 export interface RetryDeps {
   readonly cooldown: CooldownManager;
@@ -97,7 +117,13 @@ export interface EngineDeps {
     ctx: SharedContext,
     instructions?: string,
     roundInfo?: RoundInfo,
-    workerModel?: string,
+    workerIndex?: number,
+  ) => ChatMessage[];
+  /** Cold join: replacement worker joining debate mid-round with full transcript. */
+  readonly buildColdJoinMessages?: (
+    ctx: SharedContext,
+    instructions?: string,
+    roundInfo?: RoundInfo,
     workerIndex?: number,
   ) => ChatMessage[];
 }
@@ -116,14 +142,154 @@ const DEFAULT_CONFIG: EngineConfig = {
   maxRounds: 1,
 };
 
+// -- FallbackPool Implementation --
+
+/**
+ * Create a FallbackPool from a set of candidate models and a CooldownManager.
+ * Claim semantics: getNext() removes claimed model from candidates.
+ */
+export function createFallbackPool(
+  candidates: ModelInfo[],
+  cooldown: CooldownManager,
+): FallbackPool {
+  const remaining = new Set(candidates);
+
+  return {
+    getNext(excludeIds: Set<string>): ModelInfo | undefined {
+      for (const model of remaining) {
+        if (!excludeIds.has(model.id) && !cooldown.isOnCooldown(model.id)) {
+          remaining.delete(model); // Claim — prevents concurrent double-assignment
+          return model;
+        }
+      }
+      return undefined;
+    },
+    markFailed(modelId: string, reason: string): void {
+      cooldown.add(modelId, reason);
+      cooldown.addProvider(modelId, reason);
+    },
+  };
+}
+
+// -- Per-Worker Fallback --
+
+interface WorkerCallResult {
+  response?: WorkerResponse;
+  failed: boolean;
+  degenerate?: boolean;
+  swaps: ModelSwap[];
+  tokens: TokenUsage;
+}
+
+/**
+ * Call a worker with per-worker fallback on failure.
+ * Tries the original model, then falls back to pool candidates until one succeeds or pool exhausts.
+ */
+async function callWithFallback(
+  participant: TeamMember,
+  workerIndex: number,
+  ctx: SharedContext,
+  roundNumber: number,
+  deps: EngineDeps,
+  config: EngineConfig,
+  input: DeliberateInput,
+  pool: FallbackPool | undefined,
+): Promise<WorkerCallResult> {
+  const roundInfo: RoundInfo = { current: roundNumber, max: config.maxRounds };
+  const useDebateBuilder = config.protocol === "debate" && deps.buildDebateWorkerMessages && roundNumber > 1;
+  const swaps: ModelSwap[] = [];
+  let totalInput = 0;
+  let totalOutput = 0;
+
+  // Build messages for the original worker
+  const buildMessages = (isColdJoin: boolean): ChatMessage[] => {
+    if (isColdJoin && deps.buildColdJoinMessages) {
+      return deps.buildColdJoinMessages(ctx, input.workerInstructions, roundInfo, workerIndex);
+    }
+    if (useDebateBuilder) {
+      return deps.buildDebateWorkerMessages!(ctx, input.workerInstructions, roundInfo, workerIndex);
+    }
+    return deps.buildWorkerMessages(ctx, input.workerInstructions, roundInfo, workerIndex);
+  };
+
+  // Try original model
+  let currentModel = participant.model;
+  let isColdJoin = false; // Original worker is never cold join
+
+  // Attempt loop: original → fallback1 → fallback2 → ...
+  const excludeIds = new Set<string>();
+  while (true) {
+    try {
+      const messages = buildMessages(isColdJoin);
+      const result = await deps.chat(currentModel, messages, config.workerGenParams);
+      totalInput += result.inputTokens;
+      totalOutput += result.outputTokens;
+
+      const role = assignWorkerRole(workerIndex);
+      const isDegenerate = result.content.trim().length < MIN_WORKER_RESPONSE_LENGTH;
+      return {
+        response: { model: currentModel, content: result.content, role, workerIndex },
+        failed: false,
+        degenerate: isDegenerate,
+        swaps,
+        tokens: { input: totalInput, output: totalOutput },
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const llmError = findLLMClientError(error);
+
+      // No pool → can't fallback
+      if (!pool) {
+        swaps.push({
+          original: currentModel,
+          round: roundNumber,
+          error: errorMsg,
+          ...(llmError ? { httpStatus: llmError.status } : {}),
+        });
+        return { failed: true, swaps, tokens: { input: totalInput, output: totalOutput } };
+      }
+
+      // Mark failed model — always propagates to provider level.
+      // Any error from a provider likely affects all models from that provider
+      // (spending cap, auth failure, service down, model not found, etc.)
+      pool.markFailed(currentModel, errorMsg);
+      excludeIds.add(currentModel);
+
+      // Try next from pool
+      // Exclude all current team workers to avoid replacing A with B
+      const teamExclude = new Set([
+        ...excludeIds,
+        ...ctx.team.workers.map((w) => w.model),
+      ]);
+      const next = pool.getNext(teamExclude);
+
+      swaps.push({
+        original: currentModel,
+        replacement: next?.id,
+        round: roundNumber,
+        error: errorMsg,
+        ...(llmError ? { httpStatus: llmError.status } : {}),
+      });
+
+      if (!next) {
+        // Pool exhausted — empty slot
+        return { failed: true, swaps, tokens: { input: totalInput, output: totalOutput } };
+      }
+
+      // Swap to next model
+      currentModel = next.id;
+      // Cold join: swap in R2+ debate
+      isColdJoin = roundNumber > 1 && config.protocol === "debate" && !!deps.buildColdJoinMessages;
+    }
+  }
+}
+
 // -- Round Execution --
 
 /**
  * Execute a single deliberation round:
- *   1. Workers respond independently in parallel (Promise.allSettled)
- *   2. Collect responses, track failures
- *
- * Worker errors produce fallback exclusion.
+ *   1. Workers respond in parallel with per-worker fallback (callWithFallback)
+ *   2. Collect responses, track failures and swaps
  */
 export async function executeRound(
   ctx: SharedContext,
@@ -131,67 +297,64 @@ export async function executeRound(
   deps: EngineDeps,
   config: EngineConfig,
   input: DeliberateInput,
-): Promise<{ round: Round; tokens: TokenUsage }> {
-  const roundInfo: RoundInfo = { current: roundNumber, max: config.maxRounds };
+  pool?: FallbackPool,
+): Promise<{ round: Round; tokens: TokenUsage; modelSwaps: ModelSwap[] }> {
+  const divergeParticipants = [...ctx.team.workers];
+
+  // All workers run in parallel, each with its own fallback chain
+  const results = await Promise.allSettled(
+    divergeParticipants.map((participant, index) =>
+      callWithFallback(participant, index, ctx, roundNumber, deps, config, input, pool),
+    ),
+  );
+
+  // Collect results
+  const responses: WorkerResponse[] = [];
+  const failedWorkers: { model: string; error: string }[] = [];
+  const allSwaps: ModelSwap[] = [];
   let totalInput = 0;
   let totalOutput = 0;
 
-  // 1. Diverge phase — all workers respond in parallel
-  const useDebateBuilder = config.protocol === "debate" && deps.buildDebateWorkerMessages && roundNumber > 1;
-
-  const divergeParticipants = [...ctx.team.workers];
-
-  // Per-worker messages: each worker gets role-specific prompts via workerIndex.
-  const workerPromises = divergeParticipants.map(async (participant, index) => {
-    const messages = useDebateBuilder
-      ? deps.buildDebateWorkerMessages!(ctx, input.workerInstructions, roundInfo, participant.model, index)
-      : deps.buildWorkerMessages(ctx, input.workerInstructions, roundInfo, index);
-    const result = await deps.chat(participant.model, messages, config.workerGenParams);
-    totalInput += result.inputTokens;
-    totalOutput += result.outputTokens;
-    const role = assignWorkerRole(index);
-    return { model: participant.model, content: result.content, role, workerIndex: index } as WorkerResponse;
-  });
-
-  const settled = await Promise.allSettled(workerPromises);
-
-  // If ALL participants failed, treat as a hard error
-  if (
-    divergeParticipants.length > 0 &&
-    settled.every((r) => r.status === "rejected")
-  ) {
-    const firstFailure = settled[0] as PromiseRejectedResult;
-    const failedModel = divergeParticipants[0]!.model;
-    throw new RoundExecutionError("worker", failedModel, firstFailure.reason);
-  }
-
-  // Collect successful responses and track failures
-  const responses: WorkerResponse[] = [];
-  const failedWorkers: { model: string; error: string }[] = [];
-  for (let idx = 0; idx < settled.length; idx++) {
-    const result = settled[idx]!;
+  for (let idx = 0; idx < results.length; idx++) {
+    const result = results[idx]!;
     if (result.status === "fulfilled") {
-      // Filter degenerate responses (empty, whitespace-only, below minimum length).
-      if (result.value.content.trim().length < MIN_WORKER_RESPONSE_LENGTH) {
-        const model = divergeParticipants[idx]!.model;
-        failedWorkers.push({ model, error: "degenerate response (below minimum length)" });
+      const wr = result.value;
+      totalInput += wr.tokens.input;
+      totalOutput += wr.tokens.output;
+      allSwaps.push(...wr.swaps);
+      if (wr.response && !wr.degenerate) {
+        responses.push(wr.response);
+      } else if (wr.response && wr.degenerate) {
+        // Degenerate = quality issue, not error. Include in failedWorkers for tracking
+        // but don't trigger fallback. Score penalty handled downstream (PoLL judge).
+        failedWorkers.push({
+          model: wr.response.model,
+          error: `degenerate response (below ${MIN_WORKER_RESPONSE_LENGTH} chars)`,
+        });
       } else {
-        responses.push(result.value);
+        // All fallbacks exhausted → empty slot
+        const lastSwap = wr.swaps[wr.swaps.length - 1];
+        failedWorkers.push({
+          model: divergeParticipants[idx]!.model,
+          error: lastSwap?.error ?? "unknown error",
+        });
       }
     } else {
+      // callWithFallback itself shouldn't throw, but handle defensively
       const model = divergeParticipants[idx]!.model;
       const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
       failedWorkers.push({ model, error: reason });
     }
   }
 
-  // Guard: all workers produced degenerate responses
-  if (responses.length === 0 && failedWorkers.length > 0) {
+  // Guard: all workers produced no responses
+  if (responses.length === 0 && divergeParticipants.length > 0) {
     throw new RoundExecutionError(
       "worker",
-      failedWorkers[0]!.model,
-      new Error(`All ${failedWorkers.length} worker(s) produced degenerate responses (below ${MIN_WORKER_RESPONSE_LENGTH} chars)`),
+      failedWorkers[0]?.model ?? divergeParticipants[0]!.model,
+      new Error(`All ${divergeParticipants.length} worker(s) failed after fallback exhaustion`),
       { input: totalInput, output: totalOutput },
+      allSwaps,
     );
   }
 
@@ -202,6 +365,7 @@ export async function executeRound(
       ...(failedWorkers.length > 0 ? { failedWorkers } : {}),
     },
     tokens: { input: totalInput, output: totalOutput },
+    modelSwaps: allSwaps,
   };
 }
 
@@ -214,152 +378,73 @@ export async function executeRound(
  * @param input - Task, optional instructions.
  * @param deps - Injected LLM chat + prompt builders.
  * @param config - Optional engine config (defaults: maxRounds=1).
- * @param retryDeps - Optional retry dependencies for automatic recomposition on failure.
+ * @param fallbackDeps - Optional fallback pool for per-worker model replacement.
  */
 export async function deliberate(
   team: TeamComposition,
   input: DeliberateInput,
   deps: EngineDeps,
   config?: EngineConfig,
-  retryDeps?: RetryDeps,
+  fallbackDeps?: FallbackDeps,
 ): Promise<DeliberateOutput> {
   const cfg = config ?? DEFAULT_CONFIG;
-  const maxRetries = retryDeps?.maxRetries ?? 1;
   let currentTeam = team;
   let ctx = createSharedContext(input.task, currentTeam, input.taskNature);
   let accTokens: TokenUsage = { input: 0, output: 0 };
-  // Accumulate all rounds independently of ctx (survives context resets)
   const allRounds: Round[] = [];
   const allModels = new Set<string>();
+  const allModelSwaps: ModelSwap[] = [];
   let allLLMCalls = 0;
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
-    let roundResult: { round: Round; tokens: TokenUsage };
-
-    try {
-      roundResult = await executeRound(ctx, ctx.rounds.length + 1, deps, cfg, input);
-    } catch (error) {
-      if (retryDeps && error instanceof RoundExecutionError) {
-        // Accumulate tokens consumed before the failure
-        if (error.tokensConsumed) {
-          accTokens = {
-            input: accTokens.input + error.tokensConsumed.input,
-            output: accTokens.output + error.tokensConsumed.output,
-          };
-        }
-        // Cooldown the failed model with error-type-aware TTL
-        const errorType = classifyError(error.cause);
-        retryDeps.cooldown.add(error.modelId, error.message, errorType);
-        // For rate limits, propagate cooldown to all models from the same provider
-        if (errorType === "rate_limit") {
-          retryDeps.cooldown.addProvider(error.modelId, error.message);
-        }
-        let retried = false;
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-          // All workers failed — cool down and replace the entire worker set.
-          for (const w of currentTeam.workers) {
-            retryDeps.cooldown.add(w.model, "worker-failure", errorType);
-          }
-          const usedIds = new Set([
-            ...retryDeps.cooldown.getCooledDownIds(),
-          ]);
-          const newWorkers: TeamMember[] = [];
-          for (let wi = 0; wi < currentTeam.workers.length; wi++) {
-            const replacement = selectTopModel(
-              retryDeps.getModels(),
-              SELECTION_DIMS,
-              usedIds,
-            );
-            if (!replacement) break;
-            newWorkers.push({ model: replacement.id, role: "worker" as const });
-            usedIds.add(replacement.id);
-          }
-          if (newWorkers.length === 0) break;
-          currentTeam = { workers: newWorkers };
-
-          // Rebuild context with updated team.
-          // Full retry = all workers failed, so no successful responses to preserve.
-          // Drop all rounds in debate (no cross-examination possible).
-          const previousRounds = cfg.protocol === "debate" ? [] : [...ctx.rounds];
-          ctx = createSharedContext(input.task, currentTeam, input.taskNature);
-          for (const prevRound of previousRounds) {
-            ctx = addRound(ctx, prevRound);
-          }
-
-          try {
-            // When debate rounds were dropped, use sequential number from fresh context
-            const retryRoundNumber = ctx.rounds.length + 1;
-            roundResult = await executeRound(ctx, retryRoundNumber, deps, cfg, input);
-            retried = true;
-            break;
-          } catch (retryError) {
-            if (retryError instanceof RoundExecutionError) {
-              const retryErrorType = classifyError(retryError.cause);
-              retryDeps.cooldown.add(retryError.modelId, retryError.message, retryErrorType);
-            }
-          }
-        }
-
-        if (!retried) throw error;
-      } else {
-        throw error;
-      }
-    }
+    const roundResult = await executeRound(
+      ctx, ctx.rounds.length + 1, deps, cfg, input, fallbackDeps?.pool,
+    );
 
     accTokens = {
-      input: accTokens.input + roundResult!.tokens.input,
-      output: accTokens.output + roundResult!.tokens.output,
+      input: accTokens.input + roundResult.tokens.input,
+      output: accTokens.output + roundResult.tokens.output,
     };
-    ctx = addRound(ctx, roundResult!.round);
+    allModelSwaps.push(...roundResult.modelSwaps);
 
-    // Accumulate metadata independently of ctx
-    allRounds.push(roundResult!.round);
-    allLLMCalls += roundResult!.round.responses.length + (roundResult!.round.failedWorkers?.length ?? 0);
-    for (const resp of roundResult!.round.responses) allModels.add(resp.model);
-
-    // Proactive worker replacement: swap out workers that failed this round
-    // so the next round has a better chance of success (only for multi-round)
-    if (retryDeps && roundResult!.round.failedWorkers?.length && i < cfg.maxRounds) {
-      const failedIds = new Set(roundResult!.round.failedWorkers.map((f) => f.model));
-      for (const fid of failedIds) {
-        retryDeps.cooldown.add(fid, "partial-failure", "degenerate");
-      }
-      const usedIds = new Set([
-        ...retryDeps.cooldown.getCooledDownIds(),
-        ...currentTeam.workers.map((w) => w.model),
-      ]);
-      const newWorkers = currentTeam.workers.map((w) => {
-        if (!failedIds.has(w.model)) return w;
-        const replacement = selectTopModel(retryDeps.getModels(), SELECTION_DIMS, usedIds);
-        if (!replacement) return w; // keep original if no replacement available
-        usedIds.add(replacement.id);
-        return { model: replacement.id, role: "worker" as const };
+    // Update team from actual round responses — the response's model is the FINAL
+    // model that succeeded (after all fallback hops). This correctly handles multi-hop
+    // swap chains (A→B→C→D) where the swap map would only resolve to the first hop.
+    {
+      let teamChanged = false;
+      const updatedWorkers = currentTeam.workers.map((w, idx) => {
+        const resp = roundResult.round.responses.find((r) => r.workerIndex === idx);
+        if (resp && resp.model !== w.model) {
+          teamChanged = true;
+          return { model: resp.model, role: "worker" as const };
+        }
+        return w;
       });
-      currentTeam = { workers: newWorkers };
-      // In debate mode: keep only successful responses (filter out failed workers)
-      // so replacement workers can cross-examine surviving positions.
-      // In diverge-synth: preserve all rounds as-is (prompts don't reference them).
-      const prevRounds = cfg.protocol === "debate"
-        ? ctx.rounds.map((r) => ({
-            ...r,
-            responses: r.responses.filter((resp) => !failedIds.has(resp.model)),
-          })).filter((r) => r.responses.length > 0)
-        : [...ctx.rounds];
-      ctx = createSharedContext(input.task, currentTeam, input.taskNature);
-      for (const prevRound of prevRounds) {
-        ctx = addRound(ctx, prevRound);
+      if (teamChanged) {
+        currentTeam = { workers: updatedWorkers };
+        const prevRounds = [...ctx.rounds];
+        ctx = createSharedContext(input.task, currentTeam, input.taskNature);
+        for (const prevRound of prevRounds) {
+          ctx = addRound(ctx, prevRound);
+        }
       }
     }
+
+    ctx = addRound(ctx, roundResult.round);
+
+    // Accumulate metadata
+    allRounds.push(roundResult.round);
+    allLLMCalls += roundResult.round.responses.length + (roundResult.round.failedWorkers?.length ?? 0);
+    for (const resp of roundResult.round.responses) allModels.add(resp.model);
   }
 
-  // -- Assemble output (from accumulated metadata, not ctx which may have been reset) --
+  // -- Assemble output --
   const roundsSummary = allRounds.map((r, idx) => ({
     number: idx + 1,
     responses: r.responses.map((resp) => ({ model: resp.model, content: resp.content, role: resp.role })),
     ...(r.failedWorkers?.length ? { failedWorkers: r.failedWorkers } : {}),
   }));
 
-  // Provider diversity warning
   const usedModelsList = [...allModels];
   const providers = new Set(usedModelsList.map(extractProvider));
   const warnings: string[] = [];
@@ -373,6 +458,7 @@ export async function deliberate(
     totalLLMCalls: allLLMCalls,
     modelsUsed: usedModelsList,
     rounds: roundsSummary,
+    ...(allModelSwaps.length > 0 ? { modelSwaps: allModelSwaps } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
   };
 }

@@ -250,7 +250,7 @@ async function runDeliberation(
       ? (ctx, inst?, ri?, idx?) => stripConfidence(buildWorkerMessages(ctx, inst, ri, idx))
       : buildWorkerMessages,
     buildDebateWorkerMessages: variant === "baseline"
-      ? (ctx, inst?, ri?, wm?, idx?) => stripConfidence(buildDebateWorkerMessages(ctx, inst, ri, wm, idx))
+      ? (ctx, inst?, ri?, idx?) => stripConfidence(buildDebateWorkerMessages(ctx, inst, ri, idx))
       : buildDebateWorkerMessages,
   };
 

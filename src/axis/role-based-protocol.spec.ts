@@ -358,7 +358,7 @@ describe("DivergeSynthProtocol", () => {
     const result = await proto.deliberate("Task", plan, scores, chat);
 
     expect(result.protocol).toBe("diverge-synth");
-    // Single model acts as both worker and leader
+    // Single model acts as sole worker
     expect(fakeDelib.calls.length).toBe(1);
   });
 

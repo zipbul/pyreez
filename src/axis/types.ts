@@ -92,6 +92,8 @@ export interface DeliberationResult {
   totalTokens?: { input: number; output: number };
   /** Per-round worker responses for audit trail. */
   rounds?: readonly { number: number; responses?: readonly { model: string; content: string }[]; failedWorkers?: readonly { model: string; error: string }[] }[];
+  /** Model swaps that occurred during deliberation (worker failure → fallback). */
+  modelSwaps?: readonly import("../deliberation/types").ModelSwap[];
 }
 
 // -- Scoring output: ModelScore --

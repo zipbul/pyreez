@@ -1,5 +1,5 @@
 /**
- * Unit tests for wire.ts — Integration Wiring (Leaderless model).
+ * Unit tests for wire.ts — Integration Wiring.
  *
  * SUT: stripThinkTags, createChatAdapter, createDeliberateFn
  * All external dependencies (composeTeam, deliberate, prompts) are test-doubled.
@@ -152,76 +152,20 @@ describe("createChatAdapter", () => {
     expect(result.outputTokens).toBe(60);
   });
 
-  it("should retry on 429 rate limit error", async () => {
+  it("should throw immediately on any error without retrying", async () => {
     // Arrange
     let callCount = 0;
     const rawChat = mock(() => {
       callCount++;
-      if (callCount === 1) {
-        return Promise.reject(new LLMClientError(429, "Rate limited"));
-      }
-      return Promise.resolve(makeChatResponse("Retry success", 10, 20));
+      return Promise.reject(new LLMClientError(429, "Rate limited"));
     });
-    const adapter = createChatAdapter(rawChat, {
-      maxRetries: 3,
-      baseDelayMs: 1,
-      randomFn: () => 0,
-    });
-
-    // Act
-    const result = await adapter("openai/gpt-4.1", [
-      { role: "user", content: "test" },
-    ]);
-
-    // Assert
-    expect(result.content).toBe("Retry success");
-    expect(callCount).toBe(2);
-  });
-
-  it("should throw after maxRetries exhausted", async () => {
-    // Arrange
-    const rawChat = mock(() =>
-      Promise.reject(new LLMClientError(429, "Rate limited")),
-    );
-    const adapter = createChatAdapter(rawChat, {
-      maxRetries: 2,
-      baseDelayMs: 1,
-      randomFn: () => 0,
-    });
+    const adapter = createChatAdapter(rawChat);
 
     // Act & Assert
     await expect(
       adapter("openai/gpt-4.1", [{ role: "user", content: "test" }]),
     ).rejects.toThrow("Rate limited");
-  });
-
-  it("should invoke onRetry callback on retryable error", async () => {
-    // Arrange
-    const retryEvents: any[] = [];
-    let callCount = 0;
-    const rawChat = mock(() => {
-      callCount++;
-      if (callCount <= 1) {
-        return Promise.reject(new LLMClientError(429, "Rate limited"));
-      }
-      return Promise.resolve(makeChatResponse("ok", 10, 20));
-    });
-    const adapter = createChatAdapter(rawChat, {
-      maxRetries: 3,
-      baseDelayMs: 1,
-      randomFn: () => 0,
-      onRetry: (event) => retryEvents.push(event),
-    });
-
-    // Act
-    await adapter("openai/gpt-4.1", [{ role: "user", content: "test" }]);
-
-    // Assert
-    expect(retryEvents).toHaveLength(1);
-    expect(retryEvents[0].status).toBe(429);
-    expect(retryEvents[0].attempt).toBe(1);
-    expect(retryEvents[0].model).toBe("openai/gpt-4.1");
-    expect(retryEvents[0].willRetry).toBe(true);
+    expect(callCount).toBe(1);
   });
 
   it("should strip think tags from response content", async () => {

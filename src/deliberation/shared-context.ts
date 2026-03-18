@@ -2,7 +2,7 @@
  * SharedContext factory and query utilities.
  *
  * All mutations are immutable — return new objects.
- * Leaderless model: Workers only, Host handles synthesis.
+ * Workers only, Host handles synthesis.
  */
 
 import type {

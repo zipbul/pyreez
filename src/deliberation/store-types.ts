@@ -4,7 +4,7 @@
  * @module Deliberation Store Types
  */
 
-import type { Round, TokenUsage } from "./types";
+import type { ModelSwap, Round, TokenUsage } from "./types";
 
 /**
  * A persisted record of a completed deliberation session.
@@ -23,6 +23,8 @@ export interface DeliberationRecord {
   readonly rounds?: readonly Round[];
   /** Lightweight round summaries (number only). */
   readonly roundsSummary?: readonly { number: number }[];
+  /** Model swaps that occurred during deliberation. */
+  readonly modelSwaps?: readonly ModelSwap[];
 }
 
 /**
