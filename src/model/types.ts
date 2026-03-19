@@ -48,8 +48,6 @@ export type LanguageDimension =
  */
 export type OperationalDimension = "SPEED" | "COST_EFFICIENCY";
 
-/** Set of operational dimension names — shared across wrappers and selectors. */
-export const OPERATIONAL_DIM_NAMES: ReadonlySet<string> = new Set<OperationalDimension>(["SPEED", "COST_EFFICIENCY"]);
 
 /**
  * All 21 capability dimensions.
