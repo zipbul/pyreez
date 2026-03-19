@@ -12,18 +12,16 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import type { ModelRegistry } from "../model/registry";
-import { type ModelInfo, ALL_DIMENSIONS } from "../model/types";
+import type { ModelInfo } from "../model/types";
 import type { RunLogger } from "../report/run-logger";
 import type { BudgetConfig } from "../axis/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 import type { DeliberationStore } from "../deliberation/store-types";
-import type { PyreezEngine } from "../axis/engine";
 import type { TaskClassification } from "../axis/types";
 import { resolveTaskNature, shouldAutoDebate } from "../deliberation/task-nature";
 import { NoModelsAvailableError } from "../deliberation/team-composer";
 import { buildAcceptanceMessages } from "../deliberation/prompts";
 import type { GenerationParams } from "../deliberation/types";
-import type { ScoringSystem } from "../axis/interfaces";
 
 /** Domain → default task_type mapping. Used when host omits task_type. */
 const DOMAIN_DEFAULTS: Record<string, string> = {
@@ -55,11 +53,8 @@ export interface PyreezMcpServerConfig {
   /** @deprecated Stored in wire deps. Kept for backwards compatibility with index.ts. */
   deliberationStore?: DeliberationStore;
   runLogger?: RunLogger;
-  engine: PyreezEngine;
   /** Chat function for acceptance rounds. When omitted, pyreez_acceptance is unavailable. */
   chatFn?: (model: string, messages: import("../llm/types").ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
-  /** Scoring system for BT feedback updates. When omitted, pyreez_feedback is unavailable. */
-  scoring?: ScoringSystem;
   /** Filtered registry (configured providers only). Used by pyreez_scores configured_only. */
   filteredRegistry?: { getAll(): ModelInfo[]; getById(id: string): ModelInfo | undefined };
   /** SkillCell store for binary dimension feedback. */
@@ -87,9 +82,7 @@ export class PyreezMcpServer {
   private readonly registry: ModelRegistry;
   private readonly deliberateFn?: PyreezMcpServerConfig["deliberateFn"];
   private readonly runLogger?: RunLogger;
-  private readonly engine: PyreezEngine;
   private readonly chatFn?: PyreezMcpServerConfig["chatFn"];
-  private readonly scoring?: ScoringSystem;
   private readonly filteredRegistry?: { getAll(): ModelInfo[]; getById(id: string): ModelInfo | undefined };
   private readonly skillCellStore?: import("../model/skillcell-store").SkillCellStore;
 
@@ -100,17 +93,11 @@ export class PyreezMcpServer {
     if (!config.registry) {
       throw new Error("registry is required");
     }
-    if (!config.engine) {
-      throw new Error("engine is required");
-    }
-
     this.mcpServer = config.mcpServer;
     this.registry = config.registry;
     this.deliberateFn = config.deliberateFn;
     this.runLogger = config.runLogger;
-    this.engine = config.engine;
     this.chatFn = config.chatFn;
-    this.scoring = config.scoring;
     this.filteredRegistry = config.filteredRegistry;
     this.skillCellStore = config.skillCellStore;
 
@@ -118,104 +105,6 @@ export class PyreezMcpServer {
   }
 
   private registerTools(): void {
-    this.mcpServer.registerTool(
-      "pyreez_route",
-      {
-        title: "Pyreez Route",
-        description:
-          "Route a task through PROFILE → SCORE → SELECT pipeline to find the optimal model. Domain required, task_type and complexity auto-inferred if omitted.",
-        inputSchema: z.object({
-          task: z.string().max(100_000).describe("Task description to route"),
-          budget: z
-            .number()
-            .optional()
-            .describe("Max cost per request in USD (default: 1.0)"),
-          domain: z
-            .enum([
-              "IDEATION", "PLANNING", "REQUIREMENTS", "ARCHITECTURE",
-              "CODING", "TESTING", "REVIEW", "DOCUMENTATION",
-              "DEBUGGING", "OPERATIONS", "RESEARCH", "COMMUNICATION",
-            ])
-            .describe(
-              "Task domain. Pick the closest: CODING=write/modify code, DEBUGGING=fix errors/bugs, TESTING=write/run tests, REVIEW=review/compare code, ARCHITECTURE=system design, DOCUMENTATION=docs/comments, PLANNING=scope/prioritize, REQUIREMENTS=specs/acceptance, IDEATION=brainstorm, OPERATIONS=deploy/CI/infra, RESEARCH=investigate/benchmark, COMMUNICATION=explain/summarize/translate",
-            ),
-          task_type: z
-            .enum([
-              "BRAINSTORM", "ANALOGY", "CONSTRAINT_DISCOVERY", "OPTION_GENERATION", "FEASIBILITY_QUICK",
-              "GOAL_DEFINITION", "SCOPE_DEFINITION", "PRIORITIZATION", "MILESTONE_PLANNING", "RISK_ASSESSMENT", "RESOURCE_ESTIMATION", "TRADEOFF_ANALYSIS",
-              "REQUIREMENT_EXTRACTION", "REQUIREMENT_STRUCTURING", "AMBIGUITY_DETECTION", "COMPLETENESS_CHECK", "CONFLICT_DETECTION", "ACCEPTANCE_CRITERIA",
-              "SYSTEM_DESIGN", "MODULE_DESIGN", "INTERFACE_DESIGN", "DATA_MODELING", "PATTERN_SELECTION", "DEPENDENCY_ANALYSIS", "MIGRATION_STRATEGY", "PERFORMANCE_DESIGN",
-              "CODE_PLAN", "SCAFFOLD", "IMPLEMENT_FEATURE", "IMPLEMENT_ALGORITHM", "REFACTOR", "OPTIMIZE", "TYPE_DEFINITION", "ERROR_HANDLING", "INTEGRATION", "CONFIGURATION",
-              "TEST_STRATEGY", "TEST_CASE_DESIGN", "UNIT_TEST_WRITE", "INTEGRATION_TEST_WRITE", "EDGE_CASE_DISCOVERY", "TEST_DATA_GENERATION", "COVERAGE_ANALYSIS",
-              "CODE_REVIEW", "DESIGN_REVIEW", "SECURITY_REVIEW", "PERFORMANCE_REVIEW", "CRITIQUE", "COMPARISON", "STANDARDS_COMPLIANCE",
-              "API_DOC", "TUTORIAL", "COMMENT_WRITE", "CHANGELOG", "DECISION_RECORD", "DIAGRAM",
-              "ERROR_DIAGNOSIS", "LOG_ANALYSIS", "REPRODUCTION", "ROOT_CAUSE", "FIX_PROPOSAL", "FIX_IMPLEMENT", "REGRESSION_CHECK",
-              "DEPLOY_PLAN", "CI_CD_CONFIG", "ENVIRONMENT_SETUP", "MONITORING_SETUP", "INCIDENT_RESPONSE",
-              "TECH_RESEARCH", "BENCHMARK", "COMPATIBILITY_CHECK", "BEST_PRACTICE", "TREND_ANALYSIS",
-              "SUMMARIZE", "EXPLAIN", "REPORT", "TRANSLATE", "QUESTION_ANSWER",
-            ])
-            .optional()
-            .describe(
-              "Optional. Specific task type — omit if unsure, Pyreez will use a sensible default. Common: IMPLEMENT_FEATURE, FIX_IMPLEMENT, REFACTOR, UNIT_TEST_WRITE, CODE_REVIEW, EXPLAIN, SUMMARIZE, SYSTEM_DESIGN, ERROR_DIAGNOSIS",
-            ),
-          complexity: z
-            .enum(["simple", "moderate", "complex"])
-            .optional()
-            .describe(
-              "Optional. simple=single focused task, moderate=multi-step or domain knowledge, complex=cross-cutting/architectural. Defaults to moderate.",
-            ),
-          context: z
-            .object({
-              language: z.string().optional()
-                .describe("Programming language if applicable (e.g. typescript, python)"),
-              framework: z.string().optional()
-                .describe("Framework if applicable (e.g. react, express, django)"),
-            })
-            .optional()
-            .describe("Optional coding context the host already knows"),
-          quality_weight: z
-            .number()
-            .optional()
-            .describe("Override quality weight for this request (default: from config)"),
-          cost_weight: z
-            .number()
-            .optional()
-            .describe("Override cost weight for this request (default: from config)"),
-        }),
-      },
-      async (args) => this.handleRoute(args),
-    );
-
-    this.mcpServer.registerTool(
-      "pyreez_scores",
-      {
-        title: "Pyreez Scores",
-        description:
-          "Query model capability scores from the registry",
-        inputSchema: z.object({
-          model: z
-            .string()
-            .max(200)
-            .optional()
-            .describe("Filter by model ID"),
-          dimension: z
-            .string()
-            .max(100)
-            .optional()
-            .describe("Filter by capability dimension (e.g., REASONING)"),
-          top: z
-            .number()
-            .optional()
-            .describe("Return top N models sorted by score DESC (requires dimension)"),
-          configured_only: z
-            .boolean()
-            .optional()
-            .describe("When true, return only models with configured API keys (available for deliberation)"),
-        }),
-      },
-      async (args) => this.handleScores(args),
-    );
-
     this.mcpServer.registerTool(
       "pyreez_deliberate",
       {
@@ -317,16 +206,8 @@ export class PyreezMcpServer {
       {
         title: "Pyreez Feedback",
         description:
-          "Submit pairwise quality preferences to update model BT ratings. Call after deliberation to improve future model selection.",
+          "Submit per-model binary evaluations to update SkillCell scores. Call after deliberation to improve future model selection.",
         inputSchema: z.object({
-          preferences: z
-            .array(z.object({
-              winner: z.string().describe("Model ID that produced the better response"),
-              loser: z.string().describe("Model ID that produced the worse response"),
-              dimension: z.enum(ALL_DIMENSIONS).optional().describe("Capability dimension (default: JUDGMENT)"),
-            }))
-            .min(1)
-            .describe("Pairwise preferences from the deliberation (required for BT shadow)"),
           evaluations: z
             .array(z.object({
               model_id: z.string().describe("Model ID being evaluated"),
@@ -346,7 +227,7 @@ export class PyreezMcpServer {
                 degenerate: z.boolean(),
               }).describe("Critical failure flags"),
             }))
-            .optional()
+            .min(1)
             .describe("Per-model binary evaluations for SkillCell update"),
         }),
       },
@@ -400,126 +281,6 @@ export class PyreezMcpServer {
   }
 
   // --- Tool Handlers ---
-
-  async handleRoute(args: {
-    task: string;
-    budget?: number;
-    domain: string;
-    task_type?: string;
-    complexity?: string;
-    context?: { language?: string; framework?: string };
-    quality_weight?: number;
-    cost_weight?: number;
-  }): Promise<CallToolResult> {
-    return this.logRun("route", async () => {
-    if (!args.task) {
-      return this.errorResult("Error: task is required");
-    }
-
-    try {
-      const budget: BudgetConfig = {
-        perRequest: args.budget ?? DEFAULT_BUDGET.perRequest,
-      };
-      const taskType = args.task_type ?? DOMAIN_DEFAULTS[args.domain] ?? "QUESTION_ANSWER";
-      const complexity = (args.complexity ?? inferComplexity(args.task)) as TaskClassification["complexity"];
-      const method = args.task_type ? "host" : "default";
-
-      const criticality = complexity === "complex" ? "high"
-        : complexity === "simple" ? "low"
-        : "medium";
-      const classification: TaskClassification = {
-        domain: args.domain,
-        taskType,
-        complexity,
-        criticality,
-        language: args.context?.language,
-        qualityWeight: args.quality_weight,
-        costWeight: args.cost_weight,
-      };
-      const result = await this.engine.traceOnly(args.task, budget, classification);
-
-      return this.textResult(JSON.stringify({
-        classification: { ...classification, method },
-        requirement: result.requirement,
-        selection: {
-          models: result.plan.models,
-          strategy: result.plan.strategy,
-          estimatedCost: result.plan.estimatedCost,
-          reason: result.plan.reason,
-        },
-      }, null, 2));
-    } catch (error) {
-      return this.errorResult(
-        `Error: ${sanitizeError(error)}`,
-      );
-    }
-    });
-  }
-
-  async handleScores(args: {
-    model?: string;
-    dimension?: string;
-    top?: number;
-    configured_only?: boolean;
-  }): Promise<CallToolResult> {
-    return this.logRun("scores", async () => {
-    const reg = args.configured_only && this.filteredRegistry
-      ? this.filteredRegistry
-      : this.registry;
-    let models: ModelInfo[];
-
-    if (args.model) {
-      const found = reg.getById(args.model);
-      models = found ? [found] : [];
-    } else {
-      models = reg.getAll();
-    }
-
-    if (args.dimension) {
-      const dim = args.dimension;
-      let scored = models.map((m) => {
-        const raw = (m.capabilities as Record<string, unknown>)[dim];
-        let score: number;
-        let conf: number;
-        if (raw != null && typeof raw === "object" && "mu" in raw) {
-          const bt = raw as { mu: number; sigma: number };
-          score = bt.mu;
-          conf = Math.round(Math.max(0, 1 - bt.sigma / 350) * 100) / 100;
-        } else {
-          score = typeof raw === "number" ? raw : 0;
-          conf = 0;
-        }
-        return {
-          id: m.id,
-          name: m.name,
-          score,
-          confidence: conf,
-        };
-      });
-      const allZero = scored.every((s) => s.score === 0 && s.confidence === 0);
-      if (args.top != null) {
-        scored = scored
-          .sort((a, b) => b.score - a.score)
-          .slice(0, Math.max(0, args.top));
-      }
-      if (allZero && models.length > 0) {
-        return this.textResult(JSON.stringify({
-          warning: `Dimension "${dim}" not found in any model. Valid dimensions include: REASONING, CODE_GENERATION, DEBUGGING, ANALYSIS, CREATIVITY, SYSTEM_THINKING, JUDGMENT, INSTRUCTION_FOLLOWING, etc.`,
-          models: scored,
-        }, null, 2));
-      }
-      return this.textResult(JSON.stringify(scored, null, 2));
-    }
-
-    const full = models.map((m) => ({
-      id: m.id,
-      name: m.name,
-      capabilities: m.capabilities,
-      cost: m.cost,
-    }));
-    return this.textResult(JSON.stringify(full, null, 2));
-    });
-  }
 
   async handleDeliberate(args: {
     task: string;
@@ -712,7 +473,6 @@ export class PyreezMcpServer {
   }
 
   async handleFeedback(args: {
-    preferences: { winner: string; loser: string; dimension?: string }[];
     evaluations?: {
       model_id: string; domain: string; task_type: string;
       dimensions: { factually_correct: boolean; addresses_task: boolean; provides_evidence: boolean; novel_perspective: boolean; internally_consistent: boolean };
@@ -720,62 +480,37 @@ export class PyreezMcpServer {
     }[];
   }): Promise<CallToolResult> {
     return this.logRun("feedback", async () => {
-    if (!args.preferences?.length) {
-      return this.errorResult("Error: at least one preference is required");
+    if (!this.skillCellStore) {
+      return this.errorResult("Error: feedback not available (no skillCellStore configured)");
     }
-    if (!this.scoring) {
-      return this.errorResult("Error: feedback not available (no scoring system configured)");
+    if (!args.evaluations?.length) {
+      return this.errorResult("Error: at least one evaluation is required");
     }
 
     try {
-      // BT path (preserved for shadow mode)
-      const pairwise = args.preferences.map((p) => ({
-        modelAId: p.winner,
-        modelBId: p.loser,
-        outcome: "A>>B" as const,
-        dimension: p.dimension ?? "JUDGMENT",
-      }));
-
-      await this.scoring.update(pairwise);
-
-      // SkillCell path (new — binary dimension evaluations)
-      // SkillCell path (best-effort — do not crash BT path on failure)
-      let skillCellUpdated = 0;
-      if (args.evaluations?.length && this.skillCellStore) {
-        try {
-          for (const ev of args.evaluations) {
-            this.skillCellStore.update({
-              deliberation_id: crypto.randomUUID(),
-              model_id: ev.model_id,
-              domain: ev.domain,
-              task_type: ev.task_type,
-              evaluator_id: "host",
-              dimensions: ev.dimensions,
-              failures: ev.failures,
-              timestamp: Date.now(),
-            });
-            skillCellUpdated++;
-          }
-          await this.skillCellStore.save();
-        } catch {
-          // best-effort — BT update already succeeded, don't fail the response
-        }
+      let updated = 0;
+      for (const ev of args.evaluations) {
+        this.skillCellStore.update({
+          deliberation_id: crypto.randomUUID(),
+          model_id: ev.model_id,
+          domain: ev.domain,
+          task_type: ev.task_type,
+          evaluator_id: "host",
+          dimensions: ev.dimensions,
+          failures: ev.failures,
+          timestamp: Date.now(),
+        });
+        updated++;
       }
+      await this.skillCellStore.save();
 
       const models = new Set<string>();
-      for (const p of args.preferences) {
-        models.add(p.winner);
-        models.add(p.loser);
-      }
-      if (args.evaluations) {
-        for (const ev of args.evaluations) {
-          models.add(ev.model_id);
-        }
+      for (const ev of args.evaluations) {
+        models.add(ev.model_id);
       }
 
       return this.textResult(JSON.stringify({
-        updated: pairwise.length,
-        skillCellUpdated,
+        updated,
         models: [...models],
       }, null, 2));
     } catch (error) {

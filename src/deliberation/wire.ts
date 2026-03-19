@@ -16,14 +16,11 @@ import type { DeliberateInput, DeliberateOutput, GenerationParams } from "./type
 import type { ChatResult, EngineDeps, EngineConfig, FallbackDeps } from "./engine";
 import { createFallbackPool } from "./engine";
 import type { DeliberationStore } from "./store-types";
-import type { ScoringSystem } from "../axis/interfaces";
-import type { PollJudgeConfig } from "./poll-judge";
 import { composeTeam, selectDiverseModels, orderWorkersByRole, thompsonSelect } from "./team-composer";
 import type { SkillCellStore } from "../model/skillcell-store";
 import type { ExternalEvaluator } from "./external-evaluator";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
-import { evaluateWithPoll } from "./poll-judge";
 import {
   buildWorkerMessages,
   buildDebateWorkerMessages,
@@ -43,8 +40,6 @@ export interface WireDeps {
   };
   readonly chat: (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<ChatResult>;
   readonly store?: DeliberationStore;
-  readonly pollJudge?: PollJudgeConfig;
-  readonly scoring?: ScoringSystem;
   /** Shared CooldownManager (process-scoped). When omitted, a per-call instance is created. */
   readonly cooldown?: import("./cooldown").CooldownManager;
   /** SkillCell store for Thompson Sampling model selection. */
@@ -200,34 +195,7 @@ export function createDeliberateFn(
     // 6. Run deliberation
     let result = await deliberate(team, input, engineDeps, config, fallbackDeps);
 
-    // 7. PoLL quality evaluation + BT update (best-effort)
-    if (deps.pollJudge && deps.scoring && result.rounds) {
-      try {
-        const lastRound = result.rounds[result.rounds.length - 1];
-        if (lastRound?.responses && lastRound.responses.length >= 2) {
-          const teamIds = new Set(result.modelsUsed as string[]);
-          const workerResponses = lastRound.responses.map((r, idx) => ({
-            model: r.model,
-            content: r.content,
-            workerIndex: idx,
-            ...(r.role ? { role: r.role as import("./types").DeliberationRole } : {}),
-          }));
-          const pollResult = await evaluateWithPoll(
-            input.task, workerResponses, teamIds, deps.pollJudge,
-          );
-          if (pollResult.pairwise.length > 0) {
-            await deps.scoring.update([...pollResult.pairwise]);
-          }
-          if (pollResult.workerScores.length > 0) {
-            result = { ...result, pollScores: pollResult.workerScores };
-          }
-        }
-      } catch {
-        // best-effort — do not fail deliberation
-      }
-    }
-
-    // 7.5. External evaluator → SkillCell update (best-effort)
+    // 7. External evaluator → SkillCell update (best-effort)
     if (deps.externalEvaluator && deps.skillCellStore && result.rounds && input.domain) {
       try {
         const lastRound = result.rounds[result.rounds.length - 1];

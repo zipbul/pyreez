@@ -41,6 +41,40 @@
       "task_type": "COMPARISON",
       "dimensions": {
         "factually_correct": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 3,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 2
+    },
+    "xai/grok-4:RESEARCH:COMPARISON": {
+      "model_id": "xai/grok-4",
+      "domain": "RESEARCH",
+      "task_type": "COMPARISON",
+      "dimensions": {
+        "factually_correct": {
           "alpha": 2,
           "beta": 1
         },
@@ -69,10 +103,112 @@
       },
       "total": 1
     },
-    "xai/grok-4:RESEARCH:COMPARISON": {
-      "model_id": "xai/grok-4",
+    "xai/grok-4-fast-reasoning:RESEARCH:COMPARISON": {
+      "model_id": "xai/grok-4-fast-reasoning",
       "domain": "RESEARCH",
       "task_type": "COMPARISON",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 2,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 1
+    },
+    "test/manual-eval:CODING:IMPLEMENT_FEATURE": {
+      "model_id": "test/manual-eval",
+      "domain": "CODING",
+      "task_type": "IMPLEMENT_FEATURE",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "novel_perspective": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 2,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 1
+    },
+    "anthropic/claude-opus-4.6:RESEARCH:TECH_RESEARCH": {
+      "model_id": "anthropic/claude-opus-4.6",
+      "domain": "RESEARCH",
+      "task_type": "TECH_RESEARCH",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 2,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 1
+    },
+    "xai/grok-4-1-fast-reasoning:RESEARCH:TECH_RESEARCH": {
+      "model_id": "xai/grok-4-1-fast-reasoning",
+      "domain": "RESEARCH",
+      "task_type": "TECH_RESEARCH",
       "dimensions": {
         "factually_correct": {
           "alpha": 2,

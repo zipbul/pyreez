@@ -6,8 +6,6 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { ModelRegistry } from "../model/registry";
 import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
-import type { PyreezEngine } from "../axis/engine";
-import type { SlotTrace, DeliberationResult } from "../axis/types";
 
 // --- Test Doubles ---
 
@@ -62,50 +60,6 @@ function stubRegistry(
   } as unknown as ModelRegistry;
 }
 
-const DEFAULT_TRACE_RESULT: SlotTrace = {
-  scores: [
-    {
-      modelId: "openai/gpt-4.1",
-      dimensions: { REASONING: { mu: 750, sigma: 100 } },
-      overall: 750,
-    },
-  ],
-  classified: {
-    domain: "CODING",
-    taskType: "IMPLEMENT_FEATURE",
-    complexity: "moderate",
-  },
-  requirement: {
-    capabilities: { REASONING: 0.4, CODE_GENERATION: 0.6 },
-    constraints: {},
-    budget: { maxPerRequest: 1.0 },
-  },
-  plan: {
-    models: [
-      { modelId: "openai/gpt-4.1", role: "producer", weight: 1.0 },
-    ],
-    strategy: "single",
-    estimatedCost: 0.02,
-    reason: "Best match for IMPLEMENT_FEATURE",
-  },
-};
-
-const DEFAULT_RUN_RESULT: DeliberationResult = {
-  roundsExecuted: 1,
-  totalLLMCalls: 1,
-  modelsUsed: ["openai/gpt-4.1"],
-  protocol: "single",
-  rounds: [{ number: 1, responses: [{ model: "openai/gpt-4.1", content: "function add(a, b) { return a + b; }" }] }],
-};
-
-function stubEngine(overrides: Partial<PyreezEngine> = {}): PyreezEngine {
-  return {
-    traceOnly: mock(() => Promise.resolve(DEFAULT_TRACE_RESULT)),
-    run: mock(() => Promise.resolve(DEFAULT_RUN_RESULT)),
-    runWithTrace: mock(() => Promise.resolve({ ...DEFAULT_TRACE_RESULT, result: DEFAULT_RUN_RESULT })),
-    ...overrides,
-  } as unknown as PyreezEngine;
-}
 
 function stubTransport(): Transport {
   return {} as unknown as Transport;
@@ -117,7 +71,6 @@ function validConfig(
   return {
     mcpServer: stubMcpServer(),
     registry: stubRegistry(),
-    engine: stubEngine(),
     ...overrides,
   };
 }
@@ -162,506 +115,6 @@ describe("PyreezMcpServer", () => {
       ).toThrow("registry is required");
     });
 
-    it('should throw "engine is required" when engine is missing', () => {
-      expect(
-        () =>
-          new PyreezMcpServer({
-            ...validConfig(),
-            engine: undefined as unknown as PyreezEngine,
-          }),
-      ).toThrow("engine is required");
-    });
-  });
-
-  // === pyreez_route ===
-
-  describe("pyreez_route", () => {
-    it("should return trace result JSON when task and classification are valid", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      const result = await server.handleRoute({
-        task: "implement auth module",
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-        complexity: "moderate",
-      });
-
-      expect(result.isError).toBeUndefined();
-      expect(result.content).toHaveLength(1);
-      expect(result.content[0]!.type).toBe("text");
-
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.classification.domain).toBe("CODING");
-      expect(parsed.classification.taskType).toBe("IMPLEMENT_FEATURE");
-      expect(parsed.classification.complexity).toBe("moderate");
-      expect(parsed.requirement.capabilities.REASONING).toBe(0.4);
-      expect(parsed.selection.models).toHaveLength(1);
-      expect(parsed.selection.models[0].modelId).toBe("openai/gpt-4.1");
-      expect(parsed.selection.strategy).toBe("single");
-      expect(parsed.selection.reason).toBe("Best match for IMPLEMENT_FEATURE");
-    });
-
-    it("should forward budget to engine.traceOnly when budget specified", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      await server.handleRoute({
-        task: "do something",
-        budget: 0.5,
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-        complexity: "moderate",
-      });
-
-      const call = (engine.traceOnly as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[0]).toBe("do something");
-      expect(call[1]).toEqual({ perRequest: 0.5 });
-      expect(call[2].domain).toBe("CODING");
-      expect(call[2].taskType).toBe("IMPLEMENT_FEATURE");
-      expect(call[2].complexity).toBe("moderate");
-    });
-
-    it("should use default budget when budget not specified", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      await server.handleRoute({
-        task: "do something",
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-        complexity: "moderate",
-      });
-
-      const call = (engine.traceOnly as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[0]).toBe("do something");
-      expect(call[1]).toEqual({ perRequest: 1.0 });
-      expect(call[2].domain).toBe("CODING");
-      expect(call[2].taskType).toBe("IMPLEMENT_FEATURE");
-      expect(call[2].complexity).toBe("moderate");
-    });
-
-    it("should return error when task is empty", async () => {
-      const server = new PyreezMcpServer(validConfig());
-
-      const result = await server.handleRoute({
-        task: "",
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-        complexity: "moderate",
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain("task");
-    });
-
-    it("should return error with Error.message when engine.traceOnly throws Error", async () => {
-      const engine = stubEngine({
-        traceOnly: mock(() => Promise.reject(new Error("trace exploded"))),
-      } as unknown as Partial<PyreezEngine>);
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      const result = await server.handleRoute({
-        task: "trigger error",
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-        complexity: "moderate",
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain(
-        "trace exploded",
-      );
-    });
-
-    it("should return error with String(value) when engine.traceOnly throws non-Error", async () => {
-      const engine = stubEngine({
-        traceOnly: mock(() => Promise.reject("raw string failure")),
-      } as unknown as Partial<PyreezEngine>);
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      const result = await server.handleRoute({
-        task: "trigger error",
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-        complexity: "moderate",
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain(
-        "raw string failure",
-      );
-    });
-
-    it("should pass domain, task_type, and complexity as TaskClassification to engine", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      await server.handleRoute({
-        task: "find edge cases",
-        domain: "TESTING",
-        task_type: "EDGE_CASE_DISCOVERY",
-        complexity: "complex",
-      });
-
-      const call = (engine.traceOnly as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[2].domain).toBe("TESTING");
-      expect(call[2].taskType).toBe("EDGE_CASE_DISCOVERY");
-      expect(call[2].complexity).toBe("complex");
-    });
-
-    // --- Phase 2: Optional fields ---
-
-    it("should use IMPLEMENT_FEATURE default when CODING domain without task_type", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      const result = await server.handleRoute({
-        task: "write a function",
-        domain: "CODING",
-      });
-
-      const call = (engine.traceOnly as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[2].taskType).toBe("IMPLEMENT_FEATURE");
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.classification.method).toBe("default");
-    });
-
-    it("should infer 'simple' complexity for short tasks", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      await server.handleRoute({
-        task: "fix bug",
-        domain: "DEBUGGING",
-      });
-
-      const call = (engine.traceOnly as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[2].complexity).toBe("simple");
-      expect(call[2].taskType).toBe("FIX_IMPLEMENT");
-    });
-
-    it("should infer 'complex' complexity for long tasks", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      await server.handleRoute({
-        task: "x".repeat(1001),
-        domain: "ARCHITECTURE",
-      });
-
-      const call = (engine.traceOnly as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[2].complexity).toBe("complex");
-    });
-
-    it("should pass context.language to classification", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      await server.handleRoute({
-        task: "implement a function",
-        domain: "CODING",
-        context: { language: "typescript" },
-      });
-
-      const call = (engine.traceOnly as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[2].language).toBe("typescript");
-    });
-
-    it("should report method as 'default' when task_type omitted", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      const result = await server.handleRoute({
-        task: "write tests",
-        domain: "TESTING",
-      });
-
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.classification.method).toBe("default");
-      expect(parsed.classification.taskType).toBe("UNIT_TEST_WRITE");
-    });
-
-    it("should report method as 'host' when task_type provided", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      const result = await server.handleRoute({
-        task: "review code",
-        domain: "REVIEW",
-        task_type: "SECURITY_REVIEW",
-        complexity: "complex",
-      });
-
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.classification.method).toBe("host");
-      expect(parsed.classification.taskType).toBe("SECURITY_REVIEW");
-    });
-  });
-
-  // === pyreez_scores ===
-
-  describe("pyreez_scores", () => {
-    it("should return all model scores when no filter", async () => {
-      const registry = stubRegistry();
-      const server = new PyreezMcpServer(validConfig({ registry }));
-
-      const result = await server.handleScores({});
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(2);
-      expect(parsed[0].id).toBe("openai/gpt-4.1");
-      expect(parsed[1].id).toBe("openai/gpt-4.1-mini");
-    });
-
-    it("should filter by model when model specified", async () => {
-      const registry = stubRegistry();
-      const server = new PyreezMcpServer(validConfig({ registry }));
-
-      const result = await server.handleScores({ model: "openai/gpt-4.1" });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(1);
-      expect(parsed[0].id).toBe("openai/gpt-4.1");
-    });
-
-    it("should filter by dimension when dimension specified", async () => {
-      const registry = stubRegistry({
-        getAll: mock(() => [
-          {
-            id: "openai/gpt-4.1",
-            name: "GPT-4.1",
-            contextWindow: 1048576,
-            capabilities: {
-              REASONING: { mu: 9, sigma: 70, comparisons: 10 },
-              CODE_GENERATION: { mu: 8, sigma: 105, comparisons: 10 },
-            },
-            cost: { inputPer1M: 2.0, outputPer1M: 8.0 },
-            supportsToolCalling: true,
-          },
-        ] as unknown as ModelInfo[]),
-      });
-      const server = new PyreezMcpServer(validConfig({ registry }));
-
-      const result = await server.handleScores({ dimension: "REASONING" });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(1);
-      expect(parsed[0].id).toBe("openai/gpt-4.1");
-      expect(parsed[0].score).toBe(9);
-      expect(parsed[0].confidence).toBe(0.8);
-    });
-
-    it("should return empty when unknown model specified", async () => {
-      const registry = stubRegistry();
-      const server = new PyreezMcpServer(validConfig({ registry }));
-
-      const result = await server.handleScores({
-        model: "nonexistent/model",
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(0);
-    });
-
-    it("should sort by score DESC and return top N when dimension and top specified", async () => {
-      const registry = stubRegistry({
-        getAll: mock(() => [
-          {
-            id: "model-a",
-            name: "Model A",
-            contextWindow: 128000,
-            capabilities: { REASONING: 6 },
-            confidence: { REASONING: 0.7 },
-            cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
-            supportsToolCalling: true,
-          },
-          {
-            id: "model-b",
-            name: "Model B",
-            contextWindow: 128000,
-            capabilities: { REASONING: 9 },
-            confidence: { REASONING: 0.9 },
-            cost: { inputPer1M: 2.0, outputPer1M: 4.0 },
-            supportsToolCalling: true,
-          },
-          {
-            id: "model-c",
-            name: "Model C",
-            contextWindow: 128000,
-            capabilities: { REASONING: 7 },
-            confidence: { REASONING: 0.8 },
-            cost: { inputPer1M: 1.5, outputPer1M: 3.0 },
-            supportsToolCalling: true,
-          },
-        ] as unknown as ModelInfo[]),
-      });
-      const server = new PyreezMcpServer(validConfig({ registry }));
-
-      const result = await server.handleScores({
-        dimension: "REASONING",
-        top: 2,
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(2);
-      expect(parsed[0].id).toBe("model-b");
-      expect(parsed[0].score).toBe(9);
-      expect(parsed[1].id).toBe("model-c");
-      expect(parsed[1].score).toBe(7);
-    });
-
-    it("should return only top 1 model by score when top is 1", async () => {
-      const registry = stubRegistry({
-        getAll: mock(() => [
-          {
-            id: "model-a",
-            name: "Model A",
-            contextWindow: 128000,
-            capabilities: { CODE_GENERATION: 5 },
-            confidence: { CODE_GENERATION: 0.6 },
-            cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
-            supportsToolCalling: true,
-          },
-          {
-            id: "model-b",
-            name: "Model B",
-            contextWindow: 128000,
-            capabilities: { CODE_GENERATION: 10 },
-            confidence: { CODE_GENERATION: 0.95 },
-            cost: { inputPer1M: 3.0, outputPer1M: 6.0 },
-            supportsToolCalling: true,
-          },
-        ] as unknown as ModelInfo[]),
-      });
-      const server = new PyreezMcpServer(validConfig({ registry }));
-
-      const result = await server.handleScores({
-        dimension: "CODE_GENERATION",
-        top: 1,
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(1);
-      expect(parsed[0].id).toBe("model-b");
-      expect(parsed[0].score).toBe(10);
-    });
-
-    it("should ignore top when dimension is not specified", async () => {
-      const registry = stubRegistry();
-      const server = new PyreezMcpServer(validConfig({ registry }));
-
-      const result = await server.handleScores({ top: 1 });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(2);
-    });
-
-    it("should return empty array when top is 0 with dimension", async () => {
-      const registry = stubRegistry({
-        getAll: mock(() => [
-          {
-            id: "model-a",
-            name: "Model A",
-            contextWindow: 128000,
-            capabilities: { REASONING: 8 },
-            confidence: { REASONING: 0.8 },
-            cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
-            supportsToolCalling: true,
-          },
-        ] as unknown as ModelInfo[]),
-      });
-      const server = new PyreezMcpServer(validConfig({ registry }));
-
-      const result = await server.handleScores({
-        dimension: "REASONING",
-        top: 0,
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(0);
-    });
-
-    it("should return all models when top exceeds model count", async () => {
-      const registry = stubRegistry({
-        getAll: mock(() => [
-          {
-            id: "model-a",
-            name: "Model A",
-            contextWindow: 128000,
-            capabilities: { REASONING: 8 },
-            confidence: { REASONING: 0.8 },
-            cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
-            supportsToolCalling: true,
-          },
-          {
-            id: "model-b",
-            name: "Model B",
-            contextWindow: 128000,
-            capabilities: { REASONING: 6 },
-            confidence: { REASONING: 0.7 },
-            cost: { inputPer1M: 0.5, outputPer1M: 1.0 },
-            supportsToolCalling: true,
-          },
-        ] as unknown as ModelInfo[]),
-      });
-      const server = new PyreezMcpServer(validConfig({ registry }));
-
-      const result = await server.handleScores({
-        dimension: "REASONING",
-        top: 100,
-      });
-
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(2);
-      expect(parsed[0].id).toBe("model-a");
-      expect(parsed[0].score).toBe(8);
-      expect(parsed[1].id).toBe("model-b");
-      expect(parsed[1].score).toBe(6);
-    });
-
-    it("should return BT format scores with confidence from sigma", async () => {
-      // Arrange — model with BT format capabilities {mu, sigma, comparisons}
-      const registry = stubRegistry({
-        getAll: mock(() => [
-          {
-            id: "bt-model",
-            name: "BT Model",
-            contextWindow: 128000,
-            capabilities: {
-              REASONING: { mu: 750, sigma: 100, comparisons: 20 },
-            },
-            cost: { inputPer1M: 1.0, outputPer1M: 2.0 },
-            supportsToolCalling: true,
-          },
-        ] as unknown as ModelInfo[]),
-      });
-      const server = new PyreezMcpServer(validConfig({ registry }));
-
-      // Act
-      const result = await server.handleScores({
-        dimension: "REASONING",
-        top: 1,
-      });
-
-      // Assert — should detect BT format and extract mu as score
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed).toHaveLength(1);
-      expect(parsed[0].id).toBe("bt-model");
-      expect(parsed[0].score).toBe(750);
-      // confidence = round(max(0, 1 - sigma/350) * 100) / 100
-      expect(parsed[0].confidence).toBeCloseTo(0.71, 1);
-    });
   });
 
   // === pyreez_deliberate ===
@@ -816,17 +269,6 @@ describe("PyreezMcpServer", () => {
 
     // -- auto_route tests --
 
-    it("should use deliberateFn when auto_route=true with domain/taskType", async () => {
-      const deliberateFn = stubDeliberateFn();
-      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
-
-      const result = await server.handleDeliberate({
-        task: "Implement sorting",
-        auto_route: true,
-        domain: "CODING",
-        task_type: "IMPLEMENT_ALGORITHM",
-        complexity: "moderate",
-      });
 
       expect(result.isError).toBeUndefined();
       const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
@@ -853,53 +295,16 @@ describe("PyreezMcpServer", () => {
       );
     });
 
-    it("should use domain default when auto_route=true but task_type omitted", async () => {
-      const deliberateFn = stubDeliberateFn();
-      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
-
-      const result = await server.handleDeliberate({
-        task: "task",
-        auto_route: true,
-        domain: "CODING",
-      });
 
       expect(result.isError).toBeUndefined();
       const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
       expect(callArg.taskType).toBe("IMPLEMENT_FEATURE"); // domain default
     });
 
-    it("should forward domain and taskType in auto_route mode", async () => {
-      const deliberateFn = stubDeliberateFn();
-      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
-
-      await server.handleDeliberate({
-        task: "task",
-        auto_route: true,
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-      });
 
       const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
       expect(callArg.domain).toBe("CODING");
       expect(callArg.taskType).toBe("IMPLEMENT_FEATURE");
-    });
-
-    it("should forward quality_weight and cost_weight in auto_route mode", async () => {
-      const deliberateFn = stubDeliberateFn();
-      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
-
-      await server.handleDeliberate({
-        task: "Sort an array",
-        auto_route: true,
-        domain: "CODING",
-        task_type: "IMPLEMENT_ALGORITHM",
-        quality_weight: 0.8,
-        cost_weight: 0.2,
-      });
-
-      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
-      expect(callArg.qualityWeight).toBe(0.8);
-      expect(callArg.costWeight).toBe(0.2);
     });
 
     it("should forward quality_weight and cost_weight to deliberateFn in manual deliberation", async () => {
@@ -915,21 +320,6 @@ describe("PyreezMcpServer", () => {
       const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
       expect(callArg.qualityWeight).toBe(0.9);
       expect(callArg.costWeight).toBe(0.1);
-    });
-
-    it("should return error when deliberateFn throws in auto_route mode", async () => {
-      const deliberateFn = stubDeliberateFn(undefined, new Error("deliberation failed"));
-      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
-
-      const result = await server.handleDeliberate({
-        task: "task",
-        auto_route: true,
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-      });
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain("deliberation failed");
     });
   });
 
@@ -1066,56 +456,46 @@ describe("PyreezMcpServer", () => {
   // === pyreez_feedback ===
 
   describe("pyreez_feedback", () => {
-    function stubScoring() {
-      return { getScores: mock(() => Promise.resolve([])), update: mock(() => Promise.resolve()) };
-    }
-
-    it("should update BT ratings and return updated count", async () => {
-      const scoring = stubScoring();
-      const server = new PyreezMcpServer(validConfig({ scoring }));
+    it("should update SkillCell when evaluations provided", async () => {
+      const mockStore = {
+        update: mock(() => {}),
+        save: mock(async () => {}),
+        get: mock(() => undefined),
+        getAll: mock(() => []),
+        getAllForModel: mock(() => []),
+        getAllForFamily: mock(() => []),
+        load: mock(async () => {}),
+        setFamilyLookup: mock(() => {}),
+      };
+      const server = new PyreezMcpServer(validConfig({ skillCellStore: mockStore as any }));
 
       const result = await server.handleFeedback({
-        preferences: [
-          { winner: "a/m1", loser: "b/m2" },
-          { winner: "a/m1", loser: "c/m3", dimension: "REASONING" },
-        ],
+        evaluations: [{
+          model_id: "test/m1", domain: "CODING", task_type: "IMPL",
+          dimensions: { factually_correct: true, addresses_task: true, provides_evidence: false, novel_perspective: true, internally_consistent: true },
+          failures: { hallucination: false, refusal: false, off_topic: false, degenerate: false },
+        }],
       });
 
       expect(result.isError).toBeUndefined();
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.updated).toBe(2);
-      expect(parsed.models).toContain("a/m1");
-      expect(parsed.models).toContain("b/m2");
-      expect(parsed.models).toContain("c/m3");
-      expect(scoring.update).toHaveBeenCalledTimes(1);
+      expect(parsed.updated).toBe(1);
+      expect(mockStore.update).toHaveBeenCalledTimes(1);
+      expect(mockStore.save).toHaveBeenCalledTimes(1);
     });
 
-    it("should default dimension to JUDGMENT when omitted", async () => {
-      const scoring = stubScoring();
-      const server = new PyreezMcpServer(validConfig({ scoring }));
-
-      await server.handleFeedback({
-        preferences: [{ winner: "a/m1", loser: "b/m2" }],
-      });
-
-      const call = (scoring.update as ReturnType<typeof mock>).mock.calls[0]![0];
-      expect(call[0].dimension).toBe("JUDGMENT");
-      expect(call[0].outcome).toBe("A>>B");
+    it("should return error when no evaluations", async () => {
+      const mockStore = { update: mock(() => {}), save: mock(async () => {}), get: mock(() => undefined), getAll: mock(() => []), getAllForModel: mock(() => []), getAllForFamily: mock(() => []), load: mock(async () => {}), setFamilyLookup: mock(() => {}) };
+      const server = new PyreezMcpServer(validConfig({ skillCellStore: mockStore as any }));
+      const result = await server.handleFeedback({ evaluations: [] });
+      expect(result.isError).toBe(true);
     });
 
-    it("should return error when scoring is not configured", async () => {
+    it("should return error when skillCellStore not configured", async () => {
       const server = new PyreezMcpServer(validConfig());
       const result = await server.handleFeedback({
-        preferences: [{ winner: "a/m1", loser: "b/m2" }],
+        evaluations: [{ model_id: "m1", domain: "D", task_type: "T", dimensions: { factually_correct: true, addresses_task: true, provides_evidence: true, novel_perspective: true, internally_consistent: true }, failures: { hallucination: false, refusal: false, off_topic: false, degenerate: false } }],
       });
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain("not available");
-    });
-
-    it("should return error when preferences is empty", async () => {
-      const scoring = stubScoring();
-      const server = new PyreezMcpServer(validConfig({ scoring }));
-      const result = await server.handleFeedback({ preferences: [] });
       expect(result.isError).toBe(true);
     });
   });
@@ -1192,48 +572,12 @@ describe("PyreezMcpServer", () => {
         log: mock(() => Promise.reject(new Error("log write failed"))),
         query: mock(() => Promise.resolve([])),
       };
-      const server = new PyreezMcpServer(validConfig({ runLogger }));
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ runLogger, deliberateFn }));
 
-      const result = await server.handleRoute({
-        task: "test task",
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-        complexity: "moderate",
-      });
+      const result = await server.handleDeliberate({ task: "test task" });
 
       expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse(
-        (result.content[0] as { text: string }).text,
-      );
-      expect(parsed.selection.models[0].modelId).toBe("openai/gpt-4.1");
-    });
-
-    it("should propagate original error when both handler and runLogger throw", async () => {
-      // Arrange — handler throws, runLogger.log also throws
-      const runLogger = {
-        log: mock(() => Promise.reject(new Error("log write failed"))),
-        query: mock(() => Promise.resolve([])),
-      };
-      const engine = stubEngine({
-        traceOnly: mock(() => Promise.reject(new Error("engine down"))),
-      } as unknown as Partial<PyreezEngine>);
-      const server = new PyreezMcpServer(
-        validConfig({ runLogger, engine }),
-      );
-
-      // Act — handleRoute will get error from engine, logRun catches logger failure
-      const result = await server.handleRoute({
-        task: "test task",
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-        complexity: "moderate",
-      });
-
-      // Assert — error should be from the handler, not from runLogger
-      expect(result.isError).toBe(true);
-      const text = (result.content[0] as { text: string }).text;
-      expect(text).toContain("engine down");
-      expect(text).not.toContain("log write failed");
     });
   });
 

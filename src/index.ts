@@ -24,19 +24,11 @@ import { PyreezMcpServer } from "./mcp/server";
 import { ModelRegistry } from "./model/registry";
 import { BunFileIO } from "./report/bun-file-io";
 import { FileRunLogger } from "./report/run-logger";
-import { PyreezEngine } from "./axis/engine";
 import {
-  BtScoringSystem,
   DomainOverrideProfiler,
   TwoTrackCeSelector,
   DivergeSynthProtocol,
 } from "./axis/wrappers";
-import { LocalLearningLayer } from "./axis/learning";
-import { MfLearner } from "./axis/mf-learner";
-import { NUM_TASK_TYPES } from "./axis/mf-index";
-import { KnnSelector } from "./router/knn-selector";
-import { CascadeSelector } from "./router/cascade-selector";
-import type { Selector } from "./axis/interfaces";
 import type { ChatFn } from "./axis/types";
 import type { ChatMessage } from "./llm/types";
 import { createCooldownManager } from "./deliberation/cooldown";
@@ -140,8 +132,6 @@ async function main(): Promise<void> {
   // Shared CooldownManager: process-scoped, persists across MCP calls
   const sharedCooldown = createCooldownManager();
 
-  const scoring = new BtScoringSystem({ persistIO: fileIO, scoresPath: "scores/models.json", registry });
-  const profiler = new DomainOverrideProfiler();
   // NOTE: filteredRegistry is built below (line ~189). DivergeSynthProtocol needs it
   // at construction but filteredRegistry is defined later. Hoist the definition.
   const configuredModelIds = new Set(modelIds);
@@ -151,53 +141,8 @@ async function main(): Promise<void> {
     getById: (id: string) => configuredModelIds.has(id) ? registry.getById(id) : undefined,
   };
 
-  const deliberation = new DivergeSynthProtocol({ maxRounds: 1, registry: filteredRegistry, cooldown: sharedCooldown });
 
-  // MF Learner: matrix factorization for task-type × model affinity
-  const mfLearner = new MfLearner({
-    numContexts: NUM_TASK_TYPES,
-    numModels: modelIds.length,
-    io: fileIO,
-  });
-  await mfLearner.load();
 
-  // Learning Layer: preference tracking + online BT + MF + persistence
-  const learningLayer = new LocalLearningLayer({
-    scoring,
-    io: fileIO,
-    mfLearner,
-    modelIds,
-  });
-  await learningLayer.init();
-
-  // Selector variant from config
-  let selector: Selector;
-  switch (config.routing.selector) {
-    case "knn":
-      selector = new KnnSelector({
-        preferenceTable: learningLayer.table,
-        registry,
-        ensembleSize: 3,
-        routing: config.routing,
-      });
-      break;
-    case "cascade":
-      selector = new CascadeSelector({ registry, routing: config.routing });
-      break;
-    default:
-      selector = new TwoTrackCeSelector(3, undefined, config.routing);
-  }
-
-  const engine = new PyreezEngine(
-    scoring,
-    profiler,
-    selector,
-    deliberation,
-    axisChatFn,
-    modelIds,
-    learningLayer,
-    sharedCooldown,
-  );
 
   // SkillCell store for Thompson Sampling model selection
   const { FileSkillCellStore } = await import("./model/skillcell-store");
@@ -220,11 +165,6 @@ async function main(): Promise<void> {
     chat: (model, messages, params) => chatAdapter(model, messages, params),
     store: deliberationStore,
     cooldown: sharedCooldown,
-    pollJudge: {
-      chatFn: (model, messages, params) => chatAdapter(model, messages, params),
-      getAvailableModels: () => filteredRegistry.getAvailable(),
-    },
-    scoring,
     skillCellStore,
     externalEvaluator,
   });
@@ -237,8 +177,6 @@ async function main(): Promise<void> {
     deliberateFn,
     deliberationStore,
     runLogger,
-    engine,
-    scoring,
     chatFn: (model, messages, params) => chatAdapter(model, messages, params),
     skillCellStore,
   });
@@ -246,8 +184,6 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
 
   const shutdown = async () => {
-    await learningLayer.flush();
-    await mfLearner.flush();
     await server.close();
     process.exit(0);
   };

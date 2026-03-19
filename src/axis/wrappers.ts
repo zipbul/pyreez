@@ -2,7 +2,6 @@
  * Axis wrapper classes — adapts existing implementations to pipeline interfaces.
  *
  * Fixed pipeline (no variants):
- * - BtScoringSystem — Bradley-Terry 21-dimension scoring
  * - DomainOverrideProfiler — domain → capability weight lookup
  * - TwoTrackCeSelector — hard filter + composite score + cost-efficiency
  * - DivergeSynthProtocol — Workers (parallel) → Host (synthesis)
@@ -13,20 +12,8 @@ import { profileTask } from "../profile/profiler";
 import type { CapabilityRequirement } from "../profile/types";
 import type { TaskRequirement } from "../profile/types";
 import { ModelRegistry } from "../model/registry";
-import type { CapabilityDimension, ModelInfo } from "../model/types";
-import { SIGMA_BASE, OPERATIONAL_DIM_NAMES } from "../model/types";
-import {
-  extractRatingsMap,
-  persistRatings,
-  type PersistIO,
-} from "../model/calibration";
-import {
-  updateRating as btUpdateRating,
-  getRating as btGetRating,
-  setRating as btSetRating,
-  MU_FLOOR_RATIO,
-} from "../evaluation/bt-updater";
-import type { PairwiseOutcome } from "../evaluation/types";
+import type { ModelInfo } from "../model/types";
+import { SIGMA_BASE } from "../model/types";
 import type { ChatMessage } from "../llm/types";
 import { deliberate as defaultDeliberateFn } from "../deliberation/engine";
 import type { EngineDeps, EngineConfig, FallbackDeps } from "../deliberation/engine";
@@ -59,12 +46,10 @@ import type {
   EnsemblePlan,
   ModelScore,
   BudgetConfig,
-  PairwiseResult,
   DeliberationResult,
   ChatFn,
 } from "./types";
 import type {
-  ScoringSystem,
   Profiler,
   Selector,
   DeliberationProtocol,
@@ -79,98 +64,12 @@ function getRegistry(): ModelRegistry {
   return _registry;
 }
 
-/** Operational dimensions excluded from overall quality score. */
-const OPERATIONAL_DIMS = OPERATIONAL_DIM_NAMES;
-
 /** Criticality → quality/cost weight defaults. Used by selectors when no user override. */
 const CRITICALITY_WEIGHTS: Record<string, { qw: number; cw: number }> = {
   low: { qw: 0.5, cw: 0.5 },
   medium: { qw: 0.7, cw: 0.3 },
   high: { qw: 0.85, cw: 0.15 },
 };
-
-/** Compute overall composite score from capability dimension mu values (excludes operational metrics). */
-function computeOverall(dimensions: Record<string, { mu: number; sigma: number }>): number {
-  const entries = Object.entries(dimensions)
-    .filter(([dim]) => !OPERATIONAL_DIMS.has(dim))
-    .map(([, v]) => v);
-  if (entries.length === 0) return 0;
-  return entries.reduce((sum, d) => sum + d.mu, 0) / entries.length;
-}
-
-// ============================================================
-// BtScoringSystem — Bradley-Terry 21-dimension scoring
-// ============================================================
-
-export class BtScoringSystem implements ScoringSystem {
-  private readonly persistIO?: PersistIO;
-  private readonly scoresPath: string;
-  private readonly registry: ModelRegistry;
-
-  constructor(opts?: { persistIO?: PersistIO; scoresPath?: string; registry?: ModelRegistry }) {
-    this.persistIO = opts?.persistIO;
-    this.scoresPath = opts?.scoresPath ?? "scores/models.json";
-    this.registry = opts?.registry ?? getRegistry();
-  }
-
-  async getScores(modelIds: string[]): Promise<ModelScore[]> {
-    const registry = this.registry;
-    const results: ModelScore[] = [];
-
-    for (const id of modelIds) {
-      const model = registry.getById(id);
-      if (!model) continue;
-
-      const dimensions: Record<string, { mu: number; sigma: number }> = {};
-      for (const [dim, rating] of Object.entries(model.capabilities)) {
-        dimensions[dim] = { mu: rating.mu, sigma: rating.sigma };
-      }
-
-      results.push({
-        modelId: id,
-        dimensions,
-        overall: computeOverall(dimensions),
-      });
-    }
-
-    return results;
-  }
-
-  async update(results: PairwiseResult[]): Promise<void> {
-    if (results.length === 0) return;
-
-    const VALID_OUTCOMES: string[] = ["A>>B", "A>B", "A=B", "B>A", "B>>A"];
-    const registry = this.registry;
-    const models = registry.getAll();
-    const ratings = extractRatingsMap(models);
-
-    const bootstrapFloors = new Map<string, Map<string, number>>();
-    for (const model of models) {
-      const dimFloors = new Map<string, number>();
-      for (const [dim, rating] of Object.entries(model.capabilities)) {
-        dimFloors.set(dim, rating.mu * MU_FLOOR_RATIO);
-      }
-      bootstrapFloors.set(model.id, dimFloors);
-    }
-
-    for (const r of results) {
-      if (!VALID_OUTCOMES.includes(r.outcome)) continue;
-
-      const dim = r.dimension as CapabilityDimension;
-      const rA = btGetRating(ratings, r.modelAId, dim);
-      const rB = btGetRating(ratings, r.modelBId, dim);
-      const floorA = bootstrapFloors.get(r.modelAId)?.get(dim) ?? 0;
-      const floorB = bootstrapFloors.get(r.modelBId)?.get(dim) ?? 0;
-      const { updatedA, updatedB } = btUpdateRating(rA, rB, r.outcome as PairwiseOutcome, floorA, floorB);
-      btSetRating(ratings, r.modelAId, dim, updatedA);
-      btSetRating(ratings, r.modelBId, dim, updatedB);
-    }
-
-    if (this.persistIO) {
-      await persistRatings(this.scoresPath, ratings, this.persistIO);
-    }
-  }
-}
 
 // ============================================================
 // DomainOverrideProfiler — domain → capability weight lookup
