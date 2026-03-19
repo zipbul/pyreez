@@ -9,10 +9,10 @@ export interface RoutingConfig {
   qualityWeight: number;
   /** Weight for cost efficiency (default: 0.3). */
   costWeight: number;
-  /** Selector variant. Default: "bt-ce". */
-  selector?: "bt-ce" | "knn" | "cascade";
-  /** Exploration strategy. Default: "thompson". */
-  exploration?: "greedy" | "thompson";
+  /** @deprecated Selector variant — no longer used. Thompson Sampling via SkillCell replaced all selectors. */
+  selector?: string;
+  /** @deprecated Exploration strategy — Thompson Sampling handles exploration automatically. */
+  exploration?: string;
   /** Weight for latency efficiency (default: 0, disabled). */
   latencyWeight?: number;
 }
