@@ -314,7 +314,7 @@ export function shouldExclude(cell: SkillCell | null | undefined): boolean {
   const n = fc.alpha + fc.beta - 2; // subtract 2 for initial priors
   if (n < MIN_OBS_FOR_EXCLUSION) return false;
 
-  const passRate = fc.alpha / (fc.alpha + fc.beta);
+  const passRate = (fc.alpha - 1) / n; // observation-only rate, excluding priors
   return wilsonLower(passRate, n) < EXCLUSION_THRESHOLD;
 }
 
@@ -424,8 +424,11 @@ export function thompsonSelect(
 
   // Reserve 1 slot for cold-start if available and count >= 3
   if (coldModels.length > 0 && count >= 3) {
-    // Reserve 1 slot for cold-start exploration
-    const coldPick = coldModels[Math.floor(Math.random() * coldModels.length)]!;
+    // Reserve 1 slot for cold-start exploration — prefer different provider from warm top picks
+    const warmProviders = new Set(samples.slice(0, count).map(s => s.model.provider));
+    const diverseCold = coldModels.filter(m => !warmProviders.has(m.provider));
+    const coldPool = diverseCold.length > 0 ? diverseCold : coldModels;
+    const coldPick = coldPool[Math.floor(Math.random() * coldPool.length)]!;
     selected.push(coldPick);
     providerCounts.set(coldPick.provider, 1);
   }

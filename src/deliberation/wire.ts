@@ -143,9 +143,14 @@ export function createDeliberateFn(
       const MAX_AUTO_TEAM = input.taskNature === "artifact" ? 3 : 5;
 
       // Thompson Sampling if SkillCell store is available and domain is known
-      const selected = (deps.skillCellStore && input.domain)
+      let selected = (deps.skillCellStore && input.domain)
         ? thompsonSelect(input.domain, input.taskType ?? "QUESTION_ANSWER", available, MAX_AUTO_TEAM, deps.skillCellStore)
         : selectDiverseModels(available, MAX_AUTO_TEAM);
+
+      // Fallback: if TS excluded too many and returned fewer than 2, use selectDiverseModels
+      if (selected.length < 2 && available.length >= 2) {
+        selected = selectDiverseModels(available, MAX_AUTO_TEAM);
+      }
       const modelIds = selected.map((m) => m.id);
       team = composeTeam(
         { task: input.task, modelIds },
