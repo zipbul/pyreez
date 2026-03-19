@@ -12,9 +12,9 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 945.7854319045786,
-          "sigma": 316.0992325150327,
-          "comparisons": 5
+          "mu": 980.444556685608,
+          "sigma": 320.2410383639308,
+          "comparisons": 4
         },
         "MATH_REASONING": {
           "mu": 846,
@@ -27,14 +27,14 @@
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 984.3167794632438,
-          "sigma": 98.30046674445741,
-          "comparisons": 1
+          "mu": 997.1726157494866,
+          "sigma": 96.60690550445207,
+          "comparisons": 2
         },
         "ANALYSIS": {
           "mu": 1000,
-          "sigma": 317.47445517616194,
-          "comparisons": 4
+          "sigma": 311.87196479070025,
+          "comparisons": 5
         },
         "JUDGMENT": {
           "mu": 976.1338419865187,
@@ -117,7 +117,8 @@
           "comparisons": 0
         }
       },
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "family": "claude-4"
     },
     "anthropic/claude-sonnet-4.6": {
       "name": "Claude Sonnet 4.6",
@@ -235,7 +236,8 @@
           "comparisons": 0
         }
       },
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "family": "claude-4"
     },
     "anthropic/claude-haiku-4.5": {
       "name": "Claude Haiku 4.5",
@@ -353,7 +355,8 @@
           "comparisons": 0
         }
       },
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "family": "claude-4"
     },
     "google/gemini-2.5-pro": {
       "name": "Gemini 2.5 Pro",
@@ -471,7 +474,8 @@
           "comparisons": 0
         }
       },
-      "available": true
+      "available": true,
+      "family": "gemini-2"
     },
     "google/gemini-2.5-flash": {
       "name": "Gemini 2.5 Flash",
@@ -589,7 +593,8 @@
           "comparisons": 0
         }
       },
-      "available": true
+      "available": true,
+      "family": "gemini-2"
     },
     "google/gemini-2.5-flash-lite": {
       "name": "Gemini 2.5 Flash-Lite",
@@ -707,7 +712,8 @@
           "comparisons": 0
         }
       },
-      "available": true
+      "available": true,
+      "family": "gemini-2"
     },
     "google/gemini-2.0-flash": {
       "name": "Gemini 2.0 Flash",
@@ -825,7 +831,8 @@
           "comparisons": 0
         }
       },
-      "available": false
+      "available": false,
+      "family": "gemini-2"
     },
     "google/gemini-2.0-flash-lite": {
       "name": "Gemini 2.0 Flash-Lite",
@@ -943,7 +950,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "gemini-2"
     },
     "google/gemini-3-flash-preview": {
       "name": "Gemini 3 Flash (Preview)",
@@ -1061,7 +1069,8 @@
           "comparisons": 0
         }
       },
-      "available": true
+      "available": true,
+      "family": "gemini-3"
     },
     "google/gemini-3-pro-preview": {
       "name": "Gemini 3 Pro (Preview)",
@@ -1179,7 +1188,8 @@
           "comparisons": 0
         }
       },
-      "available": false
+      "available": false,
+      "family": "gemini-3"
     },
     "google/gemini-3.1-pro-preview": {
       "name": "Gemini 3.1 Pro (Preview)",
@@ -1297,7 +1307,8 @@
           "comparisons": 0
         }
       },
-      "available": true
+      "available": true,
+      "family": "gemini-3"
     },
     "google/gemini-3.1-flash-lite-preview": {
       "name": "Gemini 3.1 Flash-Lite (Preview)",
@@ -1311,9 +1322,9 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 584.9247132189276,
-          "sigma": 127.7985333729575,
-          "comparisons": 1
+          "mu": 600,
+          "sigma": 130,
+          "comparisons": 0
         },
         "MATH_REASONING": {
           "mu": 600,
@@ -1415,7 +1426,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "gemini-3"
     },
     "anthropic/claude-sonnet-4.5": {
       "name": "Claude Sonnet 4.5",
@@ -1533,7 +1545,8 @@
           "comparisons": 0
         }
       },
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "family": "claude-4"
     },
     "anthropic/claude-opus-4.5": {
       "name": "Claude Opus 4.5",
@@ -1651,7 +1664,8 @@
           "comparisons": 0
         }
       },
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "family": "claude-4"
     },
     "anthropic/claude-opus-4.1": {
       "name": "Claude Opus 4.1",
@@ -1769,7 +1783,8 @@
           "comparisons": 0
         }
       },
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "family": "claude-4"
     },
     "anthropic/claude-sonnet-4": {
       "name": "Claude Sonnet 4",
@@ -1887,7 +1902,8 @@
           "comparisons": 0
         }
       },
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "family": "claude-4"
     },
     "anthropic/claude-opus-4": {
       "name": "Claude Opus 4",
@@ -2005,7 +2021,8 @@
           "comparisons": 0
         }
       },
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "family": "claude-4"
     },
     "openai/gpt-4.1": {
       "name": "GPT-4.1",
@@ -2123,7 +2140,8 @@
         }
       },
       "provider": "openai",
-      "available": false
+      "available": false,
+      "family": "gpt-4"
     },
     "openai/gpt-4.1-mini": {
       "name": "GPT-4.1 mini",
@@ -2241,7 +2259,8 @@
         }
       },
       "provider": "openai",
-      "available": false
+      "available": false,
+      "family": "gpt-4"
     },
     "openai/gpt-4.1-nano": {
       "name": "GPT-4.1 nano",
@@ -2359,7 +2378,8 @@
         }
       },
       "provider": "openai",
-      "available": false
+      "available": false,
+      "family": "gpt-4"
     },
     "openai/gpt-4o": {
       "name": "GPT-4o",
@@ -2477,7 +2497,8 @@
         }
       },
       "provider": "openai",
-      "available": false
+      "available": false,
+      "family": "gpt-4"
     },
     "openai/gpt-4o-mini": {
       "name": "GPT-4o mini",
@@ -2595,7 +2616,8 @@
         }
       },
       "provider": "openai",
-      "available": false
+      "available": false,
+      "family": "gpt-4"
     },
     "openai/o3": {
       "name": "o3",
@@ -2713,7 +2735,8 @@
         }
       },
       "provider": "openai",
-      "available": false
+      "available": false,
+      "family": "gpt-5"
     },
     "openai/o4-mini": {
       "name": "o4-mini",
@@ -2831,7 +2854,8 @@
         }
       },
       "provider": "openai",
-      "available": false
+      "available": false,
+      "family": "gpt-5"
     },
     "openai/gpt-5.3": {
       "name": "GPT-5.3",
@@ -2949,7 +2973,8 @@
           "comparisons": 0
         }
       },
-      "provider": "openai"
+      "provider": "openai",
+      "family": "gpt-5"
     },
     "local/ai/deepseek-r1-distill-llama": {
       "name": "DeepSeek R1 Distill Llama",
@@ -3067,7 +3092,8 @@
           "comparisons": 0
         }
       },
-      "provider": "local"
+      "provider": "local",
+      "family": "deepseek-r1-distill"
     },
     "local/ai/qwen3-coder": {
       "name": "Qwen3 Coder",
@@ -3185,7 +3211,8 @@
           "comparisons": 0
         }
       },
-      "provider": "local"
+      "provider": "local",
+      "family": "qwen-3"
     },
     "local/ai/phi4": {
       "name": "Phi-4",
@@ -3303,7 +3330,8 @@
           "comparisons": 0
         }
       },
-      "provider": "local"
+      "provider": "local",
+      "family": "phi-4"
     },
     "openai/gpt-5.2": {
       "name": "GPT-5.2",
@@ -3421,7 +3449,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "gpt-5"
     },
     "openai/gpt-5": {
       "name": "GPT-5",
@@ -3539,7 +3568,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "gpt-5"
     },
     "openai/gpt-5-mini": {
       "name": "GPT-5 Mini",
@@ -3657,7 +3687,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "gpt-5"
     },
     "openai/gpt-5-nano": {
       "name": "GPT-5 Nano",
@@ -3775,7 +3806,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "gpt-5"
     },
     "deepseek/deepseek-v3.2": {
       "name": "DeepSeek V3.2",
@@ -3893,7 +3925,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "deepseek-v3"
     },
     "deepseek/deepseek-r1": {
       "name": "DeepSeek R1",
@@ -4011,7 +4044,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "deepseek-r1"
     },
     "xai/grok-4.1-fast": {
       "name": "Grok 4.1 Fast",
@@ -4129,7 +4163,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "grok-4"
     },
     "xai/grok-4": {
       "name": "Grok 4",
@@ -4143,9 +4178,9 @@
       },
       "scores": {
         "REASONING": {
-          "mu": 792.7344115621017,
-          "sigma": 120.32355610691751,
-          "comparisons": 2
+          "mu": 743,
+          "sigma": 124,
+          "comparisons": 0
         },
         "MATH_REASONING": {
           "mu": 743,
@@ -4158,9 +4193,9 @@
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 729.6832205367562,
-          "sigma": 121.89257876312718,
-          "comparisons": 1
+          "mu": 716.8273842505134,
+          "sigma": 119.79256282552056,
+          "comparisons": 2
         },
         "ANALYSIS": {
           "mu": 756.3248486796293,
@@ -4213,9 +4248,9 @@
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 743,
-          "sigma": 124,
-          "comparisons": 0
+          "mu": 759.8981288981289,
+          "sigma": 122.08457380457381,
+          "comparisons": 1
         },
         "INSTRUCTION_FOLLOWING": {
           "mu": 743,
@@ -4247,7 +4282,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "grok-4"
     },
     "xai/grok-code-fast-1": {
       "name": "Grok Code Fast 1",
@@ -4365,7 +4401,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "grok-4"
     },
     "xai/grok-4-1-fast-reasoning": {
       "name": "Grok 4.1 Fast Reasoning",
@@ -4400,8 +4437,8 @@
         },
         "ANALYSIS": {
           "mu": 700,
-          "sigma": 130,
-          "comparisons": 0
+          "sigma": 127.70588235294117,
+          "comparisons": 1
         },
         "JUDGMENT": {
           "mu": 659.6855837707707,
@@ -4449,9 +4486,9 @@
           "comparisons": 0
         },
         "AMBIGUITY_HANDLING": {
-          "mu": 700,
-          "sigma": 130,
-          "comparisons": 0
+          "mu": 683.1018711018711,
+          "sigma": 127.9918918918919,
+          "comparisons": 1
         },
         "INSTRUCTION_FOLLOWING": {
           "mu": 700,
@@ -4483,7 +4520,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "grok-4"
     },
     "xai/grok-4-1-fast-non-reasoning": {
       "name": "Grok 4.1 Fast Non-Reasoning",
@@ -4601,7 +4639,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "grok-4"
     },
     "xai/grok-4-fast-reasoning": {
       "name": "Grok 4 Fast Reasoning",
@@ -4719,7 +4758,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "grok-4"
     },
     "xai/grok-4-fast-non-reasoning": {
       "name": "Grok 4 Fast Non-Reasoning",
@@ -4837,7 +4877,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "grok-4"
     },
     "mistral/mistral-large-3-2512": {
       "name": "Mistral Large 3 (2512)",
@@ -4955,7 +4996,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "mistral-3"
     },
     "mistral/codestral-2508": {
       "name": "Codestral (2508)",
@@ -5073,7 +5115,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "mistral-codestral"
     },
     "mistral/devstral-2-2512": {
       "name": "Devstral 2 (2512)",
@@ -5191,7 +5234,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "mistral-devstral"
     },
     "qwen/qwen3.5-plus": {
       "name": "Qwen 3.5 Plus",
@@ -5309,7 +5353,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "qwen-3"
     },
     "qwen/qwen3.5-flash": {
       "name": "Qwen 3.5 Flash",
@@ -5427,7 +5472,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "qwen-3"
     },
     "qwen/qwen3-coder-next": {
       "name": "Qwen 3 Coder Next",
@@ -5545,7 +5591,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "qwen-3"
     },
     "groq/llama-4-maverick": {
       "name": "Llama 4 Maverick (Groq)",
@@ -5663,7 +5710,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "llama-4"
     },
     "groq/llama-4-scout": {
       "name": "Llama 4 Scout (Groq)",
@@ -5781,7 +5829,8 @@
           "sigma": 150,
           "comparisons": 0
         }
-      }
+      },
+      "family": "llama-4"
     },
     "deepseek/DeepSeek-V3-0324": {
       "scores": {
@@ -5899,7 +5948,8 @@
       "cost": {
         "inputPer1M": 0.27,
         "outputPer1M": 1.1
-      }
+      },
+      "family": "deepseek-v3"
     }
   }
 }

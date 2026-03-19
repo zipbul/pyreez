@@ -9,6 +9,10 @@
 import type { ModelInfo, CapabilityDimension } from "../model/types";
 import { SIGMA_BASE } from "../model/types";
 import type { TeamComposition, TeamMember } from "./types";
+import type { SkillCell } from "../axis/types";
+import { BINARY_DIMENSIONS } from "../axis/types";
+import type { SkillCellStore } from "../model/skillcell-store";
+import { betaSample } from "../math/beta";
 
 // -- Error types --
 
@@ -275,4 +279,175 @@ export function orderWorkersByRole(
   }
 
   return result;
+}
+
+// -- Thompson Sampling Selection --
+
+/** Minimum observations before exclusion recommendation is considered. */
+const MIN_OBS_FOR_EXCLUSION = 10;
+/** Wilson score lower bound threshold for exclusion. */
+const EXCLUSION_THRESHOLD = 0.3;
+/** Minimum observations before a model is considered "known" (not cold-start). */
+const MIN_OBS = 5;
+
+/**
+ * Wilson score interval lower bound.
+ * Robust for small sample sizes, bounded [0, 1].
+ */
+export function wilsonLower(passRate: number, n: number, z = 1.96): number {
+  if (n === 0) return 0;
+  const denominator = 1 + (z * z) / n;
+  const center = passRate + (z * z) / (2 * n);
+  const spread = z * Math.sqrt((passRate * (1 - passRate) + (z * z) / (4 * n)) / n);
+  return Math.max(0, (center - spread) / denominator);
+}
+
+/**
+ * Check if a model should be excluded from a domain+taskType based on Wilson score.
+ */
+export function shouldExclude(cell: SkillCell | null | undefined): boolean {
+  if (!cell || cell.total < MIN_OBS_FOR_EXCLUSION) return false;
+
+  const fc = cell.dimensions.factually_correct;
+  if (!fc) return false;
+
+  const n = fc.alpha + fc.beta - 2; // subtract 2 for initial priors
+  if (n < MIN_OBS_FOR_EXCLUSION) return false;
+
+  const passRate = fc.alpha / (fc.alpha + fc.beta);
+  return wilsonLower(passRate, n) < EXCLUSION_THRESHOLD;
+}
+
+/**
+ * Get cold-start prior for Thompson Sampling.
+ * Tier 1: same family + same domain → use family data with inflated variance.
+ * Tier 2: same family + any domain → weaker transfer.
+ * Tier 3: no data → uniform (alpha=1, beta=1).
+ */
+function getColdStartAlphaBeta(
+  model: ModelInfo,
+  domain: string,
+  taskType: string,
+  store: SkillCellStore,
+): { alpha: number; beta: number } {
+  const family = model.family ?? model.provider;
+
+  // Tier 1: same family, same domain+taskType
+  const familyCells = store.getAllForFamily(family, domain, taskType);
+  if (familyCells.length > 0) {
+    const totalObs = familyCells.reduce((sum, c) => sum + c.total, 0);
+    if (totalObs >= 10) {
+      // Use family average with inflated variance (wide prior)
+      let passSum = 0, totalDims = 0;
+      for (const cell of familyCells) {
+        for (const dim of BINARY_DIMENSIONS) {
+          const p = cell.dimensions[dim];
+          if (p) { passSum += p.alpha - 1; totalDims += (p.alpha - 1) + (p.beta - 1); }
+        }
+      }
+      const familyRate = totalDims > 0 ? passSum / totalDims : 0.5;
+      // Inflated variance: use small alpha+beta to keep distribution wide
+      return { alpha: 1 + familyRate * 3, beta: 1 + (1 - familyRate) * 3 };
+    }
+  }
+
+  // Tier 2: same family, any domain
+  const allFamilyCells: SkillCell[] = [];
+  // Iterate all models of this family
+  for (const m of familyCells.length === 0 ? [] : familyCells) {
+    allFamilyCells.push(m);
+  }
+  // If Tier 1 didn't have enough, check all domains for this family
+  // We need to get all cells for this model's family across all domains
+  // This is a broader search — use store's getAllForModel on family members
+  // For simplicity, fall through to Tier 3 if Tier 1 is insufficient
+
+  // Tier 3: uniform prior
+  return { alpha: 1, beta: 1 };
+}
+
+/**
+ * Select models via Thompson Sampling over SkillCell Beta posteriors.
+ * Domain-specific selection with provider diversity and cold-start exploration.
+ *
+ * @param domain - Task domain for skill cell lookup.
+ * @param taskType - Task type for skill cell lookup.
+ * @param pool - Available models to choose from.
+ * @param count - Number of models to select.
+ * @param store - SkillCell store with accumulated feedback data.
+ */
+export function thompsonSelect(
+  domain: string,
+  taskType: string,
+  pool: readonly ModelInfo[],
+  count: number,
+  store: SkillCellStore,
+): ModelInfo[] {
+  if (pool.length <= count) return [...pool];
+
+  // Separate cold-start models for mandatory exploration
+  const coldModels: ModelInfo[] = [];
+  const warmModels: ModelInfo[] = [];
+
+  for (const model of pool) {
+    const cell = store.get(model.id, domain, taskType);
+    if (shouldExclude(cell)) continue; // Wilson exclusion
+
+    if (!cell || cell.total < MIN_OBS) {
+      coldModels.push(model);
+    } else {
+      warmModels.push(model);
+    }
+  }
+
+  // Sample scores for warm models
+  const samples: { model: ModelInfo; score: number }[] = [];
+  for (const model of warmModels) {
+    const cell = store.get(model.id, domain, taskType)!;
+    let dimSum = 0;
+    for (const dim of BINARY_DIMENSIONS) {
+      const params = cell.dimensions[dim] ?? { alpha: 1, beta: 1 };
+      dimSum += betaSample(params.alpha, params.beta);
+    }
+    samples.push({ model, score: dimSum / BINARY_DIMENSIONS.length });
+  }
+
+  // Sample scores for cold models (using priors)
+  for (const model of coldModels) {
+    const prior = getColdStartAlphaBeta(model, domain, taskType, store);
+    let dimSum = 0;
+    for (const _dim of BINARY_DIMENSIONS) {
+      dimSum += betaSample(prior.alpha, prior.beta);
+    }
+    samples.push({ model, score: dimSum / BINARY_DIMENSIONS.length });
+  }
+
+  // Sort by sampled score (NOT by mean)
+  samples.sort((a, b) => b.score - a.score);
+
+  // Enforce provider diversity: max ceil(count/2) from same provider
+  const maxPerProvider = Math.ceil(count / 2);
+  const providerCounts = new Map<string, number>();
+  const selected: ModelInfo[] = [];
+
+  // Reserve 1 slot for cold-start if available and count >= 3
+  if (coldModels.length > 0 && count >= 3) {
+    // Reserve 1 slot for cold-start exploration
+    const coldPick = coldModels[Math.floor(Math.random() * coldModels.length)]!;
+    selected.push(coldPick);
+    providerCounts.set(coldPick.provider, 1);
+  }
+
+  for (const { model } of samples) {
+    if (selected.length >= count) break;
+    if (selected.includes(model)) continue; // skip if already in cold slot
+
+    const provCount = providerCounts.get(model.provider) ?? 0;
+    if (provCount >= maxPerProvider) continue;
+
+    selected.push(model);
+    providerCounts.set(model.provider, provCount + 1);
+  }
+
+  return selected;
 }

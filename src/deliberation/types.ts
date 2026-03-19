@@ -134,6 +134,10 @@ export interface DeliberateInput {
   readonly models?: readonly string[];
   /** Task nature for prompt selection. Artifact = deliverable output, Critique = analysis. */
   readonly taskNature?: TaskNature;
+  /** Domain for Thompson Sampling model selection. */
+  readonly domain?: string;
+  /** Task type for Thompson Sampling model selection. */
+  readonly taskType?: string;
 }
 
 /**

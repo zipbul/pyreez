@@ -150,4 +150,6 @@ export interface ModelInfo {
   supportsToolCalling: boolean;
   /** Whether the model is currently available in the API. Defaults to true if omitted. */
   available?: boolean;
+  /** Model architecture family (e.g., "claude-4", "grok-4", "gpt-5"). Models in the same family share training biases. Falls back to provider if omitted. */
+  family?: string;
 }
