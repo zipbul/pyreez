@@ -227,6 +227,43 @@ async function callWithFallback(
 
       const role = assignWorkerRole(workerIndex);
       const isDegenerate = result.content.trim().length < MIN_WORKER_RESPONSE_LENGTH;
+
+      if (isDegenerate && pool) {
+        // Degenerate = quality issue. Treat like an error for fallback purposes:
+        // try the next model from the pool instead of returning a useless response.
+        const degenerateMsg = `degenerate response (below ${MIN_WORKER_RESPONSE_LENGTH} chars)`;
+        // Don't propagate to provider level — degenerate is model-specific, not provider-wide.
+        excludeIds.add(currentModel);
+
+        const teamExclude = new Set([
+          ...excludeIds,
+          ...ctx.team.workers.map((w) => w.model),
+        ]);
+        const next = pool.getNext(teamExclude);
+
+        swaps.push({
+          original: currentModel,
+          replacement: next?.id,
+          round: roundNumber,
+          error: degenerateMsg,
+        });
+
+        if (!next) {
+          // Pool exhausted — return degenerate as-is
+          return {
+            response: { model: currentModel, content: result.content, role, workerIndex },
+            failed: false,
+            degenerate: true,
+            swaps,
+            tokens: { input: totalInput, output: totalOutput },
+          };
+        }
+
+        currentModel = next.id;
+        isColdJoin = roundNumber > 1;
+        continue; // retry with fallback model
+      }
+
       return {
         response: { model: currentModel, content: result.content, role, workerIndex },
         failed: false,

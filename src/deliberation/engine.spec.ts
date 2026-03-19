@@ -1138,10 +1138,10 @@ describe("multi-round multi-swap context integrity", () => {
 // Degenerate response triggers fallback
 // =============================================================================
 
-describe("degenerate response is quality issue, not error", () => {
-  it("should NOT trigger fallback for degenerate response — track in failedWorkers, no swap", async () => {
-    // 2 workers: model-0 returns degenerate, model-1 returns valid.
-    // model-0 should NOT be swapped — just tracked as failedWorker.
+describe("degenerate response triggers fallback", () => {
+  it("should trigger fallback for degenerate response and swap to a pool model", async () => {
+    // model-0 returns degenerate → should fallback to fallback-a
+    // model-1 returns valid
     const team = makeTeam(2);
     const input = makeInput();
     const config = makeConfig({ maxRounds: 1 });
@@ -1150,6 +1150,9 @@ describe("degenerate response is quality issue, not error", () => {
       chat: mock(async (model: string) => {
         if (model === "worker/model-0") {
           return chatResult("short", 10, 20); // below MIN_WORKER_RESPONSE_LENGTH
+        }
+        if (model === "prov-x/fallback-a") {
+          return chatResult(validWorkerContent("fallback succeeded"), 15, 25);
         }
         return chatResult(validWorkerContent("ok"), 15, 25);
       }),
@@ -1160,16 +1163,39 @@ describe("degenerate response is quality issue, not error", () => {
 
     const output = await deliberate(team, input, deps, config, { pool });
 
-    // model-1 succeeded normally
+    // Both workers should have valid responses (model-1 original + fallback-a replacing model-0)
+    expect(output.rounds![0]!.responses).toHaveLength(2);
+    // fallback-a replaced model-0
+    const models = output.rounds![0]!.responses!.map(r => r.model);
+    expect(models).toContain("prov-x/fallback-a");
+    expect(models).toContain("worker/model-1");
+    // modelSwaps should record the degenerate → fallback swap
+    expect(output.modelSwaps).toBeDefined();
+    expect(output.modelSwaps!.length).toBeGreaterThanOrEqual(1);
+    expect(output.modelSwaps![0]!.original).toBe("worker/model-0");
+    expect(output.modelSwaps![0]!.replacement).toBe("prov-x/fallback-a");
+  });
+
+  it("should track degenerate in failedWorkers when no fallback pool available", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig({ maxRounds: 1 });
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") {
+          return chatResult("short", 10, 20);
+        }
+        return chatResult(validWorkerContent("ok"), 15, 25);
+      }),
+    });
+
+    // No fallback pool
+    const output = await deliberate(team, input, deps, config);
+
     expect(output.rounds![0]!.responses).toHaveLength(1);
-    expect(output.rounds![0]!.responses![0]!.model).toBe("worker/model-1");
-    // model-0 degenerate → failedWorker, NOT swapped
     expect(output.rounds![0]!.failedWorkers).toHaveLength(1);
     expect(output.rounds![0]!.failedWorkers![0]!.error).toContain("degenerate");
-    // No modelSwaps — degenerate is not a swap trigger
-    expect(output.modelSwaps).toBeUndefined();
-    // model-0 NOT on cooldown (quality issue, not error)
-    expect(cooldown.isOnCooldown("worker/model-0")).toBe(false);
   });
 });
 
