@@ -143,6 +143,29 @@ describe("FileSkillCellStore", () => {
     expect(cell!.dimensions.factually_correct).toEqual({ alpha: 2, beta: 1 });
   });
 
+  it("should clear cells on load with unsupported version", async () => {
+    store.update(makeFeedback()); // has data
+    const io2: SkillCellIO = {
+      async readFile() { return JSON.stringify({ version: 99, cells: {} }); },
+      async writeFile() {},
+    };
+    const store2 = new FileSkillCellStore({ io: io2, path: "test.json" });
+    store2.update(makeFeedback()); // pre-existing data
+    await store2.load(); // should clear because version !== 1
+    expect(store2.get("test/model-a", "ARCHITECTURE", "SYSTEM_DESIGN")).toBeUndefined();
+  });
+
+  it("should clear cells on corrupted JSON", async () => {
+    const io2: SkillCellIO = {
+      async readFile() { return "not valid json {{{"; },
+      async writeFile() {},
+    };
+    const store2 = new FileSkillCellStore({ io: io2, path: "test.json" });
+    store2.update(makeFeedback()); // has data
+    await store2.load(); // should clear on parse error
+    expect(store2.get("test/model-a", "ARCHITECTURE", "SYSTEM_DESIGN")).toBeUndefined();
+  });
+
   it("should initialize all dimensions with uniform prior", () => {
     store.update(makeFeedback());
     const cell = store.get("test/model-a", "ARCHITECTURE", "SYSTEM_DESIGN")!;

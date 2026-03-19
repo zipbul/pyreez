@@ -351,16 +351,8 @@ function getColdStartAlphaBeta(
     }
   }
 
-  // Tier 2: same family, any domain
-  const allFamilyCells: SkillCell[] = [];
-  // Iterate all models of this family
-  for (const m of familyCells.length === 0 ? [] : familyCells) {
-    allFamilyCells.push(m);
-  }
-  // If Tier 1 didn't have enough, check all domains for this family
-  // We need to get all cells for this model's family across all domains
-  // This is a broader search — use store's getAllForModel on family members
-  // For simplicity, fall through to Tier 3 if Tier 1 is insufficient
+  // Tier 2: same family, any domain — deferred to future implementation.
+  // Would require reverse family→modelIds lookup + cross-domain aggregation.
 
   // Tier 3: uniform prior
   return { alpha: 1, beta: 1 };

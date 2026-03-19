@@ -148,14 +148,15 @@ export class FileSkillCellStore implements SkillCellStore {
     try {
       const raw = await this.io.readFile(this.path);
       const parsed = JSON.parse(raw);
+      this.cells.clear(); // Always clear before loading — consistent fresh start
       if (parsed.version === 1 && parsed.cells) {
-        this.cells.clear();
         for (const [key, cell] of Object.entries(parsed.cells)) {
           this.cells.set(key, cell as SkillCell);
         }
       }
+      // Unsupported version or missing cells → empty store (cells already cleared)
     } catch {
-      // File doesn't exist yet — start fresh
+      // File doesn't exist or corrupted → start fresh
       this.cells.clear();
     }
   }

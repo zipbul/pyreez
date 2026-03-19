@@ -133,6 +133,37 @@ describe("LLMExternalEvaluator", () => {
     expect(record.dimensions.factually_correct).toBe(true);
   });
 
+  it("should default missing dimension fields to false", async () => {
+    const partial = JSON.stringify({
+      dimensions: { factually_correct: true },
+      failures: {},
+    });
+    const deps = makeDeps({
+      chat: mock(async () => ({ content: partial, inputTokens: 0, outputTokens: 0 })),
+    });
+    const evaluator = new LLMExternalEvaluator(deps);
+    const record = await evaluator.evaluate("t", "w1", "c", "D", "T", "d1", new Set());
+    expect(record.dimensions.factually_correct).toBe(true);
+    expect(record.dimensions.addresses_task).toBe(false); // missing → false
+    expect(record.dimensions.provides_evidence).toBe(false);
+    expect(record.failures.hallucination).toBe(false); // missing → false
+  });
+
+  it("should rotate evaluator across providers within same deliberation", async () => {
+    const deps = makeDeps();
+    const evaluator = new LLMExternalEvaluator(deps);
+
+    // Evaluate 3 workers in sequence (like wire.ts loop)
+    await evaluator.evaluate("t", "w1", "c", "D", "T", "d1", new Set(["provX"]));
+    await evaluator.evaluate("t", "w2", "c", "D", "T", "d1", new Set(["provX"]));
+    await evaluator.evaluate("t", "w3", "c", "D", "T", "d1", new Set(["provX"]));
+
+    const chatMock = deps.chat as ReturnType<typeof mock>;
+    const evaluators = chatMock.mock.calls.map((c: any) => c[0]);
+    // Should rotate: provA, provB, provA (or similar pattern)
+    expect(evaluators[0]).not.toBe(evaluators[1]); // different evaluator for 2nd call
+  });
+
   it("should use temperature 0 for deterministic evaluation", async () => {
     const deps = makeDeps();
     const evaluator = new LLMExternalEvaluator(deps);

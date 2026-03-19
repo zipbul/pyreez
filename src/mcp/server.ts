@@ -771,22 +771,27 @@ export class PyreezMcpServer {
       await this.scoring.update(pairwise);
 
       // SkillCell path (new — binary dimension evaluations)
+      // SkillCell path (best-effort — do not crash BT path on failure)
       let skillCellUpdated = 0;
       if (args.evaluations?.length && this.skillCellStore) {
-        for (const ev of args.evaluations) {
-          this.skillCellStore.update({
-            deliberation_id: crypto.randomUUID(),
-            model_id: ev.model_id,
-            domain: ev.domain,
-            task_type: ev.task_type,
-            evaluator_id: "host",
-            dimensions: ev.dimensions,
-            failures: ev.failures,
-            timestamp: Date.now(),
-          });
-          skillCellUpdated++;
+        try {
+          for (const ev of args.evaluations) {
+            this.skillCellStore.update({
+              deliberation_id: crypto.randomUUID(),
+              model_id: ev.model_id,
+              domain: ev.domain,
+              task_type: ev.task_type,
+              evaluator_id: "host",
+              dimensions: ev.dimensions,
+              failures: ev.failures,
+              timestamp: Date.now(),
+            });
+            skillCellUpdated++;
+          }
+          await this.skillCellStore.save();
+        } catch {
+          // best-effort — BT update already succeeded, don't fail the response
         }
-        await this.skillCellStore.save();
       }
 
       const models = new Set<string>();

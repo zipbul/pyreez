@@ -79,6 +79,7 @@ Evaluate this response. Return ONLY the JSON object.`;
 function parseEvalResponse(content: string): { dimensions: BinaryDimensions; failures: FailureFlags } | null {
   try {
     // Extract JSON from response (may have markdown fences)
+    // Greedy match — JSON has nested braces (dimensions, failures), so we need first { to last }
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 

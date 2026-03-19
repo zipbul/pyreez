@@ -744,6 +744,26 @@ describe("thompsonSelect", () => {
     expect(sameCount).toBeLessThanOrEqual(2);
   });
 
+  it("should return empty array when all models are Wilson-excluded", () => {
+    const pool = [makeModelInfo("a/m1"), makeModelInfo("b/m2"), makeModelInfo("c/m3"), makeModelInfo("d/m4")];
+    const store = makeSkillCellStore();
+    for (const m of pool) {
+      for (let i = 0; i < 15; i++) store.update(makeFeedbackForModel(m.id, "D", "T", false));
+    }
+    const selected = thompsonSelect("D", "T", pool, 3, store);
+    expect(selected).toHaveLength(0);
+  });
+
+  it("should work with count=1 (no cold-start reservation)", () => {
+    const pool = [makeModelInfo("a/m1"), makeModelInfo("b/m2"), makeModelInfo("c/m3")];
+    const store = makeSkillCellStore();
+    for (const m of pool) {
+      for (let i = 0; i < 10; i++) store.update(makeFeedbackForModel(m.id, "D", "T", true));
+    }
+    const selected = thompsonSelect("D", "T", pool, 1, store);
+    expect(selected).toHaveLength(1);
+  });
+
   it("should reserve cold-start slot when count >= 3", () => {
     const pool = [
       makeModelInfo("a/warm1"), makeModelInfo("b/warm2"),
