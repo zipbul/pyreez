@@ -12,12 +12,10 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import type { ModelRegistry } from "../model/registry";
-import type { ModelInfo } from "../model/types";
+
 import type { RunLogger } from "../report/run-logger";
-import type { BudgetConfig } from "../axis/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 import type { DeliberationStore } from "../deliberation/store-types";
-import type { TaskClassification } from "../axis/types";
 import { resolveTaskNature, shouldAutoDebate } from "../deliberation/task-nature";
 import { NoModelsAvailableError } from "../deliberation/team-composer";
 import { buildAcceptanceMessages } from "../deliberation/prompts";
@@ -55,13 +53,10 @@ export interface PyreezMcpServerConfig {
   runLogger?: RunLogger;
   /** Chat function for acceptance rounds. When omitted, pyreez_acceptance is unavailable. */
   chatFn?: (model: string, messages: import("../llm/types").ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
-  /** Filtered registry (configured providers only). Used by pyreez_scores configured_only. */
-  filteredRegistry?: { getAll(): ModelInfo[]; getById(id: string): ModelInfo | undefined };
   /** SkillCell store for binary dimension feedback. */
   skillCellStore?: import("../model/skillcell-store").SkillCellStore;
 }
 
-const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
 
 /** Max characters for error messages returned to MCP clients. */
 const MAX_ERROR_LENGTH = 500;
@@ -79,11 +74,9 @@ function sanitizeError(error: unknown): string {
 
 export class PyreezMcpServer {
   private readonly mcpServer: McpServer;
-  private readonly registry: ModelRegistry;
   private readonly deliberateFn?: PyreezMcpServerConfig["deliberateFn"];
   private readonly runLogger?: RunLogger;
   private readonly chatFn?: PyreezMcpServerConfig["chatFn"];
-  private readonly filteredRegistry?: { getAll(): ModelInfo[]; getById(id: string): ModelInfo | undefined };
   private readonly skillCellStore?: import("../model/skillcell-store").SkillCellStore;
 
   constructor(config: PyreezMcpServerConfig) {
@@ -94,11 +87,9 @@ export class PyreezMcpServer {
       throw new Error("registry is required");
     }
     this.mcpServer = config.mcpServer;
-    this.registry = config.registry;
     this.deliberateFn = config.deliberateFn;
     this.runLogger = config.runLogger;
     this.chatFn = config.chatFn;
-    this.filteredRegistry = config.filteredRegistry;
     this.skillCellStore = config.skillCellStore;
 
     this.registerTools();

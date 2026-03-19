@@ -24,13 +24,6 @@ import { PyreezMcpServer } from "./mcp/server";
 import { ModelRegistry } from "./model/registry";
 import { BunFileIO } from "./report/bun-file-io";
 import { FileRunLogger } from "./report/run-logger";
-import {
-  DomainOverrideProfiler,
-  TwoTrackCeSelector,
-  DivergeSynthProtocol,
-} from "./axis/wrappers";
-import type { ChatFn } from "./axis/types";
-import type { ChatMessage } from "./llm/types";
 import { createCooldownManager } from "./deliberation/cooldown";
 
 /**
@@ -112,16 +105,7 @@ async function main(): Promise<void> {
 
   const chatAdapter = createChatAdapter((req) => providerRegistry.chat(req));
 
-  // Axis ChatFn adapter: bridge (modelId, string | ChatMessage[], params?) → ChatResult
-  const axisChatFn: ChatFn = async (modelId, input, params) => {
-    const messages: ChatMessage[] =
-      typeof input === "string"
-        ? [{ role: "user", content: input }]
-        : input;
-    return chatAdapter(modelId, messages, params);
-  };
-
-  // Build 3-stage pipeline directly (no factory)
+  // Build pipeline
   const { modelIds, warnings: providerWarnings } = filterModelsByProviders(registry, providers);
   for (const w of providerWarnings) console.warn(`[pyreez] ${w}`);
   if (modelIds.length === 0) {
@@ -173,7 +157,6 @@ async function main(): Promise<void> {
   const server = new PyreezMcpServer({
     mcpServer,
     registry,
-    filteredRegistry,
     deliberateFn,
     deliberationStore,
     runLogger,

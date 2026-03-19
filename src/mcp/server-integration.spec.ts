@@ -11,7 +11,6 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { PyreezMcpServer } from "./server";
 import { createDeliberateFn } from "../deliberation/wire";
 import type { ModelInfo } from "../model/types";
-import type { PyreezEngine } from "../axis/engine";
 import type { ChatMessage } from "../llm/types";
 import type { GenerationParams } from "../deliberation/types";
 
@@ -63,20 +62,6 @@ function createMockRegistry(models: ModelInfo[] = MODELS) {
 
 // -- Stub Engine (only needed for pyreez_route / auto_route, not manual deliberateFn path) --
 
-function stubEngine(): PyreezEngine {
-  return {
-    traceOnly: async () => ({
-      scores: [],
-      classified: { domain: "CODING", taskType: "IMPLEMENT_FEATURE", complexity: "moderate" as const },
-      requirement: { capabilities: {}, constraints: {}, budget: { maxPerRequest: 1.0 } },
-      plan: { models: [{ modelId: "openai/gpt-4.1", role: "producer", weight: 1.0 }], strategy: "single", estimatedCost: 0.02, reason: "stub" },
-    }),
-    run: async () => ({ roundsExecuted: 0, totalLLMCalls: 0, modelsUsed: [], protocol: "single" }),
-    runWithTrace: async () => {
-      throw new Error("not implemented in integration stub");
-    },
-  } as unknown as PyreezEngine;
-}
 
 // -- Long enough response to pass MIN_WORKER_RESPONSE_LENGTH (200 chars) --
 
@@ -106,16 +91,11 @@ async function createHarness(opts: {
   });
 
   const mcpServer = new McpServer({ name: "pyreez-test", version: "0.0.1" });
-  const filteredRegistry = opts.filteredModels
-    ? createMockRegistry(opts.filteredModels)
-    : undefined;
 
   new PyreezMcpServer({
     mcpServer,
     registry: registry as any,
-    engine: stubEngine(),
     deliberateFn,
-    filteredRegistry,
   });
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -200,45 +180,7 @@ describe("MCP Server Integration", () => {
     expect(swap.replacement).not.toBe(failModel);
   });
 
-  // === Test 2: pyreez_scores configured_only filters to configured providers ===
-
-  it("pyreez_scores configured_only should filter to configured providers", async () => {
-    const allModels = MODELS;
-    const configuredModels = [MODELS[0]!, MODELS[1]!]; // openai + anthropic only
-
-    harness = await createHarness({
-      chatFn: async (model) => ({
-        content: longResponse(model),
-        inputTokens: 100,
-        outputTokens: 200,
-      }),
-      models: allModels,
-      filteredModels: configuredModels,
-    });
-
-    const result = await harness.client.callTool({
-      name: "pyreez_scores",
-      arguments: {
-        configured_only: true,
-      },
-    });
-
-    expect(result.isError).toBeFalsy();
-    const text = (result.content as { type: string; text: string }[])[0]!.text;
-    const parsed = JSON.parse(text);
-
-    expect(parsed).toBeArray();
-    expect(parsed.length).toBe(2);
-
-    const ids = parsed.map((m: { id: string }) => m.id);
-    expect(ids).toContain("openai/gpt-4.1");
-    expect(ids).toContain("anthropic/claude-sonnet-4-20250514");
-    expect(ids).not.toContain("google/gemini-2.5-pro");
-    expect(ids).not.toContain("deepseek/deepseek-r1");
-    expect(ids).not.toContain("mistral/mistral-large");
-  });
-
-  // === Test 3: End-to-end deliberation with no failures ===
+  // === Test 2: End-to-end deliberation with no failures ===
 
   it("pyreez_deliberate should work end-to-end with no failures", async () => {
     harness = await createHarness({

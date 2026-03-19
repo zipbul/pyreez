@@ -55,26 +55,19 @@ function parseModels(data: ModelsJsonSchema): ModelInfo[] {
   const result: ModelInfo[] = [];
 
   for (const [id, entry] of Object.entries(data.models)) {
+    // BT capabilities removed (v3) — use empty capabilities
     const capabilities: Record<string, DimensionRating> = {};
-
-    for (const dim of ALL_DIMENSIONS) {
-      const raw = entry.scores[dim] as unknown;
-      if (!raw) {
-        capabilities[dim] = { ...DEFAULT_RATING };
-      } else if (isLegacy(raw)) {
-        // V1 → V2 migration: score×100 → mu, confidence unused, dataPoints → comparisons
-        capabilities[dim] = {
-          mu: raw.score * 100,
-          sigma: SIGMA_BASE,
-          comparisons: raw.dataPoints,
-        };
-      } else {
-        const v2 = raw as ScoreEntry;
-        capabilities[dim] = {
-          mu: v2.mu ?? 0,
-          sigma: v2.sigma ?? SIGMA_BASE,
-          comparisons: v2.comparisons ?? 0,
-        };
+    if (entry.scores) {
+      for (const dim of ALL_DIMENSIONS) {
+        const raw = entry.scores[dim] as unknown;
+        if (!raw) {
+          capabilities[dim] = { ...DEFAULT_RATING };
+        } else if (isLegacy(raw)) {
+          capabilities[dim] = { mu: raw.score * 100, sigma: SIGMA_BASE, comparisons: raw.dataPoints };
+        } else {
+          const v2 = raw as ScoreEntry;
+          capabilities[dim] = { mu: v2.mu ?? 0, sigma: v2.sigma ?? SIGMA_BASE, comparisons: v2.comparisons ?? 0 };
+        }
       }
     }
 
@@ -87,6 +80,7 @@ function parseModels(data: ModelsJsonSchema): ModelInfo[] {
       cost: entry.cost,
       supportsToolCalling: entry.supportsToolCalling,
       available: entry.available !== false,
+      family: (entry as any).family,
     });
   }
 

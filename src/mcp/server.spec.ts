@@ -4,7 +4,6 @@ import type { PyreezMcpServerConfig } from "./server";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { ModelRegistry } from "../model/registry";
-import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 
 // --- Test Doubles ---
@@ -81,18 +80,18 @@ describe("PyreezMcpServer", () => {
   // === Constructor ===
 
   describe("constructor", () => {
-    it("should create instance and register 5 tools when config is valid", () => {
+    it("should create instance and register 3 tools when config is valid", () => {
       const mcp = stubMcpServer();
       const server = new PyreezMcpServer(validConfig({ mcpServer: mcp }));
 
       expect(server).toBeInstanceOf(PyreezMcpServer);
-      expect(mcp.registerTool).toHaveBeenCalledTimes(5);
+      expect(mcp.registerTool).toHaveBeenCalledTimes(3);
 
       const calls = (mcp.registerTool as ReturnType<typeof mock>).mock.calls;
       const toolNames = calls.map((c: unknown[]) => c[0]);
-      expect(toolNames).toContain("pyreez_route");
-      expect(toolNames).toContain("pyreez_scores");
       expect(toolNames).toContain("pyreez_deliberate");
+      expect(toolNames).toContain("pyreez_acceptance");
+      expect(toolNames).toContain("pyreez_feedback");
     });
 
     it('should throw "mcpServer is required" when mcpServer is missing', () => {
@@ -269,16 +268,6 @@ describe("PyreezMcpServer", () => {
 
     // -- auto_route tests --
 
-
-      expect(result.isError).toBeUndefined();
-      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
-      expect(callArg.task).toBe("Implement sorting");
-      expect(callArg.domain).toBe("CODING");
-      expect(callArg.taskType).toBe("IMPLEMENT_ALGORITHM");
-      const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.roundsExecuted).toBe(DELIBERATE_OUTPUT.roundsExecuted);
-    });
-
     it("should return error when auto_route=true but domain is missing", async () => {
       const server = new PyreezMcpServer(validConfig());
 
@@ -293,18 +282,6 @@ describe("PyreezMcpServer", () => {
       expect((result.content[0] as { text: string }).text).toContain(
         "domain is required",
       );
-    });
-
-
-      expect(result.isError).toBeUndefined();
-      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
-      expect(callArg.taskType).toBe("IMPLEMENT_FEATURE"); // domain default
-    });
-
-
-      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
-      expect(callArg.domain).toBe("CODING");
-      expect(callArg.taskType).toBe("IMPLEMENT_FEATURE");
     });
 
     it("should forward quality_weight and cost_weight to deliberateFn in manual deliberation", async () => {
@@ -503,68 +480,24 @@ describe("PyreezMcpServer", () => {
   // === Run Logging ===
 
   describe("run logging", () => {
+    const DELIB_OUT: DeliberateOutput = {
+      roundsExecuted: 1, totalTokens: { input: 10, output: 20 }, totalLLMCalls: 1, modelsUsed: ["m1"],
+    };
+
     it("should log successful tool call via runLogger", async () => {
       const runLogger = {
         log: mock(() => Promise.resolve()),
         query: mock(() => Promise.resolve([])),
       };
-      const server = new PyreezMcpServer(validConfig({ runLogger }));
+      const deliberateFn = mock(() => Promise.resolve(DELIB_OUT));
+      const server = new PyreezMcpServer(validConfig({ runLogger, deliberateFn }));
 
-      await server.handleRoute({
-        task: "test task",
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-        complexity: "moderate",
-      });
+      await server.handleDeliberate({ task: "test task" });
 
       expect(runLogger.log).toHaveBeenCalledTimes(1);
-      const logged = (runLogger.log as ReturnType<typeof mock>).mock
-        .calls[0]![0];
-      expect(logged.tool).toBe("route");
+      const logged = (runLogger.log as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(logged.tool).toBe("deliberate");
       expect(logged.success).toBe(true);
-      expect(logged.durationMs).toBeGreaterThanOrEqual(0);
-      expect(logged.id).toBeString();
-      expect(logged.id.length).toBeGreaterThan(0);
-    });
-
-    it("should log failed tool call with error message", async () => {
-      const runLogger = {
-        log: mock(() => Promise.resolve()),
-        query: mock(() => Promise.resolve([])),
-      };
-      const engine = stubEngine({
-        traceOnly: mock(() => Promise.reject(new Error("engine error"))),
-      } as unknown as Partial<PyreezEngine>);
-      const server = new PyreezMcpServer(
-        validConfig({ runLogger, engine }),
-      );
-
-      await server.handleRoute({
-        task: "test task",
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-        complexity: "moderate",
-      });
-
-      expect(runLogger.log).toHaveBeenCalledTimes(1);
-      const logged = (runLogger.log as ReturnType<typeof mock>).mock
-        .calls[0]![0];
-      expect(logged.tool).toBe("route");
-      expect(logged.success).toBe(false);
-      expect(logged.error).toContain("engine error");
-    });
-
-    it("should not fail when runLogger is not configured", async () => {
-      const server = new PyreezMcpServer(validConfig());
-
-      const result = await server.handleRoute({
-        task: "test task",
-        domain: "CODING",
-        task_type: "IMPLEMENT_FEATURE",
-        complexity: "moderate",
-      });
-
-      expect(result.isError).toBeUndefined();
     });
 
     it("should still return result when runLogger.log throws", async () => {
@@ -572,11 +505,10 @@ describe("PyreezMcpServer", () => {
         log: mock(() => Promise.reject(new Error("log write failed"))),
         query: mock(() => Promise.resolve([])),
       };
-      const deliberateFn = stubDeliberateFn();
+      const deliberateFn = mock(() => Promise.resolve(DELIB_OUT));
       const server = new PyreezMcpServer(validConfig({ runLogger, deliberateFn }));
 
       const result = await server.handleDeliberate({ task: "test task" });
-
       expect(result.isError).toBeUndefined();
     });
   });
