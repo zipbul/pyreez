@@ -52,6 +52,7 @@ export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
   registry: ModelRegistry;
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
+  /** @deprecated Stored in wire deps. Kept for backwards compatibility with index.ts. */
   deliberationStore?: DeliberationStore;
   runLogger?: RunLogger;
   engine: PyreezEngine;
@@ -85,7 +86,6 @@ export class PyreezMcpServer {
   private readonly mcpServer: McpServer;
   private readonly registry: ModelRegistry;
   private readonly deliberateFn?: PyreezMcpServerConfig["deliberateFn"];
-  private readonly deliberationStore?: DeliberationStore;
   private readonly runLogger?: RunLogger;
   private readonly engine: PyreezEngine;
   private readonly chatFn?: PyreezMcpServerConfig["chatFn"];
@@ -107,7 +107,6 @@ export class PyreezMcpServer {
     this.mcpServer = config.mcpServer;
     this.registry = config.registry;
     this.deliberateFn = config.deliberateFn;
-    this.deliberationStore = config.deliberationStore;
     this.runLogger = config.runLogger;
     this.engine = config.engine;
     this.chatFn = config.chatFn;
@@ -541,71 +540,40 @@ export class PyreezMcpServer {
       return this.errorResult("Error: task is required");
     }
 
-    // Explicit models bypass auto_route — always use manual deliberateFn path
+    // auto_route: resolve classification, then route through deliberateFn (Thompson Sampling)
     if (args.auto_route && !args.models?.length) {
       if (!args.domain) {
         return this.errorResult(
           "Error: domain is required when auto_route=true",
         );
       }
+      if (!this.deliberateFn) {
+        return this.errorResult("Error: deliberation not available");
+      }
+
       try {
-        const budget = { perRequest: args.budget ?? 1.0 };
         const taskType = args.task_type ?? DOMAIN_DEFAULTS[args.domain] ?? "QUESTION_ANSWER";
-        const complexity = (args.complexity ?? inferComplexity(args.task)) as TaskClassification["complexity"];
-        const criticality = complexity === "complex" ? "high"
-          : complexity === "simple" ? "low"
-          : "medium";
-        const classification: TaskClassification = {
-          domain: args.domain,
-          taskType,
-          complexity,
-          criticality,
-          qualityWeight: args.quality_weight,
-          costWeight: args.cost_weight,
-        };
         const userProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
         const taskNature = resolveTaskNature(args.domain, taskType);
+        const complexity = (args.complexity ?? inferComplexity(args.task)) as string;
         const autoDebate = !userProtocol && shouldAutoDebate(args.domain, taskType, complexity);
         const effectiveProtocol = userProtocol ?? (autoDebate ? "debate" as const : undefined);
-        const hasOverrides = effectiveProtocol != null || args.max_rounds != null || args.worker_instructions != null || taskNature != null;
-        const deliberationOverrides = hasOverrides ? {
-          protocol: effectiveProtocol,
-          maxRounds: args.max_rounds,
+
+        const input: DeliberateInput = {
+          task: args.task,
           workerInstructions: args.worker_instructions,
-          taskNature,
-        } : undefined;
+          maxRounds: args.max_rounds,
+          protocol: effectiveProtocol,
+          qualityWeight: args.quality_weight,
+          costWeight: args.cost_weight,
+          taskNature: taskNature ?? undefined,
+          domain: args.domain,
+          taskType,
+        };
 
-        const traceResult = await this.engine.runWithTrace(args.task, budget, classification, deliberationOverrides);
-        const result = traceResult.result;
-
-        // Auto-save deliberation result to store (best-effort)
-        if (this.deliberationStore) {
-          try {
-            await this.deliberationStore.save({
-              id: crypto.randomUUID(),
-              task: args.task,
-              timestamp: Date.now(),
-              roundsExecuted: result.roundsExecuted,
-              modelsUsed: result.modelsUsed,
-              totalLLMCalls: result.totalLLMCalls,
-              totalTokens: result.totalTokens,
-              protocol: result.protocol as "diverge-synth" | "debate" | undefined,
-              workerInstructions: args.worker_instructions,
-              ...(result.rounds ? { roundsSummary: result.rounds.map(r => ({ number: r.number })) } : {}),
-              ...(result.modelSwaps?.length ? { modelSwaps: result.modelSwaps } : {}),
-            });
-          } catch {
-            // best-effort save
-          }
-        }
-
+        const result = await this.deliberateFn(input);
         const response = {
           ...result,
-          routing: {
-            models: traceResult.plan.models,
-            strategy: traceResult.plan.strategy,
-            reason: traceResult.plan.reason,
-          },
           next_required_action: { tool: "pyreez_acceptance", reason: "After synthesizing, verify synthesis represents worker positions before presenting to user" },
           synthesis_checklist: {
             comprehend: "Fill unique_contribution, most_unexpected_claim, loss_if_removed for each worker",

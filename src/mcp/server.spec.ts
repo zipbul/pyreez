@@ -816,9 +816,9 @@ describe("PyreezMcpServer", () => {
 
     // -- auto_route tests --
 
-    it("should use engine.run when auto_route=true with classification", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
+    it("should use deliberateFn when auto_route=true with domain/taskType", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
 
       const result = await server.handleDeliberate({
         task: "Implement sorting",
@@ -829,14 +829,12 @@ describe("PyreezMcpServer", () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const call = (engine.runWithTrace as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[0]).toBe("Implement sorting");
-      expect(call[1]).toEqual({ perRequest: 1.0 });
-      expect(call[2].domain).toBe("CODING");
-      expect(call[2].taskType).toBe("IMPLEMENT_ALGORITHM");
-      expect(call[2].complexity).toBe("moderate");
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(callArg.task).toBe("Implement sorting");
+      expect(callArg.domain).toBe("CODING");
+      expect(callArg.taskType).toBe("IMPLEMENT_ALGORITHM");
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
-      expect(parsed.roundsExecuted).toBe(DEFAULT_RUN_RESULT.roundsExecuted);
+      expect(parsed.roundsExecuted).toBe(DELIBERATE_OUTPUT.roundsExecuted);
     });
 
     it("should return error when auto_route=true but domain is missing", async () => {
@@ -856,8 +854,8 @@ describe("PyreezMcpServer", () => {
     });
 
     it("should use domain default when auto_route=true but task_type omitted", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
 
       const result = await server.handleDeliberate({
         task: "task",
@@ -866,46 +864,42 @@ describe("PyreezMcpServer", () => {
       });
 
       expect(result.isError).toBeUndefined();
-      const call = (engine.runWithTrace as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[2].taskType).toBe("IMPLEMENT_FEATURE");
-      expect(call[2].complexity).toBe("simple"); // "task" is < 200 chars
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(callArg.taskType).toBe("IMPLEMENT_FEATURE"); // domain default
     });
 
-    it("should infer complexity when auto_route=true but complexity omitted", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
+    it("should forward domain and taskType in auto_route mode", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
 
-      const result = await server.handleDeliberate({
+      await server.handleDeliberate({
         task: "task",
         auto_route: true,
         domain: "CODING",
         task_type: "IMPLEMENT_FEATURE",
       });
 
-      expect(result.isError).toBeUndefined();
-      const call = (engine.runWithTrace as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[2].complexity).toBe("simple"); // inferred from short task
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(callArg.domain).toBe("CODING");
+      expect(callArg.taskType).toBe("IMPLEMENT_FEATURE");
     });
 
-    it("should forward budget to engine.run when auto_route=true with budget specified", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
+    it("should forward quality_weight and cost_weight in auto_route mode", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
 
       await server.handleDeliberate({
         task: "Sort an array",
         auto_route: true,
         domain: "CODING",
         task_type: "IMPLEMENT_ALGORITHM",
-        complexity: "simple",
-        budget: 0.25,
+        quality_weight: 0.8,
+        cost_weight: 0.2,
       });
 
-      const call = (engine.runWithTrace as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[0]).toBe("Sort an array");
-      expect(call[1]).toEqual({ perRequest: 0.25 });
-      expect(call[2].domain).toBe("CODING");
-      expect(call[2].taskType).toBe("IMPLEMENT_ALGORITHM");
-      expect(call[2].complexity).toBe("simple");
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(callArg.qualityWeight).toBe(0.8);
+      expect(callArg.costWeight).toBe(0.2);
     });
 
     it("should forward quality_weight and cost_weight to deliberateFn in manual deliberation", async () => {
@@ -923,41 +917,19 @@ describe("PyreezMcpServer", () => {
       expect(callArg.costWeight).toBe(0.1);
     });
 
-    it("should forward quality_weight and cost_weight to engine.run via classification in auto_route mode", async () => {
-      const engine = stubEngine();
-      const server = new PyreezMcpServer(validConfig({ engine }));
-
-      await server.handleDeliberate({
-        task: "Optimize query",
-        auto_route: true,
-        domain: "CODING",
-        task_type: "OPTIMIZE",
-        complexity: "moderate",
-        quality_weight: 0.8,
-        cost_weight: 0.2,
-      });
-
-      const call = (engine.runWithTrace as ReturnType<typeof mock>).mock.calls[0]!;
-      expect(call[2].qualityWeight).toBe(0.8);
-      expect(call[2].costWeight).toBe(0.2);
-    });
-
-    it("should return error with Error.message when engine.runWithTrace throws Error in auto_route mode", async () => {
-      const engine = stubEngine({
-        runWithTrace: mock(() => Promise.reject(new Error("pipeline failed"))),
-      } as unknown as Partial<PyreezEngine>);
-      const server = new PyreezMcpServer(validConfig({ engine }));
+    it("should return error when deliberateFn throws in auto_route mode", async () => {
+      const deliberateFn = stubDeliberateFn(undefined, new Error("deliberation failed"));
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
 
       const result = await server.handleDeliberate({
         task: "task",
         auto_route: true,
         domain: "CODING",
         task_type: "IMPLEMENT_FEATURE",
-        complexity: "complex",
       });
 
       expect(result.isError).toBe(true);
-      expect((result.content[0] as { text: string }).text).toContain("pipeline failed");
+      expect((result.content[0] as { text: string }).text).toContain("deliberation failed");
     });
   });
 

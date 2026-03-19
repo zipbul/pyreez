@@ -28,7 +28,7 @@ For `$ARGUMENTS` or when the user provides a topic, copy this checklist and chec
 - [ ] reflect: Uncertainty, Dismissed, Counterargument each with concrete change
 - [ ] synthesize: draft ready, not yet presented to user
 - [ ] accept: called pyreez_acceptance, all workers accepted
-- [ ] feedback: called pyreez_feedback with pairwise preferences
+- [ ] feedback: called pyreez_feedback with pairwise preferences and optional evaluations
 </checklist>
 
 <workflow>
