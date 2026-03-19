@@ -581,6 +581,12 @@ export class PyreezMcpServer {
             strategy: traceResult.plan.strategy,
             reason: traceResult.plan.reason,
           },
+          next_required_action: { tool: "pyreez_acceptance", reason: "After synthesizing, verify synthesis represents worker positions before presenting to user" },
+          synthesis_checklist: {
+            comprehend: "Fill unique_contribution, most_unexpected_claim, loss_if_removed for each worker",
+            evaluate: "Label every factual claim with [x] fact / [ ] unverified. Amplify creative proposals.",
+            reflect: "Fill Uncertainty, Dismissed, Counterargument — each with a concrete change to the synthesis",
+          },
         };
         return this.textResult(JSON.stringify(response, null, 2));
       } catch (error) {
@@ -619,7 +625,16 @@ export class PyreezMcpServer {
         ...(manualTaskNature ? { taskNature: manualTaskNature } : {}),
       };
       const result = await this.deliberateFn(input);
-      return this.textResult(JSON.stringify(result, null, 2));
+      const manualResponse = {
+        ...result,
+        next_required_action: { tool: "pyreez_acceptance", reason: "After synthesizing, verify synthesis represents worker positions before presenting to user" },
+        synthesis_checklist: {
+          comprehend: "Fill unique_contribution, most_unexpected_claim, loss_if_removed for each worker",
+          evaluate: "Label every factual claim with [x] fact / [ ] unverified. Amplify creative proposals.",
+          reflect: "Fill Uncertainty, Dismissed, Counterargument — each with a concrete change to the synthesis",
+        },
+      };
+      return this.textResult(JSON.stringify(manualResponse, null, 2));
     } catch (error) {
       if (error instanceof NoModelsAvailableError) {
         return this.errorResult(JSON.stringify({
@@ -693,6 +708,7 @@ export class PyreezMcpServer {
       return this.textResult(JSON.stringify({
         workers,
         totalTokens: { input: totalInput, output: totalOutput },
+        next_required_action: { tool: "pyreez_feedback", reason: "Submit pairwise preferences to update Bradley-Terry ratings. Without feedback, team selection degrades." },
       }, null, 2));
     } catch (error) {
       return this.errorResult(`Error: ${sanitizeError(error)}`);
