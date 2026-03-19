@@ -139,8 +139,8 @@ describe("ClaudeCliProvider", () => {
         expect(callArgs).toContain("claude-sonnet-4-6");
         expect(callArgs).toContain("--output-format");
         expect(callArgs).toContain("json");
-        expect(callArgs).toContain("--max-turns");
-        expect(callArgs).toContain("1");
+        expect(callArgs).toContain("--tools");
+        expect(callArgs).toContain("");
       } finally {
         restoreSpawn();
       }

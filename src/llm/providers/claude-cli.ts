@@ -69,8 +69,7 @@ export class ClaudeCliProvider implements LLMProvider {
       "--model", modelId,
       "--output-format", "json",
       "--system-prompt", systemPrompt,
-      "--max-turns", "1",
-      "--tools", "",  // Disable all tools — pyreez needs raw LLM inference, not agent behavior
+      "--tools", "",  // Disable tools — pyreez needs raw LLM inference, not agent behavior
     ];
 
     try {
