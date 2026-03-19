@@ -244,13 +244,15 @@ export function createDeliberateFn(
                 input.domain, taskType, deliberationId, teamProviders,
               );
               deps.skillCellStore.update(feedback);
-            } catch {
+            } catch (evalErr) {
+              // Per-worker evaluation failure — skip this worker, continue others
               // Per-worker evaluation failure — skip this worker, continue others
             }
           }
           await deps.skillCellStore.save();
         }
-      } catch {
+      } catch (outerEvalErr) {
+        // best-effort — do not fail deliberation
         // best-effort — do not fail deliberation
       }
     }

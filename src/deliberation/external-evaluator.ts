@@ -110,6 +110,8 @@ export class LLMExternalEvaluator implements ExternalEvaluator {
   private readonly deps: EvaluatorDeps;
   /** Last evaluator provider used — for rotation. */
   private lastEvaluatorProvider: string | null = null;
+  /** Track models that failed during this session to deprioritize them. */
+  private failedModels = new Set<string>();
 
   constructor(deps: EvaluatorDeps) {
     this.deps = deps;
@@ -124,63 +126,81 @@ export class LLMExternalEvaluator implements ExternalEvaluator {
     deliberationId: string,
     teamProviders: Set<string>,
   ): Promise<FeedbackRecord> {
-    const evaluatorModel = this.selectEvaluator(teamProviders);
-    if (!evaluatorModel) {
+    const candidates = this.rankEvaluatorCandidates(teamProviders);
+    if (candidates.length === 0) {
       throw new Error("No evaluator model available outside team providers");
     }
 
     const messages = buildEvalPrompt(task, responseContent);
-    const result = await this.deps.chat(
-      evaluatorModel.id,
-      messages,
-      { temperature: 0, max_tokens: 512 },
-    );
 
-    const parsed = parseEvalResponse(result.content);
-    if (!parsed) {
-      throw new Error(`Failed to parse evaluator response: ${result.content.slice(0, 200)}`);
+    // Try candidates in order — if one fails, try next
+    let lastError: Error | null = null;
+    for (const evaluatorModel of candidates) {
+      try {
+        const result = await this.deps.chat(
+          evaluatorModel.id,
+          messages,
+          { temperature: 0, max_tokens: 512 },
+        );
+
+        const parsed = parseEvalResponse(result.content);
+        if (!parsed) {
+          lastError = new Error(`Failed to parse evaluator response from ${evaluatorModel.id}: ${result.content.slice(0, 200)}`);
+          continue; // try next candidate
+        }
+
+        this.lastEvaluatorProvider = evaluatorModel.provider;
+        // Mark failed models to avoid re-selecting them
+        this.failedModels.add(evaluatorModel.id);
+        // Clear on success — only track consecutive failures
+        this.failedModels.clear();
+
+        return {
+          deliberation_id: deliberationId,
+          model_id: modelId,
+          domain,
+          task_type: taskType,
+          evaluator_id: evaluatorModel.id,
+          dimensions: parsed.dimensions,
+          failures: parsed.failures,
+          timestamp: Date.now(),
+        };
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        this.failedModels.add(evaluatorModel.id);
+        // Try next candidate
+      }
     }
 
-    this.lastEvaluatorProvider = evaluatorModel.provider;
-
-    return {
-      deliberation_id: deliberationId,
-      model_id: modelId,
-      domain,
-      task_type: taskType,
-      evaluator_id: evaluatorModel.id,
-      dimensions: parsed.dimensions,
-      failures: parsed.failures,
-      timestamp: Date.now(),
-    };
+    throw lastError ?? new Error("All evaluator candidates failed");
   }
 
-  /** Select cheapest evaluator model from a different provider than team + last evaluator. */
-  private selectEvaluator(teamProviders: Set<string>): ModelInfo | null {
-    const available = this.deps.getAvailableModels();
+  /**
+   * Rank evaluator candidates by preference: different provider > same provider > any.
+   * Excludes previously failed models. Returns ordered list to try in sequence.
+   */
+  private rankEvaluatorCandidates(teamProviders: Set<string>): ModelInfo[] {
+    const available = this.deps.getAvailableModels()
+      .filter((m) => !this.failedModels.has(m.id));
 
-    // Prefer: different provider from team AND different from last evaluator
-    const candidates = available.filter(
-      (m) => !teamProviders.has(m.provider) && m.provider !== this.lastEvaluatorProvider,
-    );
+    const byCost = (a: ModelInfo, b: ModelInfo) => this.modelCost(a) - this.modelCost(b);
 
-    if (candidates.length > 0) {
-      // Pick cheapest
-      return candidates.sort((a, b) => this.modelCost(a) - this.modelCost(b))[0]!;
-    }
+    // Tier 1: different provider from team AND different from last evaluator
+    const tier1 = available
+      .filter((m) => !teamProviders.has(m.provider) && m.provider !== this.lastEvaluatorProvider)
+      .sort(byCost);
 
-    // Relax: different from team only (allow same as last evaluator)
-    const relaxed = available.filter((m) => !teamProviders.has(m.provider));
-    if (relaxed.length > 0) {
-      return relaxed.sort((a, b) => this.modelCost(a) - this.modelCost(b))[0]!;
-    }
+    // Tier 2: different from team only
+    const tier2 = available
+      .filter((m) => !teamProviders.has(m.provider) && !tier1.includes(m))
+      .sort(byCost);
 
-    // Last resort: any available model (provider constraint fully relaxed)
-    if (available.length > 0) {
-      return available.sort((a, b) => this.modelCost(a) - this.modelCost(b))[0]!;
-    }
+    // Tier 3: any available (provider constraint relaxed)
+    const tier3 = available
+      .filter((m) => !tier1.includes(m) && !tier2.includes(m))
+      .sort(byCost);
 
-    return null;
+    return [...tier1, ...tier2, ...tier3];
   }
 
   private modelCost(model: ModelInfo): number {

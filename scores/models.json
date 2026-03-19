@@ -67,9 +67,9 @@
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 971,
-          "sigma": 100,
-          "comparisons": 0
+          "mu": 984.2740330535606,
+          "sigma": 98.23561477892187,
+          "comparisons": 1
         },
         "CONFIDENCE_CALIBRATION": {
           "mu": 971,
@@ -4431,9 +4431,9 @@
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 700,
-          "sigma": 130,
-          "comparisons": 0
+          "mu": 681.5652173913044,
+          "sigma": 128.0782608695652,
+          "comparisons": 1
         },
         "ANALYSIS": {
           "mu": 700,
@@ -4476,9 +4476,9 @@
           "comparisons": 0
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 700,
-          "sigma": 130,
-          "comparisons": 0
+          "mu": 717.9080745341615,
+          "sigma": 128.02173913043478,
+          "comparisons": 1
         },
         "SELF_CONSISTENCY": {
           "mu": 700,
@@ -4669,9 +4669,9 @@
           "comparisons": 0
         },
         "CREATIVITY": {
-          "mu": 680,
-          "sigma": 135,
-          "comparisons": 0
+          "mu": 698.4347826086956,
+          "sigma": 133.00434782608696,
+          "comparisons": 1
         },
         "ANALYSIS": {
           "mu": 680,
@@ -4709,14 +4709,14 @@
           "comparisons": 0
         },
         "HALLUCINATION_RESISTANCE": {
-          "mu": 680,
-          "sigma": 135,
-          "comparisons": 0
+          "mu": 666.7259669464394,
+          "sigma": 132.61807995154453,
+          "comparisons": 1
         },
         "CONFIDENCE_CALIBRATION": {
-          "mu": 680,
-          "sigma": 135,
-          "comparisons": 0
+          "mu": 662.0919254658385,
+          "sigma": 132.94565217391303,
+          "comparisons": 1
         },
         "SELF_CONSISTENCY": {
           "mu": 680,
