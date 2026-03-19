@@ -1,7 +1,7 @@
 /**
  * PyreezMcpServer — MCP server exposing infrastructure tools.
  *
- * Tools: pyreez_route, pyreez_scores, pyreez_deliberate, pyreez_acceptance, pyreez_feedback
+ * Tools: pyreez_deliberate, pyreez_acceptance, pyreez_feedback
  * Architecture: pyreez = Infrastructure layer, Host = Orchestrator + Synthesizer.
  *
  * Classification: host provides domain (required), task_type and complexity are auto-inferred if omitted.
@@ -455,7 +455,7 @@ export class PyreezMcpServer {
       return this.textResult(JSON.stringify({
         workers,
         totalTokens: { input: totalInput, output: totalOutput },
-        next_required_action: { tool: "pyreez_feedback", reason: "Submit pairwise preferences to update Bradley-Terry ratings. Without feedback, team selection degrades." },
+        next_required_action: { tool: "pyreez_feedback", reason: "Submit per-model evaluations to update SkillCell scores. Without feedback, team selection degrades." },
       }, null, 2));
     } catch (error) {
       return this.errorResult(`Error: ${sanitizeError(error)}`);

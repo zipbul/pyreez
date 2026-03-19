@@ -2,7 +2,7 @@
  * Axis boundary types — shared across the 3-stage pipeline.
  *
  * Stage 1: Understand — host provides TaskClassification, engine does profile lookup
- * Stage 2: Select — BT scoring + 2-Track CE selector
+ * Stage 2: Select — 2-Track CE selector
  * Stage 3: Execute — Role-Based deliberation or single-model call
  */
 
@@ -99,8 +99,7 @@ export interface DeliberationResult {
 // -- Scoring output: ModelScore --
 
 /**
- * Model score — output of ScoringSystem.
- * Contains per-dimension BT ratings plus an overall composite score.
+ * Model score — per-dimension ratings plus an overall composite score.
  */
 export interface ModelScore {
   modelId: string;
@@ -147,18 +146,6 @@ export type ChatFn = (
   input: string | import("../llm/types").ChatMessage[],
   params?: import("../deliberation/types").GenerationParams,
 ) => Promise<ChatResult>;
-
-/**
- * Pairwise comparison result for BT rating update.
- */
-export interface PairwiseResult {
-  modelAId: string;
-  modelBId: string;
-  /** "A>>B" | "A>B" | "A=B" | "B>A" | "B>>A" */
-  outcome: string;
-  dimension: string;
-  taskType?: string;
-}
 
 // -- SkillCell types (feedback redesign) --
 

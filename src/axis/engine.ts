@@ -8,22 +8,33 @@
  */
 
 import type {
-  ScoringSystem,
   Profiler,
   Selector,
   DeliberationProtocol,
   DeliberationOverrides,
-  LearningLayer,
 } from "./interfaces";
 import type {
   BudgetConfig,
   ChatFn,
   TaskClassification,
   DeliberationResult,
+  EnsemblePlan,
+  ModelScore,
   SlotTrace,
   RunTrace,
 } from "./types";
 import type { CooldownManager } from "../deliberation/cooldown";
+
+/** Scoring system — returns model scores for selection. */
+export interface ScoringSystem {
+  getScores(modelIds: string[]): Promise<ModelScore[]>;
+}
+
+/** Learning layer — cross-cutting concern that improves scoring over time. */
+export interface LearningLayer {
+  record(classified: TaskClassification, plan: EnsemblePlan, result: DeliberationResult): Promise<void>;
+  enhance(scores: ModelScore[], classified: TaskClassification): Promise<ModelScore[]>;
+}
 
 export class PyreezEngine {
   constructor(
@@ -57,7 +68,7 @@ export class PyreezEngine {
       }
     }
 
-    // Scoring: get BT ratings
+    // Scoring: get model ratings
     let scores = await this.scoring.getScores(effectiveModelIds);
 
     // Learning Layer: apply L2~L4 personal corrections (optional)

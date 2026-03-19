@@ -48,7 +48,7 @@ export type LanguageDimension =
  */
 export type OperationalDimension = "SPEED" | "COST_EFFICIENCY";
 
-/** Set of operational dimension names — shared across bootstrap, wrappers, and selectors. */
+/** Set of operational dimension names — shared across wrappers and selectors. */
 export const OPERATIONAL_DIM_NAMES: ReadonlySet<string> = new Set<OperationalDimension>(["SPEED", "COST_EFFICIENCY"]);
 
 /**
@@ -93,13 +93,13 @@ export const ALL_DIMENSIONS: readonly CapabilityDimension[] = [
   "COST_EFFICIENCY",
 ] as const;
 
-// -- BT Dimensional Rating --
+// -- Dimensional Rating --
 
 /** Initial sigma for new/uncompared dimensions. */
 export const SIGMA_BASE = 350;
 
 /**
- * Bradley-Terry dimensional rating.
+ * Dimensional rating.
  * Replaces the old 0-10 integer + separate confidence.
  */
 export interface DimensionRating {
@@ -142,7 +142,7 @@ export interface ModelInfo {
   provider: import("../llm/types").ProviderName;
   /** Context window size in tokens. */
   contextWindow: number;
-  /** Capability ratings (BT DimensionRating per dimension). */
+  /** Capability ratings (DimensionRating per dimension). */
   capabilities: ModelCapabilities;
   /** Pricing info. */
   cost: ModelCost;

@@ -52,7 +52,7 @@ function makeModel(overrides: {
   };
 }
 
-/** Create a ModelInfo with explicit DimensionRating values (BT rating style). */
+/** Create a ModelInfo with explicit DimensionRating values. */
 function makeBTModel(overrides: {
   id: string;
   capabilities?: Partial<
@@ -194,7 +194,7 @@ describe("scoreDimensions", () => {
   });
 });
 
-describe("scoreDimensions (BT rating)", () => {
+describe("scoreDimensions", () => {
   it("should compute weighted sum using mu and sigma", () => {
     // Arrange -- mu=800, sigma=350 -> penalty = 1/(1+350/350) = 0.5
     const model = makeBTModel({

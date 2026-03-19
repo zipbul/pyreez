@@ -69,7 +69,7 @@ export { extractProvider };
 
 /**
  * Score a model against weighted dimensions.
- * Uses BT uncertainty penalty: score = mu * (1 / (1 + sigma / SIGMA_BASE)) * weight
+ * Uses uncertainty penalty: score = mu * (1 / (1 + sigma / SIGMA_BASE)) * weight
  */
 export function scoreDimensions(
   model: ModelInfo,

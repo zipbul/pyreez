@@ -4,7 +4,6 @@
 
 /**
  * A single LLM call record for quality/cost tracking.
- * Used by calibration module for pairwise signal extraction.
  */
 export interface CallRecord {
   /** Model ID used (e.g., "openai/gpt-4.1"). */

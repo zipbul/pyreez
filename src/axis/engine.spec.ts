@@ -3,12 +3,11 @@
  */
 import { describe, it, expect, mock } from "bun:test";
 import { PyreezEngine } from "./engine";
+import type { ScoringSystem, LearningLayer } from "./engine";
 import type {
-  ScoringSystem,
   Profiler,
   Selector,
   DeliberationProtocol,
-  LearningLayer,
 } from "./interfaces";
 import type {
   ModelScore,
@@ -75,7 +74,6 @@ function makeMocks(planOverride?: EnsemblePlan): {
   return {
     scoring: {
       getScores: mock(async () => [mockScore]),
-      update: mock(async () => {}),
     },
     profiler: {
       profile: mock(async () => mockReq),

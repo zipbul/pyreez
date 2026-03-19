@@ -191,11 +191,11 @@ describe("ModelRegistry", () => {
 });
 
 // ================================================================
-// BT Dimensional Rating — parseModels + ModelRegistry
+// Dimensional Rating — parseModels + ModelRegistry
 // ================================================================
 
 /**
- * BT Rating tests for registry.
+ * DimensionRating tests for registry.
  * Expects DimensionRating { mu, sigma, comparisons }.
  * mu scale: 0-1000 (old score × 100).
  * sigma: initial 350, decreases with comparisons.

@@ -2,7 +2,7 @@
  * SkillCell Store — per-model, per-domain, per-task_type skill profiles.
  *
  * Stores Beta distribution parameters for Thompson Sampling model selection.
- * Persistence: scores/skillcells.json (separate from BT scores in models.json).
+ * Persistence: scores/skillcells.json.
  *
  * @module SkillCell Store
  */

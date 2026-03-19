@@ -60,7 +60,7 @@ function createMockRegistry(models: ModelInfo[] = MODELS) {
   };
 }
 
-// -- Stub Engine (only needed for pyreez_route / auto_route, not manual deliberateFn path) --
+// -- Test helpers --
 
 
 // -- Long enough response to pass MIN_WORKER_RESPONSE_LENGTH (200 chars) --

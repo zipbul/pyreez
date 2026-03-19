@@ -363,7 +363,7 @@ export async function executeRound(
         responses.push(wr.response);
       } else if (wr.response && wr.degenerate) {
         // Degenerate = quality issue, not error. Include in failedWorkers for tracking
-        // but don't trigger fallback. Score penalty handled downstream (PoLL judge).
+        // but don't trigger fallback.
         failedWorkers.push({
           model: wr.response.model,
           error: `degenerate response (below ${MIN_WORKER_RESPONSE_LENGTH} chars)`,

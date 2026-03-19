@@ -269,7 +269,7 @@ for (const [domain, tasks] of Object.entries(DOMAIN_TASK_TYPES)) {
 
 /**
  * Get the primary capability dimensions for a task type.
- * Single source of truth — used by both profiler (routing) and calibration (BT updates).
+ * Single source of truth — used by profiler (routing).
  * Resolves: TASK_OVERRIDES → DOMAIN_DEFAULTS (via auto-resolved domain) → ["REASONING"] fallback.
  */
 export function getDimensionsForTask(taskType: string, domain?: string): string[] {

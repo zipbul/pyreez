@@ -76,7 +76,7 @@ describe("KnnSelector", () => {
     const plan = await selector.select(req, scores, budget);
 
     expect(plan.strategy).toBe("knn-preference");
-    // m2 should be first despite lower BT score, because preference data favors it
+    // m2 should be first despite lower score, because preference data favors it
     expect(plan.models[0]!.modelId).toBe("m2");
   });
 

@@ -154,8 +154,6 @@ export interface DeliberateOutput {
     responses?: readonly { model: string; content: string; role?: string }[];
     failedWorkers?: readonly { model: string; error: string }[];
   }[];
-  /** PoLL judge scores per worker model. */
-  readonly pollScores?: readonly { model: string; score: number }[];
   /** Warnings about deliberation quality (e.g., low provider diversity). */
   readonly warnings?: readonly string[];
   /** Model swaps that occurred during deliberation (worker failure → fallback). */

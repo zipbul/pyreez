@@ -14,27 +14,12 @@ import modelsJson from "../../scores/models.json";
 
 // -- JSON → ModelInfo parser --
 
-/** V2 score entry: BT dimensional rating. */
-interface ScoreEntry {
-  mu: number;
-  sigma: number;
-  comparisons: number;
-}
-
-/** V1 legacy score entry (auto-migrated). */
-interface LegacyScoreEntry {
-  score: number;
-  confidence: number;
-  dataPoints: number;
-}
-
 interface JsonModelEntry {
   name: string;
   provider: ProviderName;
   contextWindow: number;
   supportsToolCalling: boolean;
   cost: { inputPer1M: number; outputPer1M: number };
-  scores: Record<string, ScoreEntry>;
   available?: boolean;
 }
 
@@ -46,29 +31,13 @@ interface ModelsJsonSchema {
 /** Default DimensionRating for missing entries. */
 const DEFAULT_RATING: DimensionRating = { mu: 500, sigma: SIGMA_BASE, comparisons: 0 };
 
-/** Detect if entry is legacy v1 format (has 'score' key). */
-function isLegacy(entry: unknown): entry is LegacyScoreEntry {
-  return typeof entry === "object" && entry !== null && "score" in entry;
-}
-
 function parseModels(data: ModelsJsonSchema): ModelInfo[] {
   const result: ModelInfo[] = [];
 
   for (const [id, entry] of Object.entries(data.models)) {
-    // BT capabilities removed (v3) — use empty capabilities
     const capabilities: Record<string, DimensionRating> = {};
-    if (entry.scores) {
-      for (const dim of ALL_DIMENSIONS) {
-        const raw = entry.scores[dim] as unknown;
-        if (!raw) {
-          capabilities[dim] = { ...DEFAULT_RATING };
-        } else if (isLegacy(raw)) {
-          capabilities[dim] = { mu: raw.score * 100, sigma: SIGMA_BASE, comparisons: raw.dataPoints };
-        } else {
-          const v2 = raw as ScoreEntry;
-          capabilities[dim] = { mu: v2.mu ?? 0, sigma: v2.sigma ?? SIGMA_BASE, comparisons: v2.comparisons ?? 0 };
-        }
-      }
+    for (const dim of ALL_DIMENSIONS) {
+      capabilities[dim] = { ...DEFAULT_RATING };
     }
 
     result.push({
