@@ -1,121 +1,8 @@
 /**
- * Axis boundary types — shared across the 3-stage pipeline.
- *
- * Stage 1: Understand — host provides TaskClassification, engine does profile lookup
- * Stage 2: Select — 2-Track CE selector
- * Stage 3: Execute — Role-Based deliberation or single-model call
+ * Axis types — shared across deliberation infrastructure.
  */
-
-// -- Stage 1 input: TaskClassification (provided by host agent) --
-
-/**
- * Task classification provided by the host agent via MCP tool parameters.
- * Replaces server-side keyword/LLM classification.
- */
-export interface TaskClassification {
-  domain: string;
-  taskType: string;
-  complexity: "simple" | "moderate" | "complex";
-  criticality?: "low" | "medium" | "high" | "critical";
-  language?: string;
-  /** Per-request quality weight override from host. */
-  qualityWeight?: number;
-  /** Per-request cost weight override from host. */
-  costWeight?: number;
-}
-
-// -- Stage 1 output: AxisTaskRequirement --
-
-/**
- * Task requirement profile — output of profile lookup.
- * Named AxisTaskRequirement to avoid collision with src/profile/types.ts TaskRequirement.
- */
-export interface AxisTaskRequirement {
-  /** Capability dimension → importance weight (0~1). Sum should ~= 1.0. */
-  capabilities: Record<string, number>;
-  constraints: {
-    minContextWindow?: number;
-    requiresToolCalling?: boolean;
-    requiresKorean?: boolean;
-    structuredOutput?: boolean;
-  };
-  budget: {
-    maxPerRequest?: number;
-    /** Per-request quality weight override (from MCP host). */
-    qualityWeight?: number;
-    /** Per-request cost weight override (from MCP host). */
-    costWeight?: number;
-  };
-  /** Domain carried through from TaskClassification for Selector's domain-specific scoring. */
-  domain?: string;
-  /** Task type carried through from TaskClassification for Selector's task-specific scoring. */
-  taskType?: string;
-  /** Criticality carried through from TaskClassification for Selector's quality-first decision. */
-  criticality?: string;
-  /** Token estimates passed from Profiler for cost filtering in Selector. */
-  estimatedInputTokens?: number;
-  estimatedOutputTokens?: number;
-}
-
-// -- Stage 2 output: EnsemblePlan --
-
-/**
- * Model selection plan — output of Selector.
- */
-export interface EnsemblePlan {
-  models: Array<{
-    modelId: string;
-    role?: string;
-    weight?: number;
-  }>;
-  strategy: string;
-  estimatedCost: number;
-  /** Total effective cost across all rounds, accounting for provider prompt caching. */
-  effectiveCost?: number;
-  reason: string;
-}
-
-// -- Stage 3 output: DeliberationResult --
-
-/**
- * Final deliberation result — output of DeliberationProtocol.
- */
-export interface DeliberationResult {
-  roundsExecuted: number;
-  totalLLMCalls: number;
-  modelsUsed: string[];
-  /** Which protocol variant was used (e.g., "diverge-synth", "debate"). */
-  protocol: string;
-  /** Unique session ID for feedback linkage (Not Diamond session reference). */
-  sessionId?: string;
-  /** Token usage for cost tracking. */
-  totalTokens?: { input: number; output: number };
-  /** Per-round worker responses for audit trail. */
-  rounds?: readonly { number: number; responses?: readonly { model: string; content: string }[]; failedWorkers?: readonly { model: string; error: string }[] }[];
-  /** Model swaps that occurred during deliberation (worker failure → fallback). */
-  modelSwaps?: readonly import("../deliberation/types").ModelSwap[];
-}
-
-// -- Scoring output: ModelScore --
-
-/**
- * Model score — per-dimension ratings plus an overall composite score.
- */
-export interface ModelScore {
-  modelId: string;
-  dimensions: Record<string, { mu: number; sigma: number }>;
-  /** Composite score (sum of weighted mu across key dimensions). */
-  overall: number;
-}
 
 // -- Shared utility types --
-
-/**
- * Budget configuration for a single request.
- */
-export interface BudgetConfig {
-  perRequest: number;
-}
 
 /**
  * Result of a single LLM call, including token usage.
@@ -130,16 +17,6 @@ export interface ChatResult {
 
 /**
  * Chat function injected into the engine — allows any LLM backend.
- *
- * Accepts either a plain string (user prompt) or a ChatMessage[] array
- * (multi-turn conversation). Implementations must handle both forms:
- * - string → wrap as [{ role: "user", content: input }]
- * - ChatMessage[] → pass directly to the LLM API
- *
- * Optional GenerationParams (temperature, max_tokens, top_p) are forwarded
- * to the LLM provider when provided.
- *
- * Returns ChatResult with content + token usage for cost tracking.
  */
 export type ChatFn = (
   modelId: string,
@@ -147,7 +24,7 @@ export type ChatFn = (
   params?: import("../deliberation/types").GenerationParams,
 ) => Promise<ChatResult>;
 
-// -- SkillCell types (feedback redesign) --
+// -- SkillCell types (feedback system) --
 
 /** Binary evaluation dimensions for a worker response. */
 export interface BinaryDimensions {
@@ -210,18 +87,3 @@ export const FAILURE_FLAGS = [
   "off_topic",
   "degenerate",
 ] as const;
-
-// -- Trace types (for benchmark / dry-run) --
-
-/** Stage 1-2 intermediate results (no LLM calls). */
-export interface SlotTrace {
-  scores: ModelScore[];
-  classified: TaskClassification;
-  requirement: AxisTaskRequirement;
-  plan: EnsemblePlan;
-}
-
-/** Full pipeline trace including Stage 3 deliberation result. */
-export interface RunTrace extends SlotTrace {
-  result: DeliberationResult;
-}
