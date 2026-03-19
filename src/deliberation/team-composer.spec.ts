@@ -580,3 +580,191 @@ describe("orderWorkersByRole", () => {
     expect(ordered).toEqual([]);
   });
 });
+
+// =============================================================================
+// Thompson Sampling + Wilson Score
+// =============================================================================
+
+import { thompsonSelect, wilsonLower, shouldExclude } from "./team-composer";
+import { FileSkillCellStore } from "../model/skillcell-store";
+import type { FeedbackRecord } from "../axis/types";
+
+function makeSkillCellStore(): FileSkillCellStore {
+  const io = { async readFile() { throw new Error("no file"); }, async writeFile() {} };
+  return new FileSkillCellStore({ io, path: "test.json" });
+}
+
+function makeFeedbackForModel(modelId: string, domain: string, taskType: string, allPass = true): FeedbackRecord {
+  return {
+    deliberation_id: "d1",
+    model_id: modelId,
+    domain,
+    task_type: taskType,
+    evaluator_id: "eval",
+    dimensions: {
+      factually_correct: allPass,
+      addresses_task: true,
+      provides_evidence: allPass,
+      novel_perspective: allPass,
+      internally_consistent: true,
+    },
+    failures: { hallucination: false, refusal: false, off_topic: false, degenerate: false },
+    timestamp: Date.now(),
+  };
+}
+
+/** Minimal ModelInfo for TS tests. Provider extracted from id prefix. */
+function makeModelInfo(id: string): ModelInfo {
+  const provider = id.split("/")[0] ?? "unknown";
+  const caps: Record<string, { mu: number; sigma: number; comparisons: number }> = {};
+  for (const dim of ALL_DIMENSIONS) {
+    caps[dim] = { mu: 500, sigma: 350, comparisons: 0 };
+  }
+  return {
+    id,
+    name: id,
+    provider: provider as any,
+    contextWindow: 128_000,
+    capabilities: caps as any,
+    cost: { inputPer1M: 1, outputPer1M: 1 },
+    supportsToolCalling: true,
+    family: provider,
+  };
+}
+
+describe("wilsonLower", () => {
+  it("should return 0 for n=0", () => {
+    expect(wilsonLower(0.5, 0)).toBe(0);
+  });
+
+  it("should return value between 0 and passRate", () => {
+    const lower = wilsonLower(0.8, 100);
+    expect(lower).toBeGreaterThan(0);
+    expect(lower).toBeLessThan(0.8);
+  });
+
+  it("should return 0 for passRate=0, n>0", () => {
+    const lower = wilsonLower(0, 10);
+    expect(lower).toBe(0);
+  });
+
+  it("should approach passRate for large n", () => {
+    const lower = wilsonLower(0.9, 10000);
+    expect(lower).toBeGreaterThan(0.89);
+  });
+});
+
+describe("shouldExclude", () => {
+  it("should return false for null cell", () => {
+    expect(shouldExclude(null)).toBe(false);
+  });
+
+  it("should return false for low observation count", () => {
+    const store = makeSkillCellStore();
+    store.update(makeFeedbackForModel("m1", "D", "T", false));
+    const cell = store.get("m1", "D", "T");
+    expect(shouldExclude(cell)).toBe(false); // total=1, below MIN_OBS_FOR_EXCLUSION
+  });
+
+  it("should return true for consistently failing model with enough observations", () => {
+    const store = makeSkillCellStore();
+    // 15 observations, all failing on factually_correct
+    for (let i = 0; i < 15; i++) {
+      store.update(makeFeedbackForModel("m1", "D", "T", false));
+    }
+    const cell = store.get("m1", "D", "T");
+    expect(shouldExclude(cell)).toBe(true);
+  });
+
+  it("should return false for consistently passing model", () => {
+    const store = makeSkillCellStore();
+    for (let i = 0; i < 15; i++) {
+      store.update(makeFeedbackForModel("m1", "D", "T", true));
+    }
+    const cell = store.get("m1", "D", "T");
+    expect(shouldExclude(cell)).toBe(false);
+  });
+});
+
+describe("thompsonSelect", () => {
+  it("should return all models if pool <= count", () => {
+    const pool = [makeModelInfo("a/m1"), makeModelInfo("b/m2")];
+    const store = makeSkillCellStore();
+    const selected = thompsonSelect("D", "T", pool, 5, store);
+    expect(selected).toHaveLength(2);
+  });
+
+  it("should select exactly count models from larger pool", () => {
+    const pool = [
+      makeModelInfo("a/m1"), makeModelInfo("b/m2"),
+      makeModelInfo("c/m3"), makeModelInfo("d/m4"),
+      makeModelInfo("e/m5"),
+    ];
+    const store = makeSkillCellStore();
+    const selected = thompsonSelect("D", "T", pool, 3, store);
+    expect(selected).toHaveLength(3);
+  });
+
+  it("should exclude models below Wilson threshold", () => {
+    const pool = [
+      makeModelInfo("a/good"), makeModelInfo("b/bad"),
+      makeModelInfo("c/ok"), makeModelInfo("d/ok2"),
+    ];
+    const store = makeSkillCellStore();
+
+    // good: 15 passes
+    for (let i = 0; i < 15; i++) store.update(makeFeedbackForModel("a/good", "D", "T", true));
+    // bad: 15 fails — should be excluded
+    for (let i = 0; i < 15; i++) store.update(makeFeedbackForModel("b/bad", "D", "T", false));
+    // ok: 15 passes
+    for (let i = 0; i < 15; i++) store.update(makeFeedbackForModel("c/ok", "D", "T", true));
+    for (let i = 0; i < 15; i++) store.update(makeFeedbackForModel("d/ok2", "D", "T", true));
+
+    const selected = thompsonSelect("D", "T", pool, 3, store);
+    const ids = selected.map(m => m.id);
+    expect(ids).not.toContain("b/bad");
+  });
+
+  it("should enforce provider diversity", () => {
+    // 4 models from same provider, 1 from different
+    const pool = [
+      makeModelInfo("same/m1"), makeModelInfo("same/m2"),
+      makeModelInfo("same/m3"), makeModelInfo("same/m4"),
+      makeModelInfo("diff/m5"),
+    ];
+    const store = makeSkillCellStore();
+    // Give all models data so they're warm
+    for (const m of pool) {
+      for (let i = 0; i < 10; i++) store.update(makeFeedbackForModel(m.id, "D", "T", true));
+    }
+
+    // Select 3 — max ceil(3/2)=2 from same provider
+    const selected = thompsonSelect("D", "T", pool, 3, store);
+    const sameCount = selected.filter(m => extractProvider(m.id) === "same").length;
+    expect(sameCount).toBeLessThanOrEqual(2);
+  });
+
+  it("should reserve cold-start slot when count >= 3", () => {
+    const pool = [
+      makeModelInfo("a/warm1"), makeModelInfo("b/warm2"),
+      makeModelInfo("c/warm3"), makeModelInfo("d/cold1"),
+    ];
+    const store = makeSkillCellStore();
+    // Make warm models have data
+    for (const m of pool.slice(0, 3)) {
+      for (let i = 0; i < 10; i++) store.update(makeFeedbackForModel(m.id, "D", "T", true));
+    }
+    // cold1 has no data
+
+    // Run 20 times — cold model should appear at least once
+    let coldAppeared = false;
+    for (let trial = 0; trial < 20; trial++) {
+      const selected = thompsonSelect("D", "T", pool, 3, store);
+      if (selected.some(m => m.id === "d/cold1")) {
+        coldAppeared = true;
+        break;
+      }
+    }
+    expect(coldAppeared).toBe(true);
+  });
+});

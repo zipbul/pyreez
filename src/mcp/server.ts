@@ -648,6 +648,8 @@ export class PyreezMcpServer {
         costWeight: args.cost_weight,
         ...(args.models?.length ? { models: args.models } : {}),
         ...(manualTaskNature ? { taskNature: manualTaskNature } : {}),
+        ...(args.domain ? { domain: args.domain } : {}),
+        ...(args.task_type ? { taskType: args.task_type } : {}),
       };
       const result = await this.deliberateFn(input);
       const manualResponse = {
