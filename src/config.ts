@@ -9,10 +9,6 @@ export interface RoutingConfig {
   qualityWeight: number;
   /** Weight for cost efficiency (default: 0.3). */
   costWeight: number;
-  /** @deprecated Selector variant — no longer used. Thompson Sampling via SkillCell replaced all selectors. */
-  selector?: string;
-  /** @deprecated Exploration strategy — Thompson Sampling handles exploration automatically. */
-  exploration?: string;
   /** Weight for latency efficiency (default: 0, disabled). */
   latencyWeight?: number;
 }
@@ -68,11 +64,6 @@ export async function loadRoutingConfig(path = ".pyreez/config.jsonc"): Promise<
     const text = await file.text();
     const parsed = Bun.JSONC.parse(text) as { routing?: Partial<RoutingConfig> };
     if (!parsed?.routing) return { ...DEFAULT_ROUTING_CONFIG };
-    const VALID_SELECTORS = ["bt-ce", "knn", "cascade"];
-    const VALID_EXPLORATIONS = ["greedy", "thompson"];
-    const raw = parsed.routing as Record<string, unknown>;
-    const selectorRaw = raw.selector;
-    const explorationRaw = raw.exploration;
     return {
       qualityWeight: typeof parsed.routing.qualityWeight === "number"
         ? Math.max(0, parsed.routing.qualityWeight)
@@ -80,14 +71,8 @@ export async function loadRoutingConfig(path = ".pyreez/config.jsonc"): Promise<
       costWeight: typeof parsed.routing.costWeight === "number"
         ? Math.max(0, parsed.routing.costWeight)
         : DEFAULT_ROUTING_CONFIG.costWeight,
-      selector: typeof selectorRaw === "string" && VALID_SELECTORS.includes(selectorRaw)
-        ? (selectorRaw as RoutingConfig["selector"])
-        : undefined,
-      exploration: typeof explorationRaw === "string" && VALID_EXPLORATIONS.includes(explorationRaw)
-        ? (explorationRaw as RoutingConfig["exploration"])
-        : undefined,
-      latencyWeight: typeof raw.latencyWeight === "number"
-        ? Math.max(0, raw.latencyWeight)
+      latencyWeight: typeof (parsed.routing as Record<string, unknown>).latencyWeight === "number"
+        ? Math.max(0, (parsed.routing as Record<string, unknown>).latencyWeight as number)
         : undefined,
     };
   } catch {

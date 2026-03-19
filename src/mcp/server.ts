@@ -15,7 +15,6 @@ import type { ModelRegistry } from "../model/registry";
 
 import type { RunLogger } from "../report/run-logger";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
-import type { DeliberationStore } from "../deliberation/store-types";
 import { resolveTaskNature, shouldAutoDebate } from "../deliberation/task-nature";
 import { NoModelsAvailableError } from "../deliberation/team-composer";
 import { buildAcceptanceMessages } from "../deliberation/prompts";
@@ -48,8 +47,6 @@ export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
   registry: ModelRegistry;
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
-  /** @deprecated Stored in wire deps. Kept for backwards compatibility with index.ts. */
-  deliberationStore?: DeliberationStore;
   runLogger?: RunLogger;
   /** Chat function for acceptance rounds. When omitted, pyreez_acceptance is unavailable. */
   chatFn?: (model: string, messages: import("../llm/types").ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;

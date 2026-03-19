@@ -88,15 +88,6 @@ export interface FallbackDeps {
 }
 
 /**
- * @deprecated Use FallbackDeps instead. Kept for backward compatibility with wrappers.ts.
- */
-export interface RetryDeps {
-  readonly cooldown: CooldownManager;
-  readonly getModels: () => ModelInfo[];
-  readonly maxRetries?: number;
-}
-
-/**
  * Dependency injection for the engine.
  * All LLM I/O and prompt construction is injected.
  */

@@ -158,7 +158,6 @@ async function main(): Promise<void> {
     mcpServer,
     registry,
     deliberateFn,
-    deliberationStore,
     runLogger,
     chatFn: (model, messages, params) => chatAdapter(model, messages, params),
     skillCellStore,
