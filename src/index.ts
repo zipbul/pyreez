@@ -199,6 +199,22 @@ async function main(): Promise<void> {
     sharedCooldown,
   );
 
+  // SkillCell store for Thompson Sampling model selection
+  const { FileSkillCellStore } = await import("./model/skillcell-store");
+  const skillCellStore = new FileSkillCellStore({
+    io: fileIO,
+    path: "scores/skillcells.json",
+    familyLookup: new Map(registry.getAll().map((m) => [m.id, m.family ?? m.provider])),
+  });
+  await skillCellStore.load();
+
+  // External evaluator for binary dimension feedback
+  const { LLMExternalEvaluator } = await import("./deliberation/external-evaluator");
+  const externalEvaluator = new LLMExternalEvaluator({
+    chat: (model, messages, params) => chatAdapter(model, messages, params),
+    getAvailableModels: () => filteredRegistry.getAvailable(),
+  });
+
   const deliberateFn = createDeliberateFn({
     registry: filteredRegistry,
     chat: (model, messages, params) => chatAdapter(model, messages, params),
@@ -209,6 +225,8 @@ async function main(): Promise<void> {
       getAvailableModels: () => filteredRegistry.getAvailable(),
     },
     scoring,
+    skillCellStore,
+    externalEvaluator,
   });
 
   const mcpServer = new McpServer({ name: "pyreez", version: "1.0.0" });
@@ -222,6 +240,7 @@ async function main(): Promise<void> {
     engine,
     scoring,
     chatFn: (model, messages, params) => chatAdapter(model, messages, params),
+    skillCellStore,
   });
 
   const transport = new StdioServerTransport();

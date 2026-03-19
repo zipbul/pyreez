@@ -18,7 +18,9 @@ import { createFallbackPool } from "./engine";
 import type { DeliberationStore } from "./store-types";
 import type { ScoringSystem } from "../axis/interfaces";
 import type { PollJudgeConfig } from "./poll-judge";
-import { composeTeam, selectDiverseModels, orderWorkersByRole } from "./team-composer";
+import { composeTeam, selectDiverseModels, orderWorkersByRole, thompsonSelect } from "./team-composer";
+import type { SkillCellStore } from "../model/skillcell-store";
+import type { ExternalEvaluator } from "./external-evaluator";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
 import { evaluateWithPoll } from "./poll-judge";
@@ -45,6 +47,10 @@ export interface WireDeps {
   readonly scoring?: ScoringSystem;
   /** Shared CooldownManager (process-scoped). When omitted, a per-call instance is created. */
   readonly cooldown?: import("./cooldown").CooldownManager;
+  /** SkillCell store for Thompson Sampling model selection. */
+  readonly skillCellStore?: SkillCellStore;
+  /** External evaluator for binary dimension feedback. */
+  readonly externalEvaluator?: ExternalEvaluator;
 }
 
 // -- Think Tag Stripping --
@@ -133,11 +139,13 @@ export function createDeliberateFn(
       );
     } else {
       // Auto compose from available models, capped to prevent cost explosion.
-      // selectDiverseModels ensures provider diversity (round-robin across providers).
-      // Artifact tasks: 3 workers. Critique: 5 workers.
       const available = deps.registry.getAvailable();
       const MAX_AUTO_TEAM = input.taskNature === "artifact" ? 3 : 5;
-      const selected = selectDiverseModels(available, MAX_AUTO_TEAM);
+
+      // Thompson Sampling if SkillCell store is available and domain is known
+      const selected = (deps.skillCellStore && input.domain)
+        ? thompsonSelect(input.domain, input.taskType ?? "QUESTION_ANSWER", available, MAX_AUTO_TEAM, deps.skillCellStore)
+        : selectDiverseModels(available, MAX_AUTO_TEAM);
       const modelIds = selected.map((m) => m.id);
       team = composeTeam(
         { task: input.task, modelIds },
@@ -208,6 +216,34 @@ export function createDeliberateFn(
           if (pollResult.workerScores.length > 0) {
             result = { ...result, pollScores: pollResult.workerScores };
           }
+        }
+      } catch {
+        // best-effort — do not fail deliberation
+      }
+    }
+
+    // 7.5. External evaluator → SkillCell update (best-effort)
+    if (deps.externalEvaluator && deps.skillCellStore && result.rounds && input.domain) {
+      try {
+        const lastRound = result.rounds[result.rounds.length - 1];
+        if (lastRound?.responses) {
+          const teamProviders = new Set(
+            result.modelsUsed.map((id) => deps.registry.getById(id)?.provider).filter(Boolean) as string[],
+          );
+          const deliberationId = crypto.randomUUID();
+          const taskType = input.taskType ?? "QUESTION_ANSWER";
+          for (const response of lastRound.responses) {
+            try {
+              const feedback = await deps.externalEvaluator.evaluate(
+                input.task, response.model, response.content ?? "",
+                input.domain, taskType, deliberationId, teamProviders,
+              );
+              deps.skillCellStore.update(feedback);
+            } catch {
+              // Per-worker evaluation failure — skip this worker, continue others
+            }
+          }
+          await deps.skillCellStore.save();
         }
       } catch {
         // best-effort — do not fail deliberation

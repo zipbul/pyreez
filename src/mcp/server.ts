@@ -61,6 +61,8 @@ export interface PyreezMcpServerConfig {
   scoring?: ScoringSystem;
   /** Filtered registry (configured providers only). Used by pyreez_scores configured_only. */
   filteredRegistry?: { getAll(): ModelInfo[]; getById(id: string): ModelInfo | undefined };
+  /** SkillCell store for binary dimension feedback. */
+  skillCellStore?: import("../model/skillcell-store").SkillCellStore;
 }
 
 const DEFAULT_BUDGET: BudgetConfig = { perRequest: 1.0 };
@@ -89,6 +91,7 @@ export class PyreezMcpServer {
   private readonly chatFn?: PyreezMcpServerConfig["chatFn"];
   private readonly scoring?: ScoringSystem;
   private readonly filteredRegistry?: { getAll(): ModelInfo[]; getById(id: string): ModelInfo | undefined };
+  private readonly skillCellStore?: import("../model/skillcell-store").SkillCellStore;
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -110,6 +113,7 @@ export class PyreezMcpServer {
     this.chatFn = config.chatFn;
     this.scoring = config.scoring;
     this.filteredRegistry = config.filteredRegistry;
+    this.skillCellStore = config.skillCellStore;
 
     this.registerTools();
   }
@@ -323,7 +327,28 @@ export class PyreezMcpServer {
               dimension: z.enum(ALL_DIMENSIONS).optional().describe("Capability dimension (default: JUDGMENT)"),
             }))
             .min(1)
-            .describe("Pairwise preferences from the deliberation"),
+            .describe("Pairwise preferences from the deliberation (required for BT shadow)"),
+          evaluations: z
+            .array(z.object({
+              model_id: z.string().describe("Model ID being evaluated"),
+              domain: z.string().describe("Task domain"),
+              task_type: z.string().describe("Task type"),
+              dimensions: z.object({
+                factually_correct: z.boolean(),
+                addresses_task: z.boolean(),
+                provides_evidence: z.boolean(),
+                novel_perspective: z.boolean(),
+                internally_consistent: z.boolean(),
+              }).describe("Binary pass/fail per dimension"),
+              failures: z.object({
+                hallucination: z.boolean(),
+                refusal: z.boolean(),
+                off_topic: z.boolean(),
+                degenerate: z.boolean(),
+              }).describe("Critical failure flags"),
+            }))
+            .optional()
+            .describe("Per-model binary evaluations for SkillCell update"),
         }),
       },
       async (args) => this.handleFeedback(args),
@@ -718,6 +743,11 @@ export class PyreezMcpServer {
 
   async handleFeedback(args: {
     preferences: { winner: string; loser: string; dimension?: string }[];
+    evaluations?: {
+      model_id: string; domain: string; task_type: string;
+      dimensions: { factually_correct: boolean; addresses_task: boolean; provides_evidence: boolean; novel_perspective: boolean; internally_consistent: boolean };
+      failures: { hallucination: boolean; refusal: boolean; off_topic: boolean; degenerate: boolean };
+    }[];
   }): Promise<CallToolResult> {
     return this.logRun("feedback", async () => {
     if (!args.preferences?.length) {
@@ -728,6 +758,7 @@ export class PyreezMcpServer {
     }
 
     try {
+      // BT path (preserved for shadow mode)
       const pairwise = args.preferences.map((p) => ({
         modelAId: p.winner,
         modelBId: p.loser,
@@ -737,14 +768,39 @@ export class PyreezMcpServer {
 
       await this.scoring.update(pairwise);
 
+      // SkillCell path (new — binary dimension evaluations)
+      let skillCellUpdated = 0;
+      if (args.evaluations?.length && this.skillCellStore) {
+        for (const ev of args.evaluations) {
+          this.skillCellStore.update({
+            deliberation_id: crypto.randomUUID(),
+            model_id: ev.model_id,
+            domain: ev.domain,
+            task_type: ev.task_type,
+            evaluator_id: "host",
+            dimensions: ev.dimensions,
+            failures: ev.failures,
+            timestamp: Date.now(),
+          });
+          skillCellUpdated++;
+        }
+        await this.skillCellStore.save();
+      }
+
       const models = new Set<string>();
       for (const p of args.preferences) {
         models.add(p.winner);
         models.add(p.loser);
       }
+      if (args.evaluations) {
+        for (const ev of args.evaluations) {
+          models.add(ev.model_id);
+        }
+      }
 
       return this.textResult(JSON.stringify({
         updated: pairwise.length,
+        skillCellUpdated,
         models: [...models],
       }, null, 2));
     } catch (error) {
