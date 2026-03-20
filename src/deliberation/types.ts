@@ -161,6 +161,13 @@ export interface DeliberateInput {
 /**
  * Output from the deliberation engine.
  */
+/** Team degradation metadata — attached when team shrinks below requested size. */
+export interface Degradation {
+  readonly originalTeamSize: number;
+  readonly activeTeamSize: number;
+  readonly lostSlots: readonly { model: string; reason: string }[];
+}
+
 export interface DeliberateOutput {
   readonly roundsExecuted: number;
   readonly totalTokens: TokenUsage;
@@ -176,4 +183,6 @@ export interface DeliberateOutput {
   readonly warnings?: readonly string[];
   /** Model swaps that occurred during deliberation (worker failure → fallback). */
   readonly modelSwaps?: readonly ModelSwap[];
+  /** Team degradation info — present when team shrank below requested size. */
+  readonly degradation?: Degradation;
 }

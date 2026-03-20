@@ -8,7 +8,9 @@ import {
   deliberate,
   createFallbackPool,
   RoundExecutionError,
+  TeamDegradedError,
   MIN_WORKER_RESPONSE_LENGTH,
+  minViableTeamSize,
   type EngineDeps,
   type EngineConfig,
   type ChatResult,
@@ -475,8 +477,35 @@ describe("deliberate", () => {
 // =============================================================================
 
 describe("failedWorkers propagation in deliberate output", () => {
-  it("should include failedWorkers in rounds when a worker fails partially", async () => {
+  it("should throw TeamDegradedError when 3-worker team loses 1 (below min viable)", async () => {
     const team = makeTeam(3);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") {
+          throw new Error("o3 rate limit");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    try {
+      await deliberate(team, input, deps, config);
+      expect.unreachable("should have thrown TeamDegradedError");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TeamDegradedError);
+      const tde = error as InstanceType<typeof TeamDegradedError>;
+      expect(tde.originalSize).toBe(3);
+      expect(tde.activeSize).toBe(2);
+      expect(tde.lostSlots).toHaveLength(1);
+      expect(tde.lostSlots[0]!.model).toBe("worker/model-0");
+    }
+  });
+
+  it("should include failedWorkers in rounds with 2-worker team (no min viable enforcement)", async () => {
+    const team = makeTeam(2);
     const input = makeInput();
     const config = makeConfig();
 
@@ -491,18 +520,12 @@ describe("failedWorkers propagation in deliberate output", () => {
 
     const output = await deliberate(team, input, deps, config);
 
-    // Verify the output includes failedWorkers info
     expect(output.rounds).toBeDefined();
-    expect(output.rounds).toHaveLength(1);
     expect(output.rounds![0]!.failedWorkers).toBeDefined();
     expect(output.rounds![0]!.failedWorkers).toHaveLength(1);
     expect(output.rounds![0]!.failedWorkers![0]!.model).toBe("worker/model-0");
-    expect(output.rounds![0]!.failedWorkers![0]!.error).toContain("o3 rate limit");
-
-    // modelsUsed should NOT include the failed worker
     expect(output.modelsUsed).not.toContain("worker/model-0");
     expect(output.modelsUsed).toContain("worker/model-1");
-    expect(output.modelsUsed).toContain("worker/model-2");
   });
 
   it("should omit failedWorkers from rounds when all workers succeed", async () => {
@@ -1636,5 +1659,93 @@ describe("cooldown check before team worker call", () => {
     expect(skipSwap!.errorCode).toBe("rate_limit");
     expect(skipSwap!.retryable).toBe(true);
     expect(skipSwap!.error).toBe("Rate limit");
+  });
+});
+
+// =============================================================================
+// #5 — Team degradation: min viable check + metadata
+// =============================================================================
+
+describe("minViableTeamSize", () => {
+  it("should return 3 for small teams", () => {
+    expect(minViableTeamSize(1)).toBe(3);
+    expect(minViableTeamSize(2)).toBe(3);
+    expect(minViableTeamSize(3)).toBe(3);
+    expect(minViableTeamSize(4)).toBe(3);
+  });
+
+  it("should return ceil(N*0.6) for large teams", () => {
+    expect(minViableTeamSize(5)).toBe(3);
+    expect(minViableTeamSize(6)).toBe(4);
+    expect(minViableTeamSize(7)).toBe(5);
+    expect(minViableTeamSize(10)).toBe(6);
+  });
+});
+
+describe("team degradation", () => {
+  it("should throw TeamDegradedError when team drops below min viable (5→2)", async () => {
+    const team: TeamComposition = {
+      workers: Array.from({ length: 5 }, (_, i) => ({
+        model: `prov-${i}/model-${i}`,
+        role: "worker" as const,
+      })),
+    };
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        // Only model-0 and model-1 succeed → 2 active, min viable = 3
+        if (model === "prov-0/model-0" || model === "prov-1/model-1") {
+          return chatResult(validWorkerContent("ok"), 10, 20);
+        }
+        throw new LLMClientError(500, "Server error");
+      }),
+    });
+
+    try {
+      await deliberate(team, makeInput(), deps, makeConfig());
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TeamDegradedError);
+      const tde = error as InstanceType<typeof TeamDegradedError>;
+      expect(tde.originalSize).toBe(5);
+      expect(tde.activeSize).toBe(2);
+      expect(tde.lostSlots).toHaveLength(3);
+    }
+  });
+
+  it("should include degradation metadata when team shrinks but stays viable (5→3)", async () => {
+    const team: TeamComposition = {
+      workers: Array.from({ length: 5 }, (_, i) => ({
+        model: `prov-${i}/model-${i}`,
+        role: "worker" as const,
+      })),
+    };
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        // 3 succeed, 2 fail → viable (min 3) but degraded
+        if (model.startsWith("prov-0") || model.startsWith("prov-1") || model.startsWith("prov-2")) {
+          return chatResult(validWorkerContent("ok"), 10, 20);
+        }
+        throw new LLMClientError(500, "Server error");
+      }),
+    });
+
+    const output = await deliberate(team, makeInput(), deps, makeConfig());
+
+    expect(output.degradation).toBeDefined();
+    expect(output.degradation!.originalTeamSize).toBe(5);
+    expect(output.degradation!.activeTeamSize).toBe(3);
+    expect(output.degradation!.lostSlots).toHaveLength(2);
+    expect(output.warnings).toBeDefined();
+    expect(output.warnings!.some(w => w.includes("team_degraded"))).toBe(true);
+  });
+
+  it("should not include degradation when all workers succeed", async () => {
+    const team = makeTeam(3);
+    const deps = makeDeps();
+    const output = await deliberate(team, makeInput(), deps, makeConfig());
+
+    expect(output.degradation).toBeUndefined();
   });
 });

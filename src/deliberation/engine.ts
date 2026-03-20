@@ -13,6 +13,7 @@
 import type { ChatMessage } from "../llm/types";
 import type { ModelInfo } from "../model/types";
 import type {
+  Degradation,
   DeliberateInput,
   DeliberateOutput,
   FailedWorker,
@@ -47,6 +48,27 @@ import type { ChatResult } from "../axis/types";
  * and excluded. Workers are instructed of this requirement in their prompts.
  */
 export const MIN_WORKER_RESPONSE_LENGTH = 200;
+
+/** Minimum viable team size: at least 3, or 60% of requested. */
+export function minViableTeamSize(requested: number): number {
+  return Math.max(3, Math.ceil(requested * 0.6));
+}
+
+/**
+ * Error thrown when the team degrades below minimum viable size.
+ */
+export class TeamDegradedError extends Error {
+  constructor(
+    public readonly originalSize: number,
+    public readonly activeSize: number,
+    public readonly lostSlots: readonly { model: string; reason: string }[],
+    public readonly tokensConsumed?: TokenUsage,
+    public readonly modelSwaps?: readonly ModelSwap[],
+  ) {
+    super(`Team degraded below minimum viable size (${activeSize}/${originalSize}, min ${minViableTeamSize(originalSize)})`);
+    this.name = "TeamDegradedError";
+  }
+}
 
 // -- Public Interfaces --
 
@@ -483,6 +505,8 @@ export async function deliberate(
   const allModels = new Set<string>();
   const allModelSwaps: ModelSwap[] = [];
   let allLLMCalls = 0;
+  const originalTeamSize = team.workers.length;
+  const minViable = minViableTeamSize(originalTeamSize);
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
     const roundResult = await executeRound(
@@ -494,6 +518,19 @@ export async function deliberate(
       output: accTokens.output + roundResult.tokens.output,
     };
     allModelSwaps.push(...roundResult.modelSwaps);
+
+    // Check team viability: abort if active workers < min_viable
+    // Only enforce for teams of 3+; smaller teams use existing all-fail guard.
+    const activeCount = roundResult.round.responses.length;
+    if (originalTeamSize >= 3 && activeCount > 0 && activeCount < minViable) {
+      const lostSlots = (roundResult.round.failedWorkers ?? []).map((fw) => ({
+        model: fw.model,
+        reason: fw.error,
+      }));
+      throw new TeamDegradedError(
+        originalTeamSize, activeCount, lostSlots, accTokens, allModelSwaps,
+      );
+    }
 
     // Update team from actual round responses — the response's model is the FINAL
     // model that succeeded (after all fallback hops). This correctly handles multi-hop
@@ -540,6 +577,25 @@ export async function deliberate(
     warnings.push(`provider_diversity_low: ${providers.size} provider(s) — minimum 2 recommended`);
   }
 
+  // Build degradation metadata if team shrank
+  const lastRound = allRounds[allRounds.length - 1];
+  const finalActiveCount = lastRound ? lastRound.responses.length : 0;
+  const degradation: Degradation | undefined =
+    finalActiveCount < originalTeamSize
+      ? {
+          originalTeamSize,
+          activeTeamSize: finalActiveCount,
+          lostSlots: (lastRound?.failedWorkers ?? []).map((fw) => ({
+            model: fw.model,
+            reason: fw.error,
+          })),
+        }
+      : undefined;
+
+  if (degradation) {
+    warnings.push(`team_degraded: ${degradation.activeTeamSize}/${degradation.originalTeamSize} workers active`);
+  }
+
   return {
     roundsExecuted: allRounds.length,
     totalTokens: accTokens,
@@ -548,5 +604,6 @@ export async function deliberate(
     rounds: roundsSummary,
     ...(allModelSwaps.length > 0 ? { modelSwaps: allModelSwaps } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
+    ...(degradation ? { degradation } : {}),
   };
 }
