@@ -37,6 +37,13 @@ export interface CooldownEntry {
 /**
  * Manages per-model cooldown state.
  */
+/** Serializable cooldown state for persistence across sessions. */
+export interface CooldownState {
+  readonly entries: readonly { modelId: string; reason: string; errorType: CooldownErrorType; failCount: number }[];
+  readonly providers: readonly string[];
+  readonly savedAt: number;
+}
+
 export interface CooldownManager {
   /** Add a model to cooldown (session-level permanent). */
   add(modelId: string, reason: string, errorType?: CooldownErrorType, ttlMs?: number): void;
@@ -50,6 +57,10 @@ export interface CooldownManager {
   getEntry(modelId: string): CooldownEntry | undefined;
   /** Clear all cooldown entries. */
   clear(): void;
+  /** Serialize state for persistence. */
+  serialize(): CooldownState;
+  /** Restore state from a previous session. Only loads entries saved within maxAgeMs. */
+  restore(state: CooldownState, maxAgeMs?: number): void;
 }
 
 import { extractProvider } from "./provider-util";
@@ -114,6 +125,37 @@ export function createCooldownManager(
       cooledModels.clear();
       cooledProviders.clear();
       entries.clear();
+    },
+
+    serialize(): CooldownState {
+      return {
+        entries: [...entries.values()].map((e) => ({
+          modelId: e.modelId,
+          reason: e.reason,
+          errorType: e.errorType,
+          failCount: e.failCount,
+        })),
+        providers: [...cooledProviders],
+        savedAt: Date.now(),
+      };
+    },
+
+    restore(state: CooldownState, maxAgeMs = 3_600_000): void {
+      const age = Date.now() - state.savedAt;
+      if (age > maxAgeMs) return; // expired, ignore
+      for (const entry of state.entries) {
+        cooledModels.add(entry.modelId);
+        entries.set(entry.modelId, {
+          modelId: entry.modelId,
+          reason: entry.reason,
+          cooldownUntil: Infinity,
+          failCount: entry.failCount,
+          errorType: entry.errorType,
+        });
+      }
+      for (const provider of state.providers) {
+        cooledProviders.add(provider);
+      }
     },
   };
 }

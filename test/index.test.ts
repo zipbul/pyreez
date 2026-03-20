@@ -59,14 +59,12 @@ describe("filterModelsByProviders", () => {
     expect(warnings.length).toBeGreaterThan(0);
   });
 
-  it("should include local models when local provider is configured", () => {
+  it("should return empty for local provider when all local models are unavailable", () => {
     const providers = [fakeProvider("local")];
     const { modelIds } = filterModelsByProviders(registry, providers);
 
-    expect(modelIds.length).toBeGreaterThan(0);
-    for (const id of modelIds) {
-      expect(id.startsWith("local/")).toBe(true);
-    }
+    // All local models are currently available:false in models.json
+    expect(modelIds).toHaveLength(0);
   });
 
   it("should only return available models (not unavailable)", () => {

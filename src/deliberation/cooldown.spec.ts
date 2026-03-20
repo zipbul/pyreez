@@ -168,6 +168,63 @@ describe("classifyError", () => {
   });
 });
 
+describe("cooldown persistence (serialize/restore)", () => {
+  it("should serialize and restore model cooldowns", () => {
+    const cm1 = createCooldownManager();
+    cm1.add("openai/gpt-4.1", "rate limit", "rate_limit");
+    cm1.add("anthropic/claude-opus-4.6", "timeout", "timeout");
+
+    const state = cm1.serialize();
+
+    const cm2 = createCooldownManager();
+    cm2.restore(state);
+
+    expect(cm2.isOnCooldown("openai/gpt-4.1")).toBe(true);
+    expect(cm2.isOnCooldown("anthropic/claude-opus-4.6")).toBe(true);
+    expect(cm2.getEntry("openai/gpt-4.1")?.errorType).toBe("rate_limit");
+    expect(cm2.getEntry("anthropic/claude-opus-4.6")?.errorType).toBe("timeout");
+  });
+
+  it("should serialize and restore provider cooldowns", () => {
+    const cm1 = createCooldownManager();
+    cm1.addProvider("google/gemini-2.5-pro", "spending cap");
+
+    const state = cm1.serialize();
+
+    const cm2 = createCooldownManager();
+    cm2.restore(state);
+
+    expect(cm2.isOnCooldown("google/gemini-2.5-pro")).toBe(true);
+    expect(cm2.isOnCooldown("google/other-model")).toBe(true); // provider-level
+  });
+
+  it("should ignore expired state (older than maxAgeMs)", () => {
+    const cm1 = createCooldownManager();
+    cm1.add("openai/gpt-4.1", "rate limit", "rate_limit");
+    const state = cm1.serialize();
+    // Artificially age the state
+    (state as any).savedAt = Date.now() - 7_200_000; // 2 hours ago
+
+    const cm2 = createCooldownManager();
+    cm2.restore(state, 3_600_000); // 1 hour max age
+
+    expect(cm2.isOnCooldown("openai/gpt-4.1")).toBe(false);
+  });
+
+  it("should preserve failCount across sessions", () => {
+    const cm1 = createCooldownManager();
+    cm1.add("model-a", "first", "unknown");
+    cm1.add("model-a", "second", "unknown");
+    expect(cm1.getEntry("model-a")?.failCount).toBe(2);
+
+    const state = cm1.serialize();
+    const cm2 = createCooldownManager();
+    cm2.restore(state);
+
+    expect(cm2.getEntry("model-a")?.failCount).toBe(2);
+  });
+});
+
 describe("normalizeErrorMessage", () => {
   it("should extract message from OpenAI-style JSON error body", () => {
     const raw = '{"error":{"code":429,"message":"Your project has exceeded its spending cap.","status":"RESOURCE_EXHAUSTED"}}';

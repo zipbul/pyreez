@@ -305,7 +305,7 @@
       "name": "DeepSeek R1 Distill Llama",
       "contextWindow": 32768,
       "supportsToolCalling": false,
-      "available": true,
+      "available": false,
       "cost": {
         "inputPer1M": 0,
         "outputPer1M": 0
@@ -317,7 +317,7 @@
       "name": "Qwen3 Coder",
       "contextWindow": 32768,
       "supportsToolCalling": false,
-      "available": true,
+      "available": false,
       "cost": {
         "inputPer1M": 0,
         "outputPer1M": 0
@@ -329,7 +329,7 @@
       "name": "Phi-4",
       "contextWindow": 16384,
       "supportsToolCalling": false,
-      "available": true,
+      "available": false,
       "cost": {
         "inputPer1M": 0,
         "outputPer1M": 0

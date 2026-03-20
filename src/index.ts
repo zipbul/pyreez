@@ -24,7 +24,7 @@ import { PyreezMcpServer } from "./mcp/server";
 import { ModelRegistry } from "./model/registry";
 import { BunFileIO } from "./report/bun-file-io";
 import { FileRunLogger } from "./report/run-logger";
-import { createCooldownManager } from "./deliberation/cooldown";
+import { createCooldownManager, type CooldownState } from "./deliberation/cooldown";
 
 /**
  * Filter registry models to only those from configured providers.
@@ -116,6 +116,17 @@ async function main(): Promise<void> {
   // Shared CooldownManager: process-scoped, persists across MCP calls
   const sharedCooldown = createCooldownManager();
 
+  // Restore cooldown state from previous session (best-effort)
+  const COOLDOWN_PATH = "scores/cooldown.json";
+  try {
+    const raw = await fileIO.readFile(COOLDOWN_PATH);
+    const state = JSON.parse(raw) as CooldownState;
+    sharedCooldown.restore(state); // default 1h max age
+    console.error(`[pyreez] Restored cooldown state (${state.entries.length} entries)`);
+  } catch {
+    // No persisted state or parse error — start fresh
+  }
+
   // NOTE: filteredRegistry is built below (line ~189). DivergeSynthProtocol needs it
   // at construction but filteredRegistry is defined later. Hoist the definition.
   const configuredModelIds = new Set(modelIds);
@@ -166,6 +177,15 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
 
   const shutdown = async () => {
+    // Persist cooldown state for next session
+    try {
+      const state = sharedCooldown.serialize();
+      if (state.entries.length > 0) {
+        await fileIO.writeFile(COOLDOWN_PATH, JSON.stringify(state, null, 2));
+      }
+    } catch {
+      // best-effort
+    }
     await server.close();
     process.exit(0);
   };
