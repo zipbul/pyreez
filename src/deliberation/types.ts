@@ -67,13 +67,26 @@ export interface WorkerResponse {
 }
 
 /**
+ * A worker that failed during a round.
+ */
+export interface FailedWorker {
+  readonly model: string;
+  /** Human-readable error message (cleaned of raw JSON). */
+  readonly error: string;
+  /** Classified error type for programmatic handling. */
+  readonly errorCode?: string;
+  /** Whether this error is likely transient (rate limit, timeout). */
+  readonly retryable?: boolean;
+}
+
+/**
  * A single deliberation round.
  */
 export interface Round {
   readonly number: number;
   readonly responses: readonly WorkerResponse[];
   /** Workers that failed during this round (partial failure tracking). */
-  readonly failedWorkers?: readonly { model: string; error: string }[];
+  readonly failedWorkers?: readonly FailedWorker[];
 }
 
 // -- SharedContext --
@@ -110,8 +123,13 @@ export interface ModelSwap {
   readonly original: string;
   readonly replacement?: string;
   readonly round: number;
+  /** Human-readable error message (cleaned of raw JSON). */
   readonly error: string;
   readonly httpStatus?: number;
+  /** Classified error type for programmatic handling. */
+  readonly errorCode?: string;
+  /** Whether this error is likely transient (rate limit, timeout). */
+  readonly retryable?: boolean;
 }
 
 // -- Deliberate Tool I/O --
@@ -152,7 +170,7 @@ export interface DeliberateOutput {
   readonly rounds?: readonly {
     number: number;
     responses?: readonly { model: string; content: string; role?: string }[];
-    failedWorkers?: readonly { model: string; error: string }[];
+    failedWorkers?: readonly FailedWorker[];
   }[];
   /** Warnings about deliberation quality (e.g., low provider diversity). */
   readonly warnings?: readonly string[];

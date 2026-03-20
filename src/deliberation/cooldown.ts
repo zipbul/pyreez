@@ -163,3 +163,25 @@ function classifyByStatus(status: number, type?: string): CooldownErrorType {
   if (status >= 500) return "server_error";
   return "unknown";
 }
+
+/**
+ * Clean raw error message: extract human-readable text from JSON error bodies.
+ */
+export function normalizeErrorMessage(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as {
+      error?: { message?: string };
+      message?: string;
+    };
+    return parsed.error?.message ?? parsed.message ?? raw;
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * Whether the error type is likely transient and worth retrying later.
+ */
+export function isRetryableError(errorType: CooldownErrorType): boolean {
+  return errorType === "rate_limit" || errorType === "timeout";
+}

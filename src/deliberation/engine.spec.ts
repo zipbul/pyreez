@@ -17,6 +17,7 @@ import {
 import type { TeamComposition, DeliberateInput } from "./types";
 import type { ModelInfo } from "../model/types";
 import { createCooldownManager } from "./cooldown";
+import { LLMClientError } from "../llm/errors";
 
 // -- Fixtures --
 
@@ -936,25 +937,39 @@ describe("createFallbackPool", () => {
     const cooldown = createCooldownManager();
     const pool = createFallbackPool([makeModelInfo("model/a")], cooldown);
 
-    pool.markFailed("model/a", "server error");
+    pool.markFailed("model/a", "server error", "server_error");
 
     expect(cooldown.isOnCooldown("model/a")).toBe(true);
   });
 
-  it("markFailed should cool all models from same provider", () => {
+  it("markFailed should cool all models from same provider on provider-scoped errors", () => {
     const cooldown = createCooldownManager();
     const pool = createFallbackPool(
       [makeModelInfo("google/a"), makeModelInfo("google/b"), makeModelInfo("openai/c")],
       cooldown,
     );
 
-    pool.markFailed("google/a", "spending cap");
+    pool.markFailed("google/a", "spending cap", "rate_limit");
 
-    // markFailed always propagates to provider level.
-    // google/a and google/b share provider "google" → both cooled.
+    // rate_limit → provider-scoped → google/a and google/b share provider "google" → both cooled.
     const result = pool.getNext(new Set<string>());
     expect(result).toBeDefined();
     expect(result!.id).toBe("openai/c");
+  });
+
+  it("markFailed should NOT cool other models from same provider on model-scoped errors", () => {
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool(
+      [makeModelInfo("google/a"), makeModelInfo("google/b"), makeModelInfo("openai/c")],
+      cooldown,
+    );
+
+    pool.markFailed("google/a", "model not found", "unknown");
+
+    // unknown (404) → model-scoped → only google/a cooled, google/b still available.
+    const result = pool.getNext(new Set<string>());
+    expect(result).toBeDefined();
+    expect(result!.id).toBe("google/b");
   });
 });
 
@@ -1288,5 +1303,338 @@ describe("multi-hop swap chain team update", () => {
     expect(r2Models).toContain("prov-y/fallback-b");
     expect(r2Models).not.toContain("prov-x/fallback-a");
     expect(r2Models).not.toContain("worker/model-0");
+  });
+});
+
+// =============================================================================
+// #8 — Normalized error output
+// =============================================================================
+
+describe("normalized error output", () => {
+  it("should include errorCode and retryable in failedWorkers", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") {
+          throw new LLMClientError(429, "Rate limit exceeded", "rate_limit_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    expect(output.rounds![0]!.failedWorkers).toHaveLength(1);
+    const fw = output.rounds![0]!.failedWorkers![0]!;
+    expect(fw.errorCode).toBe("rate_limit");
+    expect(fw.retryable).toBe(true);
+    expect(fw.error).toBe("Rate limit exceeded");
+  });
+
+  it("should include errorCode and retryable in modelSwaps", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") {
+          throw new LLMClientError(404, "Model not found");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([makeModelInfo("prov-b/fallback")], cooldown);
+
+    const customTeam: TeamComposition = {
+      workers: [{ model: "worker/model-0", role: "worker" }],
+    };
+
+    const output = await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
+
+    expect(output.modelSwaps).toBeDefined();
+    const swap = output.modelSwaps![0]!;
+    expect(swap.errorCode).toBe("unknown");
+    expect(swap.retryable).toBe(false);
+    expect(swap.error).toBe("Model not found");
+  });
+
+  it("should clean raw JSON in error messages", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") {
+          throw new Error('{"error":{"message":"spending cap exceeded","code":429}}');
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const output = await deliberate(makeTeam(2), makeInput(), deps, makeConfig());
+
+    const fw = output.rounds![0]!.failedWorkers![0]!;
+    expect(fw.error).toBe("spending cap exceeded");
+  });
+
+  it("should mark timeout errors as retryable", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") {
+          throw new LLMClientError(408, "Request timeout", "timeout_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const output = await deliberate(makeTeam(2), makeInput(), deps, makeConfig());
+
+    const fw = output.rounds![0]!.failedWorkers![0]!;
+    expect(fw.errorCode).toBe("timeout");
+    expect(fw.retryable).toBe(true);
+  });
+
+  it("should mark auth errors as non-retryable", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") {
+          throw new LLMClientError(401, "Invalid API key", "authentication_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const output = await deliberate(makeTeam(2), makeInput(), deps, makeConfig());
+
+    const fw = output.rounds![0]!.failedWorkers![0]!;
+    expect(fw.errorCode).toBe("auth_error");
+    expect(fw.retryable).toBe(false);
+  });
+});
+
+// =============================================================================
+// #1 — Error-scoped cooldown: provider vs model scope
+// =============================================================================
+
+describe("error-scoped cooldown in fallback", () => {
+  it("should NOT cool down provider on 404 — same-provider fallback remains available", async () => {
+    const callLog: string[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        callLog.push(model);
+        if (model === "prov-a/model-0") {
+          throw new LLMClientError(404, "Model not found");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool(
+      [makeModelInfo("prov-a/fallback")],
+      cooldown,
+    );
+
+    const customTeam: TeamComposition = {
+      workers: [{ model: "prov-a/model-0", role: "worker" }],
+    };
+
+    const output = await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
+
+    // 404 = model-only cooldown → same-provider fallback should work
+    expect(callLog).toEqual(["prov-a/model-0", "prov-a/fallback"]);
+    expect(output.modelsUsed).toContain("prov-a/fallback");
+    expect(cooldown.isOnCooldown("prov-a/model-0")).toBe(true);
+    expect(cooldown.isOnCooldown("prov-a/unrelated")).toBe(false); // provider NOT cooled
+  });
+
+  it("should cool down entire provider on 429 rate limit", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "prov-a/model-0") {
+          throw new LLMClientError(429, "Rate limit", "rate_limit_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool(
+      [makeModelInfo("prov-b/fallback")],
+      cooldown,
+    );
+
+    const customTeam: TeamComposition = {
+      workers: [{ model: "prov-a/model-0", role: "worker" }],
+    };
+
+    await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
+
+    expect(cooldown.isOnCooldown("prov-a/model-0")).toBe(true);
+    expect(cooldown.isOnCooldown("prov-a/any-model")).toBe(true); // provider cooled
+  });
+
+  it("should cool down entire provider on 401 auth error", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "prov-a/model-0") {
+          throw new LLMClientError(401, "Unauthorized", "authentication_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([makeModelInfo("prov-b/fallback")], cooldown);
+
+    const customTeam: TeamComposition = {
+      workers: [{ model: "prov-a/model-0", role: "worker" }],
+    };
+
+    await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
+
+    expect(cooldown.isOnCooldown("prov-a/other")).toBe(true); // provider cooled
+  });
+
+  it("should cool down entire provider on 500 server error", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "prov-a/model-0") {
+          throw new LLMClientError(500, "Internal Server Error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([makeModelInfo("prov-b/fallback")], cooldown);
+
+    const customTeam: TeamComposition = {
+      workers: [{ model: "prov-a/model-0", role: "worker" }],
+    };
+
+    await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
+
+    expect(cooldown.isOnCooldown("prov-a/other")).toBe(true); // provider cooled
+  });
+
+  it("should NOT cool down provider on timeout — model-only cooldown", async () => {
+    const callLog: string[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        callLog.push(model);
+        if (model === "prov-a/model-0") {
+          throw new LLMClientError(408, "Timeout", "timeout_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([makeModelInfo("prov-a/fallback")], cooldown);
+
+    const customTeam: TeamComposition = {
+      workers: [{ model: "prov-a/model-0", role: "worker" }],
+    };
+
+    await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
+
+    // Timeout = model-only → same-provider fallback should work
+    expect(callLog).toEqual(["prov-a/model-0", "prov-a/fallback"]);
+    expect(cooldown.isOnCooldown("prov-a/model-0")).toBe(true);
+    expect(cooldown.isOnCooldown("prov-a/unrelated")).toBe(false); // provider NOT cooled
+  });
+
+  it("should store correct errorType in cooldown entry", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "prov-a/model-0") {
+          throw new LLMClientError(429, "Rate limit", "rate_limit_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([makeModelInfo("prov-b/fallback")], cooldown);
+
+    const customTeam: TeamComposition = {
+      workers: [{ model: "prov-a/model-0", role: "worker" }],
+    };
+
+    await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
+
+    expect(cooldown.getEntry("prov-a/model-0")?.errorType).toBe("rate_limit");
+  });
+});
+
+// =============================================================================
+// #10 — Cooldown check before team worker call (cross-round)
+// =============================================================================
+
+describe("cooldown check before team worker call", () => {
+  it("should not call a cooled model in R2 — skips without wasting API call", async () => {
+    const callLog: string[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        callLog.push(model);
+        if (model === "prov-a/model-0" || model === "prov-c/fallback-1") {
+          throw new LLMClientError(429, "Rate limit", "rate_limit_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([
+      makeModelInfo("prov-c/fallback-1"),
+    ], cooldown);
+
+    const customTeam: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-b/model-1", role: "worker" },
+      ],
+    };
+
+    const config = makeConfig({ maxRounds: 2 });
+    await deliberate(customTeam, makeInput(), deps, config, { pool });
+
+    // R1: model-0 fails (429, provider-a cooled) → fallback-1 fails (429, provider-c cooled) → worker-0 fails
+    // R2: model-0 still on team (no response in R1) → should check cooldown → SKIP
+    const model0Calls = callLog.filter(m => m === "prov-a/model-0");
+    expect(model0Calls).toHaveLength(1); // Only R1, not R2
+  });
+
+  it("should propagate original error info in cooldown skip swap", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "prov-a/model-0") {
+          throw new LLMClientError(429, "Rate limit", "rate_limit_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([], cooldown); // empty pool
+
+    const customTeam: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-b/model-1", role: "worker" },
+      ],
+    };
+
+    const config = makeConfig({ maxRounds: 2 });
+    const output = await deliberate(customTeam, makeInput(), deps, config, { pool });
+
+    // R2 swap for cooled model should carry original error info
+    const r2Swaps = output.modelSwaps!.filter(s => s.round === 2);
+    expect(r2Swaps.length).toBeGreaterThanOrEqual(1);
+    const skipSwap = r2Swaps.find(s => s.original === "prov-a/model-0");
+    expect(skipSwap).toBeDefined();
+    expect(skipSwap!.errorCode).toBe("rate_limit");
+    expect(skipSwap!.retryable).toBe(true);
+    expect(skipSwap!.error).toBe("Rate limit");
   });
 });

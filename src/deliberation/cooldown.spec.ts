@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { createCooldownManager, classifyError } from "./cooldown";
+import { createCooldownManager, classifyError, normalizeErrorMessage, isRetryableError } from "./cooldown";
 import { LLMClientError } from "../llm/errors";
 
 describe("createCooldownManager", () => {
@@ -165,5 +165,56 @@ describe("classifyError", () => {
   it("should return unknown for unrecognized errors", () => {
     expect(classifyError(new Error("something else"))).toBe("unknown");
     expect(classifyError("string error")).toBe("unknown");
+  });
+});
+
+describe("normalizeErrorMessage", () => {
+  it("should extract message from OpenAI-style JSON error body", () => {
+    const raw = '{"error":{"code":429,"message":"Your project has exceeded its spending cap.","status":"RESOURCE_EXHAUSTED"}}';
+    expect(normalizeErrorMessage(raw)).toBe("Your project has exceeded its spending cap.");
+  });
+
+  it("should extract message from flat JSON error", () => {
+    const raw = '{"message":"Model not found","code":404}';
+    expect(normalizeErrorMessage(raw)).toBe("Model not found");
+  });
+
+  it("should return plain string as-is", () => {
+    expect(normalizeErrorMessage("Rate limit exceeded")).toBe("Rate limit exceeded");
+  });
+
+  it("should return raw JSON if no message field found", () => {
+    const raw = '{"code":500}';
+    expect(normalizeErrorMessage(raw)).toBe(raw);
+  });
+
+  it("should handle empty string", () => {
+    expect(normalizeErrorMessage("")).toBe("");
+  });
+});
+
+describe("isRetryableError", () => {
+  it("should return true for rate_limit", () => {
+    expect(isRetryableError("rate_limit")).toBe(true);
+  });
+
+  it("should return true for timeout", () => {
+    expect(isRetryableError("timeout")).toBe(true);
+  });
+
+  it("should return false for server_error", () => {
+    expect(isRetryableError("server_error")).toBe(false);
+  });
+
+  it("should return false for auth_error", () => {
+    expect(isRetryableError("auth_error")).toBe(false);
+  });
+
+  it("should return false for unknown", () => {
+    expect(isRetryableError("unknown")).toBe(false);
+  });
+
+  it("should return false for degenerate", () => {
+    expect(isRetryableError("degenerate")).toBe(false);
   });
 });

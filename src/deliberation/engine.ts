@@ -15,6 +15,7 @@ import type { ModelInfo } from "../model/types";
 import type {
   DeliberateInput,
   DeliberateOutput,
+  FailedWorker,
   GenerationParams,
   ModelSwap,
   Round,
@@ -30,7 +31,7 @@ import {
   addRound,
 } from "./shared-context";
 import { extractProvider } from "./provider-util";
-import { findLLMClientError, type CooldownManager } from "./cooldown";
+import { classifyError, findLLMClientError, isRetryableError, normalizeErrorMessage, type CooldownEntry, type CooldownErrorType, type CooldownManager } from "./cooldown";
 
 import type { RoundInfo } from "./prompts";
 
@@ -76,8 +77,12 @@ export class RoundExecutionError extends Error {
 export interface FallbackPool {
   /** Get next available model. Claimed on return — removed from pool. */
   getNext(excludeIds: Set<string>): ModelInfo | undefined;
-  /** Mark failure with provider-level propagation (all models from same provider cooled). */
-  markFailed(modelId: string, reason: string): void;
+  /** Mark failure with error-type-scoped cooldown (provider or model level). */
+  markFailed(modelId: string, reason: string, errorType: CooldownErrorType): void;
+  /** Check if a model is currently on cooldown. */
+  isOnCooldown(modelId: string): boolean;
+  /** Get the cooldown entry for a model. */
+  getEntry(modelId: string): CooldownEntry | undefined;
 }
 
 /**
@@ -136,6 +141,13 @@ const DEFAULT_CONFIG: EngineConfig = {
 // -- FallbackPool Implementation --
 
 /**
+ * Provider-scoped error types: failures likely affect all models from the same provider.
+ */
+function isProviderScopedError(errorType: CooldownErrorType): boolean {
+  return errorType === "rate_limit" || errorType === "auth_error" || errorType === "server_error";
+}
+
+/**
  * Create a FallbackPool from a set of candidate models and a CooldownManager.
  * Claim semantics: getNext() removes claimed model from candidates.
  */
@@ -155,9 +167,17 @@ export function createFallbackPool(
       }
       return undefined;
     },
-    markFailed(modelId: string, reason: string): void {
-      cooldown.add(modelId, reason);
-      cooldown.addProvider(modelId, reason);
+    markFailed(modelId: string, reason: string, errorType: CooldownErrorType): void {
+      cooldown.add(modelId, reason, errorType);
+      if (isProviderScopedError(errorType)) {
+        cooldown.addProvider(modelId, reason);
+      }
+    },
+    isOnCooldown(modelId: string): boolean {
+      return cooldown.isOnCooldown(modelId);
+    },
+    getEntry(modelId: string): CooldownEntry | undefined {
+      return cooldown.getEntry(modelId);
     },
   };
 }
@@ -209,6 +229,35 @@ async function callWithFallback(
 
   // Attempt loop: original → fallback1 → fallback2 → ...
   const excludeIds = new Set<string>();
+
+  // #10: If the original model is already on cooldown (e.g., failed in previous round),
+  // skip directly to fallback without wasting an API call.
+  if (pool?.isOnCooldown(currentModel)) {
+    excludeIds.add(currentModel);
+    const teamExclude = new Set([
+      ...excludeIds,
+      ...ctx.team.workers.map((w) => w.model),
+    ]);
+    const next = pool.getNext(teamExclude);
+
+    const priorEntry = pool.getEntry(currentModel);
+    swaps.push({
+      original: currentModel,
+      replacement: next?.id,
+      round: roundNumber,
+      error: priorEntry?.reason ?? "model on cooldown from previous round",
+      errorCode: priorEntry?.errorType ?? "unknown",
+      retryable: priorEntry ? isRetryableError(priorEntry.errorType) : false,
+    });
+
+    if (!next) {
+      return { failed: true, swaps, tokens: { input: totalInput, output: totalOutput } };
+    }
+
+    currentModel = next.id;
+    isColdJoin = roundNumber > 1 && config.protocol === "debate" && !!deps.buildColdJoinMessages;
+  }
+
   while (true) {
     try {
       const messages = buildMessages(isColdJoin);
@@ -263,8 +312,11 @@ async function callWithFallback(
         tokens: { input: totalInput, output: totalOutput },
       };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const rawMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = normalizeErrorMessage(rawMsg);
       const llmError = findLLMClientError(error);
+      const errorType = classifyError(error);
+      const retryable = isRetryableError(errorType);
 
       // No pool → can't fallback
       if (!pool) {
@@ -272,15 +324,17 @@ async function callWithFallback(
           original: currentModel,
           round: roundNumber,
           error: errorMsg,
+          errorCode: errorType,
+          retryable,
           ...(llmError ? { httpStatus: llmError.status } : {}),
         });
         return { failed: true, swaps, tokens: { input: totalInput, output: totalOutput } };
       }
 
-      // Mark failed model — always propagates to provider level.
-      // Any error from a provider likely affects all models from that provider
-      // (spending cap, auth failure, service down, model not found, etc.)
-      pool.markFailed(currentModel, errorMsg);
+      // Scope cooldown by error type.
+      // Provider-scoped (429, 401, 5xx) → all models from provider cooled.
+      // Model-scoped (404, timeout, degenerate) → only this model cooled.
+      pool.markFailed(currentModel, errorMsg, errorType);
       excludeIds.add(currentModel);
 
       // Try next from pool
@@ -296,6 +350,8 @@ async function callWithFallback(
         replacement: next?.id,
         round: roundNumber,
         error: errorMsg,
+        errorCode: errorType,
+        retryable,
         ...(llmError ? { httpStatus: llmError.status } : {}),
       });
 
@@ -338,7 +394,7 @@ export async function executeRound(
 
   // Collect results
   const responses: WorkerResponse[] = [];
-  const failedWorkers: { model: string; error: string }[] = [];
+  const failedWorkers: FailedWorker[] = [];
   const allSwaps: ModelSwap[] = [];
   let totalInput = 0;
   let totalOutput = 0;
@@ -358,6 +414,8 @@ export async function executeRound(
         failedWorkers.push({
           model: wr.response.model,
           error: `degenerate response (below ${MIN_WORKER_RESPONSE_LENGTH} chars)`,
+          errorCode: "degenerate",
+          retryable: false,
         });
       } else {
         // All fallbacks exhausted → empty slot
@@ -365,13 +423,15 @@ export async function executeRound(
         failedWorkers.push({
           model: divergeParticipants[idx]!.model,
           error: lastSwap?.error ?? "unknown error",
+          errorCode: lastSwap?.errorCode,
+          retryable: lastSwap?.retryable,
         });
       }
     } else {
       // callWithFallback itself shouldn't throw, but handle defensively
       const model = divergeParticipants[idx]!.model;
       const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
-      failedWorkers.push({ model, error: reason });
+      failedWorkers.push({ model, error: normalizeErrorMessage(reason) });
     }
   }
 
