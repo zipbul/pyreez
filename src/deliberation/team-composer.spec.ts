@@ -763,4 +763,30 @@ describe("thompsonSelect", () => {
     }
     expect(coldAppeared).toBe(true);
   });
+
+  it("should use Tier 2 domain data when Tier 1 specific cell has no data", () => {
+    // model-a has strong data in D:T1 but no data in D:T2
+    // Tier 2 (domain aggregate) should influence D:T2 scoring
+    const pool = [makeModelInfo("a/model-a"), makeModelInfo("b/model-b")];
+    const store = makeSkillCellStore();
+
+    // model-a: 20 all-pass in domain D, taskType T1
+    for (let i = 0; i < 20; i++) {
+      store.update(makeFeedbackForModel("a/model-a", "D", "T1", true));
+    }
+    // model-b: 20 all-fail in domain D, taskType T1
+    for (let i = 0; i < 20; i++) {
+      store.update(makeFeedbackForModel("b/model-b", "D", "T1", false));
+    }
+    // Neither has data for D:T2 → Tier 1 has no data → Tier 2 (domain) should differentiate
+
+    // Run 30 times: model-a should be selected more often (strong domain data)
+    let aSelectedCount = 0;
+    for (let trial = 0; trial < 30; trial++) {
+      const selected = thompsonSelect("D", "T2", pool, 1, store);
+      if (selected[0]?.id === "a/model-a") aSelectedCount++;
+    }
+    // model-a should win most of the time due to positive domain-level data
+    expect(aSelectedCount).toBeGreaterThan(15); // > 50% of 30 trials
+  });
 });

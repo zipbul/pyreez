@@ -179,6 +179,26 @@ describe("FileSkillCellStore", () => {
     }
   });
 
+  // -- getForDomain --
+
+  it("should return all cells for a model in a specific domain across taskTypes", () => {
+    store.update(makeFeedback({ domain: "ARCHITECTURE", task_type: "SYSTEM_DESIGN" }));
+    store.update(makeFeedback({ domain: "ARCHITECTURE", task_type: "MODULE_DESIGN" }));
+    store.update(makeFeedback({ domain: "CODING", task_type: "IMPLEMENT_FEATURE" }));
+
+    const cells = store.getForDomain("test/model-a", "ARCHITECTURE");
+    expect(cells).toHaveLength(2);
+    for (const c of cells) {
+      expect(c.domain).toBe("ARCHITECTURE");
+      expect(c.model_id).toBe("test/model-a");
+    }
+  });
+
+  it("should return empty for getForDomain with no matching cells", () => {
+    const cells = store.getForDomain("nonexistent/model", "CODING");
+    expect(cells).toHaveLength(0);
+  });
+
   // -- Failure severity integration --
 
   it("should penalize ALL dimensions on critical hallucination (CODING)", () => {

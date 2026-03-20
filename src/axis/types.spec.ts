@@ -127,6 +127,16 @@ describe("applyFailureSeverity", () => {
     expect(result.addresses_task).toBe(false);
   });
 
+  it("should short-circuit on critical even when another flag is neutral (IDEATION)", () => {
+    // IDEATION: hallucination=neutral, off_topic=critical
+    const failures: FailureFlags = { hallucination: true, refusal: false, off_topic: true, degenerate: false };
+    const result = applyFailureSeverity("IDEATION", ALL_PASS, failures);
+    // off_topic is critical → all false, despite hallucination being neutral
+    expect(result.factually_correct).toBe(false);
+    expect(result.addresses_task).toBe(false);
+    expect(result.novel_perspective).toBe(false);
+  });
+
   it("should handle warning + neutral (worst = warning)", () => {
     // IDEATION: hallucination=neutral, refusal=critical. But refusal is false.
     // Use COMMUNICATION: hallucination=warning, refusal=warning

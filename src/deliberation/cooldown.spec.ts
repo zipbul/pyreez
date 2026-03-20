@@ -211,6 +211,21 @@ describe("cooldown persistence (serialize/restore)", () => {
     expect(cm2.isOnCooldown("openai/gpt-4.1")).toBe(false);
   });
 
+  it("should allow addProvider to work correctly after restore", () => {
+    const cm1 = createCooldownManager();
+    cm1.addProvider("openai/gpt-4.1", "spending cap");
+    const state = cm1.serialize();
+
+    const cm2 = createCooldownManager();
+    cm2.restore(state);
+    cm2.addProvider("google/gemini-2.5-pro", "new error");
+
+    expect(cm2.isOnCooldown("openai/gpt-4.1")).toBe(true);
+    expect(cm2.isOnCooldown("openai/other")).toBe(true); // restored provider
+    expect(cm2.isOnCooldown("google/gemini-2.5-pro")).toBe(true);
+    expect(cm2.isOnCooldown("google/other")).toBe(true); // new provider
+  });
+
   it("should preserve failCount across sessions", () => {
     const cm1 = createCooldownManager();
     cm1.add("model-a", "first", "unknown");

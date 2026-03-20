@@ -1748,4 +1748,126 @@ describe("team degradation", () => {
 
     expect(output.degradation).toBeUndefined();
   });
+
+  it("should include tokensConsumed and modelSwaps in TeamDegradedError", async () => {
+    const team: TeamComposition = {
+      workers: Array.from({ length: 5 }, (_, i) => ({
+        model: `prov-${i}/model-${i}`,
+        role: "worker" as const,
+      })),
+    };
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "prov-0/model-0" || model === "prov-1/model-1") {
+          return chatResult(validWorkerContent("ok"), 15, 25);
+        }
+        throw new LLMClientError(500, "Server error");
+      }),
+    });
+
+    try {
+      await deliberate(team, makeInput(), deps, makeConfig());
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TeamDegradedError);
+      const tde = error as InstanceType<typeof TeamDegradedError>;
+      expect(tde.tokensConsumed).toBeDefined();
+      expect(tde.tokensConsumed!.input).toBeGreaterThan(0);
+      expect(tde.tokensConsumed!.output).toBeGreaterThan(0);
+      expect(tde.modelSwaps).toBeDefined();
+    }
+  });
+
+  it("should reflect final degradation state across multiple rounds", async () => {
+    const team: TeamComposition = {
+      workers: Array.from({ length: 5 }, (_, i) => ({
+        model: `prov-${i}/model-${i}`,
+        role: "worker" as const,
+      })),
+    };
+
+    let round = 1;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        // model-4 always fails (both rounds)
+        if (model === "prov-4/model-4") {
+          throw new LLMClientError(500, "model-4 always fails");
+        }
+        // model-3 fails only in R2
+        if (round === 2 && model === "prov-3/model-3") {
+          throw new LLMClientError(500, "R2 fail");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    // Track round progression
+    const origChat = deps.chat;
+    let callCount = 0;
+    (deps as any).chat = async (model: string, messages: any, params?: any) => {
+      callCount++;
+      // first 5 calls = R1, then R2
+      round = callCount <= 5 ? 1 : 2;
+      return origChat(model, messages, params);
+    };
+
+    const config = makeConfig({ maxRounds: 2 });
+    const output = await deliberate(team, makeInput(), deps, config);
+
+    expect(output.degradation).toBeDefined();
+    expect(output.degradation!.originalTeamSize).toBe(5);
+    expect(output.degradation!.activeTeamSize).toBe(3);
+  });
+});
+
+// =============================================================================
+// #10 supplement — cooldown pre-check success path (model replaced by fallback)
+// =============================================================================
+
+describe("cooldown pre-check success path", () => {
+  it("should skip cooled model and use fallback successfully in R2", async () => {
+    const callLog: string[] = [];
+    let round = 1;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        callLog.push(model);
+        // R1: model-0 fails with 429
+        if (round === 1 && model === "prov-a/model-0") {
+          throw new LLMClientError(429, "Rate limit", "rate_limit_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const origChat = deps.chat;
+    let callCount = 0;
+    (deps as any).chat = async (model: string, messages: any, params?: any) => {
+      callCount++;
+      round = callCount <= 3 ? 1 : 2; // 2 workers + 1 fallback in R1, then R2
+      return origChat(model, messages, params);
+    };
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([
+      makeModelInfo("prov-c/fallback-1"),
+      makeModelInfo("prov-d/fallback-2"),
+    ], cooldown);
+
+    const customTeam: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-b/model-1", role: "worker" },
+      ],
+    };
+
+    const config = makeConfig({ maxRounds: 2 });
+    const output = await deliberate(customTeam, makeInput(), deps, config, { pool });
+
+    // R1: model-0 fails → fallback-1 succeeds, team updated to fallback-1
+    // R2: fallback-1 called (not model-0)
+    expect(callLog.filter(m => m === "prov-a/model-0")).toHaveLength(1); // only R1
+    expect(output.modelsUsed).toContain("prov-c/fallback-1");
+    expect(output.roundsExecuted).toBe(2);
+  });
 });
