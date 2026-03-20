@@ -21,6 +21,8 @@ export interface SkillCellStore {
   getAllForModel(modelId: string): SkillCell[];
   /** Get all cells for models in a given family. */
   getAllForFamily(family: string, domain: string, taskType: string): SkillCell[];
+  /** Get all cells for a model in a specific domain (across all taskTypes). */
+  getForDomain(modelId: string, domain: string): SkillCell[];
   /** Update a cell with a new feedback record. */
   update(record: FeedbackRecord): void;
   /** Persist to disk. */
@@ -87,6 +89,16 @@ export class FileSkillCellStore implements SkillCellStore {
     const result: SkillCell[] = [];
     for (const cell of this.cells.values()) {
       if (cell.model_id === modelId) {
+        result.push(cell);
+      }
+    }
+    return result;
+  }
+
+  getForDomain(modelId: string, domain: string): SkillCell[] {
+    const result: SkillCell[] = [];
+    for (const cell of this.cells.values()) {
+      if (cell.model_id === modelId && cell.domain === domain) {
         result.push(cell);
       }
     }

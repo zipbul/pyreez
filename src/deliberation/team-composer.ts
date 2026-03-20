@@ -281,86 +281,89 @@ export function orderWorkersByRole(
   return result;
 }
 
-// -- Thompson Sampling Selection --
-
-/** Minimum observations before exclusion recommendation is considered. */
-const MIN_OBS_FOR_EXCLUSION = 10;
-/** Wilson score lower bound threshold for exclusion. */
-const EXCLUSION_THRESHOLD = 0.3;
-/** Minimum observations before a model is considered "known" (not cold-start). */
-const MIN_OBS = 5;
+// -- Thompson Sampling Selection (3-Tier Hierarchical Blend) --
 
 /**
- * Wilson score interval lower bound.
- * Robust for small sample sizes, bounded [0, 1].
+ * Blend schedule: maps observation count to weight on the specific tier.
+ * Remainder goes to the parent tier. Piecewise-linear interpolation.
  */
-export function wilsonLower(passRate: number, n: number, z = 1.96): number {
-  if (n === 0) return 0;
-  const denominator = 1 + (z * z) / n;
-  const center = passRate + (z * z) / (2 * n);
-  const spread = z * Math.sqrt((passRate * (1 - passRate) + (z * z) / (4 * n)) / n);
-  return Math.max(0, (center - spread) / denominator);
+const BLEND_SCHEDULE: readonly [number, number][] = [
+  [0, 0.0], [1, 0.15], [3, 0.40], [5, 0.60],
+  [8, 0.80], [12, 0.90], [20, 0.95], [50, 1.0],
+];
+
+/** Get blend weight for a specific tier given observation count. */
+export function blendWeight(n: number): number {
+  if (n <= 0) return 0;
+  if (n >= BLEND_SCHEDULE[BLEND_SCHEDULE.length - 1]![0]) return 1.0;
+  for (let i = 0; i < BLEND_SCHEDULE.length - 1; i++) {
+    const [lo, wLo] = BLEND_SCHEDULE[i]!;
+    const [hi, wHi] = BLEND_SCHEDULE[i + 1]!;
+    if (n >= lo && n < hi) {
+      const frac = (n - lo) / (hi - lo);
+      return wLo + frac * (wHi - wLo);
+    }
+  }
+  return 0;
 }
 
 /**
- * Check if a model should be excluded from a domain+taskType based on Wilson score.
+ * Aggregate Beta params across multiple cells for a dimension.
+ * Returns pooled alpha/beta from all cells, or uniform prior if no data.
  */
-export function shouldExclude(cell: SkillCell | null | undefined): boolean {
-  if (!cell || cell.total < MIN_OBS_FOR_EXCLUSION) return false;
-
-  const fc = cell.dimensions.factually_correct;
-  if (!fc) return false;
-
-  const n = fc.alpha + fc.beta - 2; // subtract 2 for initial priors
-  if (n < MIN_OBS_FOR_EXCLUSION) return false;
-
-  const passRate = (fc.alpha - 1) / n; // observation-only rate, excluding priors
-  return wilsonLower(passRate, n) < EXCLUSION_THRESHOLD;
+function aggregateParams(cells: readonly SkillCell[], dim: string): { alpha: number; beta: number; total: number } {
+  let alpha = 1, beta = 1, total = 0;
+  for (const cell of cells) {
+    const p = cell.dimensions[dim];
+    if (p) {
+      alpha += p.alpha - 1; // subtract prior, add observations
+      beta += p.beta - 1;
+      total += cell.total;
+    }
+  }
+  return { alpha, beta, total };
 }
 
 /**
- * Get cold-start prior for Thompson Sampling.
- * Tier 1: same family + same domain → use family data with inflated variance.
- * Tier 2: same family + any domain → weaker transfer.
- * Tier 3: no data → uniform (alpha=1, beta=1).
+ * 3-tier hierarchical Thompson sample for a single dimension.
+ *
+ * Tier 1: model:domain:taskType (specific cell)
+ * Tier 2: model:domain (aggregated across taskTypes)
+ * Tier 3: family:domain:taskType (family-level)
+ *
+ * Blends tiers based on observation count at each level.
  */
-function getColdStartAlphaBeta(
+function hierarchicalSample(
   model: ModelInfo,
   domain: string,
   taskType: string,
+  dim: string,
   store: SkillCellStore,
-): { alpha: number; beta: number } {
+): number {
   const family = model.family ?? model.provider;
 
-  // Tier 1: same family, same domain+taskType
+  // Tier 3: family-level (broadest)
   const familyCells = store.getAllForFamily(family, domain, taskType);
-  if (familyCells.length > 0) {
-    const totalObs = familyCells.reduce((sum, c) => sum + c.total, 0);
-    if (totalObs >= 10) {
-      // Use family average with inflated variance (wide prior)
-      let passSum = 0, totalDims = 0;
-      for (const cell of familyCells) {
-        for (const dim of BINARY_DIMENSIONS) {
-          const p = cell.dimensions[dim];
-          if (p) { passSum += p.alpha - 1; totalDims += (p.alpha - 1) + (p.beta - 1); }
-        }
-      }
-      const familyRate = totalDims > 0 ? passSum / totalDims : 0.5;
-      // Inflated variance: use small alpha+beta to keep distribution wide
-      return { alpha: 1 + familyRate * 3, beta: 1 + (1 - familyRate) * 3 };
-    }
-  }
+  const t3 = aggregateParams(familyCells, dim);
+  const s3 = betaSample(t3.alpha, t3.beta);
 
-  // Tier 2: same family, any domain — deferred to future implementation.
-  // Would require reverse family→modelIds lookup + cross-domain aggregation.
+  // Tier 2: model:domain (all taskTypes for this model+domain)
+  const domainCells = store.getForDomain(model.id, domain);
+  const t2 = aggregateParams(domainCells, dim);
+  const w2 = blendWeight(t2.total);
+  const s2 = w2 * betaSample(t2.alpha, t2.beta) + (1 - w2) * s3;
 
-  // Tier 3: uniform prior
-  return { alpha: 1, beta: 1 };
+  // Tier 1: model:domain:taskType (specific)
+  const cell = store.get(model.id, domain, taskType);
+  const params = cell?.dimensions[dim] ?? { alpha: 1, beta: 1 };
+  const n1 = cell?.total ?? 0;
+  const w1 = blendWeight(n1);
+  return w1 * betaSample(params.alpha, params.beta) + (1 - w1) * s2;
 }
 
 /**
- * Select models via Thompson Sampling over SkillCell Beta posteriors.
- * Domain-specific selection with provider diversity and cold-start exploration.
+ * Select models via Thompson Sampling with 3-tier hierarchical blending.
+ * Replaces Wilson score exclusion with smooth blend schedule.
  *
  * @param domain - Task domain for skill cell lookup.
  * @param taskType - Task type for skill cell lookup.
@@ -377,42 +380,15 @@ export function thompsonSelect(
 ): ModelInfo[] {
   if (pool.length <= count) return [...pool];
 
-  // Separate cold-start models for mandatory exploration
-  const coldModels: ModelInfo[] = [];
-  const warmModels: ModelInfo[] = [];
-
-  for (const model of pool) {
-    const cell = store.get(model.id, domain, taskType);
-    if (shouldExclude(cell)) continue; // Wilson exclusion
-
-    if (!cell || cell.total < MIN_OBS) {
-      coldModels.push(model);
-    } else {
-      warmModels.push(model);
-    }
-  }
-
   // Domain-specific dimension weights for Thompson Sampling
   const weights = getDomainWeights(domain);
 
-  // Sample scores for warm models (weighted by domain)
+  // Score all models using hierarchical blend (no warm/cold split needed)
   const samples: { model: ModelInfo; score: number }[] = [];
-  for (const model of warmModels) {
-    const cell = store.get(model.id, domain, taskType)!;
+  for (const model of pool) {
     let score = 0;
     for (const dim of BINARY_DIMENSIONS) {
-      const params = cell.dimensions[dim] ?? { alpha: 1, beta: 1 };
-      score += (weights[dim] ?? 0.20) * betaSample(params.alpha, params.beta);
-    }
-    samples.push({ model, score });
-  }
-
-  // Sample scores for cold models (using priors, weighted by domain)
-  for (const model of coldModels) {
-    const prior = getColdStartAlphaBeta(model, domain, taskType, store);
-    let score = 0;
-    for (const dim of BINARY_DIMENSIONS) {
-      score += (weights[dim] ?? 0.20) * betaSample(prior.alpha, prior.beta);
+      score += (weights[dim] ?? 0.20) * hierarchicalSample(model, domain, taskType, dim, store);
     }
     samples.push({ model, score });
   }
@@ -425,16 +401,8 @@ export function thompsonSelect(
   const providerCounts = new Map<string, number>();
   const selected: ModelInfo[] = [];
 
-  // Reserve 1 slot for cold-start if available and count >= 3
-  if (coldModels.length > 0 && count >= 3) {
-    // Reserve 1 slot for cold-start exploration — prefer different provider from warm top picks
-    const warmProviders = new Set(samples.slice(0, count).map(s => s.model.provider));
-    const diverseCold = coldModels.filter(m => !warmProviders.has(m.provider));
-    const coldPool = diverseCold.length > 0 ? diverseCold : coldModels;
-    const coldPick = coldPool[Math.floor(Math.random() * coldPool.length)]!;
-    selected.push(coldPick);
-    providerCounts.set(coldPick.provider, 1);
-  }
+  // Hierarchical blend ensures cold-start models get exploration via parent-tier variance.
+  // No mandatory cold slot needed — natural Thompson exploration handles it.
 
   for (const { model } of samples) {
     if (selected.length >= count) break;

@@ -585,7 +585,7 @@ describe("orderWorkersByRole", () => {
 // Thompson Sampling + Wilson Score
 // =============================================================================
 
-import { thompsonSelect, wilsonLower, shouldExclude } from "./team-composer";
+import { thompsonSelect, blendWeight } from "./team-composer";
 import { FileSkillCellStore } from "../model/skillcell-store";
 import type { FeedbackRecord } from "../axis/types";
 
@@ -632,57 +632,30 @@ function makeModelInfo(id: string): ModelInfo {
   };
 }
 
-describe("wilsonLower", () => {
+describe("blendWeight", () => {
   it("should return 0 for n=0", () => {
-    expect(wilsonLower(0.5, 0)).toBe(0);
+    expect(blendWeight(0)).toBe(0);
   });
 
-  it("should return value between 0 and passRate", () => {
-    const lower = wilsonLower(0.8, 100);
-    expect(lower).toBeGreaterThan(0);
-    expect(lower).toBeLessThan(0.8);
+  it("should return 1.0 for n>=50", () => {
+    expect(blendWeight(50)).toBe(1.0);
+    expect(blendWeight(100)).toBe(1.0);
   });
 
-  it("should return 0 for passRate=0, n>0", () => {
-    const lower = wilsonLower(0, 10);
-    expect(lower).toBe(0);
+  it("should interpolate between schedule points", () => {
+    const w5 = blendWeight(5);
+    expect(w5).toBe(0.6);
+    const w8 = blendWeight(8);
+    expect(w8).toBe(0.8);
   });
 
-  it("should approach passRate for large n", () => {
-    const lower = wilsonLower(0.9, 10000);
-    expect(lower).toBeGreaterThan(0.89);
-  });
-});
-
-describe("shouldExclude", () => {
-  it("should return false for null cell", () => {
-    expect(shouldExclude(null)).toBe(false);
-  });
-
-  it("should return false for low observation count", () => {
-    const store = makeSkillCellStore();
-    store.update(makeFeedbackForModel("m1", "D", "T", false));
-    const cell = store.get("m1", "D", "T");
-    expect(shouldExclude(cell)).toBe(false); // total=1, below MIN_OBS_FOR_EXCLUSION
-  });
-
-  it("should return true for consistently failing model with enough observations", () => {
-    const store = makeSkillCellStore();
-    // 15 observations, all failing on factually_correct
-    for (let i = 0; i < 15; i++) {
-      store.update(makeFeedbackForModel("m1", "D", "T", false));
+  it("should be monotonically increasing", () => {
+    let prev = 0;
+    for (let n = 0; n <= 60; n++) {
+      const w = blendWeight(n);
+      expect(w).toBeGreaterThanOrEqual(prev);
+      prev = w;
     }
-    const cell = store.get("m1", "D", "T");
-    expect(shouldExclude(cell)).toBe(true);
-  });
-
-  it("should return false for consistently passing model", () => {
-    const store = makeSkillCellStore();
-    for (let i = 0; i < 15; i++) {
-      store.update(makeFeedbackForModel("m1", "D", "T", true));
-    }
-    const cell = store.get("m1", "D", "T");
-    expect(shouldExclude(cell)).toBe(false);
   });
 });
 
@@ -744,17 +717,19 @@ describe("thompsonSelect", () => {
     expect(sameCount).toBeLessThanOrEqual(2);
   });
 
-  it("should return empty array when all models are Wilson-excluded", () => {
+  it("should still select poorly-performing models (no Wilson exclusion) via hierarchical blend", () => {
     const pool = [makeModelInfo("a/m1"), makeModelInfo("b/m2"), makeModelInfo("c/m3"), makeModelInfo("d/m4")];
     const store = makeSkillCellStore();
+    // All models fail consistently — but hierarchical blend doesn't exclude, just ranks low
     for (const m of pool) {
       for (let i = 0; i < 15; i++) store.update(makeFeedbackForModel(m.id, "D", "T", false));
     }
     const selected = thompsonSelect("D", "T", pool, 3, store);
-    expect(selected).toHaveLength(0);
+    // Should still return 3 models (no exclusion in hierarchical blend)
+    expect(selected).toHaveLength(3);
   });
 
-  it("should work with count=1 (no cold-start reservation)", () => {
+  it("should work with count=1", () => {
     const pool = [makeModelInfo("a/m1"), makeModelInfo("b/m2"), makeModelInfo("c/m3")];
     const store = makeSkillCellStore();
     for (const m of pool) {
@@ -764,21 +739,22 @@ describe("thompsonSelect", () => {
     expect(selected).toHaveLength(1);
   });
 
-  it("should reserve cold-start slot when count >= 3", () => {
+  it("should explore cold models via hierarchical blend variance", () => {
     const pool = [
       makeModelInfo("a/warm1"), makeModelInfo("b/warm2"),
       makeModelInfo("c/warm3"), makeModelInfo("d/cold1"),
     ];
     const store = makeSkillCellStore();
-    // Make warm models have data
+    // Warm models with mediocre data (mixed pass/fail) — cold model can compete
     for (const m of pool.slice(0, 3)) {
-      for (let i = 0; i < 10; i++) store.update(makeFeedbackForModel(m.id, "D", "T", true));
+      for (let i = 0; i < 5; i++) store.update(makeFeedbackForModel(m.id, "D", "T", true));
+      for (let i = 0; i < 5; i++) store.update(makeFeedbackForModel(m.id, "D", "T", false));
     }
-    // cold1 has no data
+    // cold1 has no data — blend gives it uniform prior which competes with mediocre warm
 
-    // Run 20 times — cold model should appear at least once
+    // Run 50 times — cold model should appear at least once due to Thompson exploration
     let coldAppeared = false;
-    for (let trial = 0; trial < 20; trial++) {
+    for (let trial = 0; trial < 50; trial++) {
       const selected = thompsonSelect("D", "T", pool, 3, store);
       if (selected.some(m => m.id === "d/cold1")) {
         coldAppeared = true;
