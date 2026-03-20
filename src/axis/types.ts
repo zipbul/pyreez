@@ -87,3 +87,93 @@ export const FAILURE_FLAGS = [
   "off_topic",
   "degenerate",
 ] as const;
+
+// -- Domain Dimension Weights --
+
+/** Per-domain weight vectors for Thompson Sampling. Sums to 1.0 per domain. */
+export const DOMAIN_DIMENSION_WEIGHTS: Readonly<Record<string, Readonly<Record<string, number>>>> = {
+  IDEATION:       { factually_correct: 0.10, addresses_task: 0.20, provides_evidence: 0.10, novel_perspective: 0.40, internally_consistent: 0.20 },
+  PLANNING:       { factually_correct: 0.15, addresses_task: 0.30, provides_evidence: 0.15, novel_perspective: 0.20, internally_consistent: 0.20 },
+  REQUIREMENTS:   { factually_correct: 0.25, addresses_task: 0.30, provides_evidence: 0.20, novel_perspective: 0.05, internally_consistent: 0.20 },
+  ARCHITECTURE:   { factually_correct: 0.25, addresses_task: 0.25, provides_evidence: 0.25, novel_perspective: 0.05, internally_consistent: 0.20 },
+  CODING:         { factually_correct: 0.15, addresses_task: 0.35, provides_evidence: 0.10, novel_perspective: 0.10, internally_consistent: 0.30 },
+  TESTING:        { factually_correct: 0.25, addresses_task: 0.25, provides_evidence: 0.20, novel_perspective: 0.10, internally_consistent: 0.20 },
+  REVIEW:         { factually_correct: 0.30, addresses_task: 0.20, provides_evidence: 0.25, novel_perspective: 0.05, internally_consistent: 0.20 },
+  DOCUMENTATION:  { factually_correct: 0.10, addresses_task: 0.25, provides_evidence: 0.10, novel_perspective: 0.25, internally_consistent: 0.30 },
+  DEBUGGING:      { factually_correct: 0.30, addresses_task: 0.25, provides_evidence: 0.25, novel_perspective: 0.05, internally_consistent: 0.15 },
+  OPERATIONS:     { factually_correct: 0.20, addresses_task: 0.30, provides_evidence: 0.20, novel_perspective: 0.05, internally_consistent: 0.25 },
+  RESEARCH:       { factually_correct: 0.30, addresses_task: 0.15, provides_evidence: 0.30, novel_perspective: 0.10, internally_consistent: 0.15 },
+  COMMUNICATION:  { factually_correct: 0.20, addresses_task: 0.25, provides_evidence: 0.15, novel_perspective: 0.10, internally_consistent: 0.30 },
+};
+
+/** Default equal weights (fallback for unknown domains). */
+const DEFAULT_WEIGHTS: Readonly<Record<string, number>> = {
+  factually_correct: 0.20, addresses_task: 0.20, provides_evidence: 0.20,
+  novel_perspective: 0.20, internally_consistent: 0.20,
+};
+
+/** Get dimension weights for a domain. Falls back to equal weights. */
+export function getDomainWeights(domain: string): Readonly<Record<string, number>> {
+  return DOMAIN_DIMENSION_WEIGHTS[domain] ?? DEFAULT_WEIGHTS;
+}
+
+// -- Failure Flag Severity --
+
+/** Severity level for a failure flag in a given domain. */
+export type FailureSeverity = "critical" | "warning" | "neutral";
+
+/**
+ * Domain×flag severity overrides. Default is "critical" for all combinations.
+ * Only non-critical entries are stored (sparse representation).
+ */
+const SEVERITY_OVERRIDES: ReadonlyMap<string, FailureSeverity> = new Map([
+  ["IDEATION:hallucination", "neutral"],
+  ["PLANNING:hallucination", "warning"],
+  ["DOCUMENTATION:hallucination", "warning"],
+  ["COMMUNICATION:hallucination", "warning"],
+  ["COMMUNICATION:refusal", "warning"],
+]);
+
+/** Get the severity of a failure flag for a domain. */
+export function getFailureSeverity(domain: string, flag: string): FailureSeverity {
+  return SEVERITY_OVERRIDES.get(`${domain}:${flag}`) ?? "critical";
+}
+
+/**
+ * Apply failure severity to a FeedbackRecord's dimensions.
+ * - critical: override ALL dimensions to false
+ * - warning: override factually_correct to false
+ * - neutral: no change
+ * Returns a new dimensions object (does not mutate input).
+ */
+export function applyFailureSeverity(
+  domain: string,
+  dimensions: BinaryDimensions,
+  failures: FailureFlags,
+): BinaryDimensions {
+  let worstSeverity: FailureSeverity = "neutral";
+
+  for (const flag of FAILURE_FLAGS) {
+    if (!failures[flag]) continue;
+    const severity = getFailureSeverity(domain, flag);
+    if (severity === "critical") {
+      // Critical is the worst — short-circuit
+      return {
+        factually_correct: false,
+        addresses_task: false,
+        provides_evidence: false,
+        novel_perspective: false,
+        internally_consistent: false,
+      };
+    }
+    if (severity === "warning") {
+      worstSeverity = "warning";
+    }
+  }
+
+  if (worstSeverity === "warning") {
+    return { ...dimensions, factually_correct: false };
+  }
+
+  return dimensions;
+}

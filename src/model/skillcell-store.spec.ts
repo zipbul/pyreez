@@ -178,4 +178,61 @@ describe("FileSkillCellStore", () => {
       expect(cell.failure_counts[flag]).toBeDefined();
     }
   });
+
+  // -- Failure severity integration --
+
+  it("should penalize ALL dimensions on critical hallucination (CODING)", () => {
+    store.update(makeFeedback({
+      domain: "CODING",
+      task_type: "IMPLEMENT_FEATURE",
+      dimensions: {
+        factually_correct: true, addresses_task: true,
+        provides_evidence: true, novel_perspective: true, internally_consistent: true,
+      },
+      failures: { hallucination: true, refusal: false, off_topic: false, degenerate: false },
+    }));
+    const cell = store.get("test/model-a", "CODING", "IMPLEMENT_FEATURE")!;
+    // Critical → all dimensions overridden to false → beta incremented
+    for (const dim of BINARY_DIMENSIONS) {
+      expect(cell.dimensions[dim]!.beta).toBe(2); // 1 initial + 1 failure
+      expect(cell.dimensions[dim]!.alpha).toBe(1); // unchanged
+    }
+  });
+
+  it("should penalize only factually_correct on warning hallucination (PLANNING)", () => {
+    store.update(makeFeedback({
+      domain: "PLANNING",
+      task_type: "SCOPE_DEFINITION",
+      dimensions: {
+        factually_correct: true, addresses_task: true,
+        provides_evidence: true, novel_perspective: true, internally_consistent: true,
+      },
+      failures: { hallucination: true, refusal: false, off_topic: false, degenerate: false },
+    }));
+    const cell = store.get("test/model-a", "PLANNING", "SCOPE_DEFINITION")!;
+    // Warning → factually_correct overridden to false
+    expect(cell.dimensions["factually_correct"]!.beta).toBe(2);
+    expect(cell.dimensions["factually_correct"]!.alpha).toBe(1);
+    // Other dimensions keep original true → alpha incremented
+    expect(cell.dimensions["addresses_task"]!.alpha).toBe(2);
+    expect(cell.dimensions["novel_perspective"]!.alpha).toBe(2);
+  });
+
+  it("should not penalize dimensions on neutral hallucination (IDEATION)", () => {
+    store.update(makeFeedback({
+      domain: "IDEATION",
+      task_type: "BRAINSTORM",
+      dimensions: {
+        factually_correct: true, addresses_task: true,
+        provides_evidence: true, novel_perspective: true, internally_consistent: true,
+      },
+      failures: { hallucination: true, refusal: false, off_topic: false, degenerate: false },
+    }));
+    const cell = store.get("test/model-a", "IDEATION", "BRAINSTORM")!;
+    // Neutral → dimensions unchanged → all alpha incremented
+    for (const dim of BINARY_DIMENSIONS) {
+      expect(cell.dimensions[dim]!.alpha).toBe(2);
+      expect(cell.dimensions[dim]!.beta).toBe(1);
+    }
+  });
 });

@@ -10,7 +10,7 @@ import type { ModelInfo, CapabilityDimension } from "../model/types";
 import { SIGMA_BASE } from "../model/types";
 import type { TeamComposition, TeamMember } from "./types";
 import type { SkillCell } from "../axis/types";
-import { BINARY_DIMENSIONS } from "../axis/types";
+import { BINARY_DIMENSIONS, getDomainWeights } from "../axis/types";
 import type { SkillCellStore } from "../model/skillcell-store";
 import { betaSample } from "../math/beta";
 
@@ -392,26 +392,29 @@ export function thompsonSelect(
     }
   }
 
-  // Sample scores for warm models
+  // Domain-specific dimension weights for Thompson Sampling
+  const weights = getDomainWeights(domain);
+
+  // Sample scores for warm models (weighted by domain)
   const samples: { model: ModelInfo; score: number }[] = [];
   for (const model of warmModels) {
     const cell = store.get(model.id, domain, taskType)!;
-    let dimSum = 0;
+    let score = 0;
     for (const dim of BINARY_DIMENSIONS) {
       const params = cell.dimensions[dim] ?? { alpha: 1, beta: 1 };
-      dimSum += betaSample(params.alpha, params.beta);
+      score += (weights[dim] ?? 0.20) * betaSample(params.alpha, params.beta);
     }
-    samples.push({ model, score: dimSum / BINARY_DIMENSIONS.length });
+    samples.push({ model, score });
   }
 
-  // Sample scores for cold models (using priors)
+  // Sample scores for cold models (using priors, weighted by domain)
   for (const model of coldModels) {
     const prior = getColdStartAlphaBeta(model, domain, taskType, store);
-    let dimSum = 0;
-    for (const _dim of BINARY_DIMENSIONS) {
-      dimSum += betaSample(prior.alpha, prior.beta);
+    let score = 0;
+    for (const dim of BINARY_DIMENSIONS) {
+      score += (weights[dim] ?? 0.20) * betaSample(prior.alpha, prior.beta);
     }
-    samples.push({ model, score: dimSum / BINARY_DIMENSIONS.length });
+    samples.push({ model, score });
   }
 
   // Sort by sampled score (NOT by mean)

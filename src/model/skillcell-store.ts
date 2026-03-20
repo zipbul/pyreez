@@ -8,7 +8,7 @@
  */
 
 import type { SkillCell, FeedbackRecord, BetaParams } from "../axis/types";
-import { BINARY_DIMENSIONS, FAILURE_FLAGS } from "../axis/types";
+import { BINARY_DIMENSIONS, FAILURE_FLAGS, applyFailureSeverity } from "../axis/types";
 
 // -- Public Interface --
 
@@ -113,9 +113,12 @@ export class FileSkillCellStore implements SkillCellStore {
       cell = freshCell(record.model_id, record.domain, record.task_type);
     }
 
+    // Apply failure severity: critical → all dims false, warning → factual false
+    const effectiveDims = applyFailureSeverity(record.domain, record.dimensions, record.failures);
+
     // Update binary dimensions
     for (const dim of BINARY_DIMENSIONS) {
-      const passed = record.dimensions[dim];
+      const passed = effectiveDims[dim];
       const params = cell.dimensions[dim] ?? { alpha: 1, beta: 1 };
       if (passed) {
         params.alpha += 1;
