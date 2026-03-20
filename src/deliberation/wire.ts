@@ -114,6 +114,7 @@ export function createDeliberateFn(
 ): (input: DeliberateInput) => Promise<DeliberateOutput> {
   return async (input) => {
     let team: import("./types").TeamComposition;
+    const cooldown = deps.cooldown ?? createCooldownManager();
 
     if (input.models && input.models.length >= 2) {
       // Validate all model IDs exist in registry
@@ -134,7 +135,8 @@ export function createDeliberateFn(
       );
     } else {
       // Auto compose from available models, capped to prevent cost explosion.
-      const available = deps.registry.getAvailable();
+      // Filter out models on cooldown (dead providers from previous calls in this session).
+      const available = deps.registry.getAvailable().filter((m) => !cooldown.isOnCooldown(m.id));
       const MAX_AUTO_TEAM = input.taskNature === "artifact" ? 3 : 5;
 
       // Thompson Sampling if SkillCell store is available and domain is known
@@ -183,13 +185,34 @@ export function createDeliberateFn(
       workerGenParams,
     };
 
-    // 5. Build fallback pool (auto mode only; manual mode = no fallback per D8)
+    // 5. Build fallback pool + replenishment (auto mode only)
     let fallbackDeps: FallbackDeps | undefined;
     if (!input.models) {
-      const cooldown = deps.cooldown ?? createCooldownManager();
-      const available = deps.registry.getAvailable();
-      const pool = createFallbackPool(available, cooldown);
-      fallbackDeps = { pool };
+      const allAvailable = deps.registry.getAvailable();
+      const pool = createFallbackPool(allAvailable, cooldown);
+      const teamModelIds = new Set(team.workers.map((w) => w.model));
+
+      fallbackDeps = {
+        pool,
+        replenish(aliveProviders, emptySlots, respondedModels) {
+          // Select replacement models from alive providers, excluding current team + already responded
+          const candidates = allAvailable.filter(
+            (m) => aliveProviders.has(m.provider) && !teamModelIds.has(m.id)
+              && !cooldown.isOnCooldown(m.id) && !respondedModels.has(m.id),
+          );
+          if (candidates.length === 0) return [];
+
+          // Use Thompson Sampling for replenishment selection when possible
+          const selected = (deps.skillCellStore && input.domain)
+            ? thompsonSelect(input.domain, input.taskType ?? "QUESTION_ANSWER", candidates, emptySlots, deps.skillCellStore)
+            : selectDiverseModels(candidates, emptySlots);
+
+          return selected.map((m) => ({
+            model: m.id,
+            role: "worker" as const,
+          }));
+        },
+      };
     }
 
     // 6. Run deliberation

@@ -1871,3 +1871,218 @@ describe("cooldown pre-check success path", () => {
     expect(output.roundsExecuted).toBe(2);
   });
 });
+
+// =============================================================================
+// Replenishment — fill empty slots after R1 failures
+// =============================================================================
+
+describe("replenishment after R1 failures", () => {
+  it("should fill empty slots via replenish callback", async () => {
+    const callLog: string[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        callLog.push(model);
+        if (model === "prov-a/model-0" || model === "prov-b/model-1") {
+          throw new LLMClientError(429, "Rate limit", "rate_limit_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([], cooldown); // empty pool — no fallback
+
+    const customTeam: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-b/model-1", role: "worker" },
+        { model: "prov-c/model-2", role: "worker" },
+      ],
+    };
+
+    // Replenish returns 2 new workers from alive provider (prov-c)
+    const replenish = mock((aliveProviders: ReadonlySet<string>, emptySlots: number, _responded: ReadonlySet<string>) => {
+      expect(aliveProviders.has("prov-c")).toBe(true);
+      expect(emptySlots).toBe(2);
+      return [
+        { model: "prov-c/replenish-1", role: "worker" as const },
+        { model: "prov-c/replenish-2", role: "worker" as const },
+      ];
+    });
+
+    const output = await deliberate(
+      customTeam, makeInput(), deps, makeConfig(),
+      { pool, replenish },
+    );
+
+    // Original: 3 workers, 2 failed, 1 success
+    // Replenishment: 2 additional from prov-c → both succeed
+    // Total: 3 responses
+    expect(output.modelsUsed).toContain("prov-c/model-2");
+    expect(output.modelsUsed).toContain("prov-c/replenish-1");
+    expect(output.modelsUsed).toContain("prov-c/replenish-2");
+    expect(callLog).toContain("prov-c/replenish-1");
+    expect(callLog).toContain("prov-c/replenish-2");
+  });
+
+  it("should not call replenish when all workers succeed", async () => {
+    const deps = makeDeps();
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([], cooldown);
+    const replenish = mock(() => []);
+
+    await deliberate(makeTeam(3), makeInput(), deps, makeConfig(), { pool, replenish });
+
+    expect(replenish).not.toHaveBeenCalled();
+  });
+
+  it("should include replenished workers in team for R2", async () => {
+    const callLog: string[] = [];
+    let round = 1;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        callLog.push(model);
+        // R1: model-0 and model-1 fail, model-2 succeeds
+        if (round === 1 && (model === "prov-a/model-0" || model === "prov-b/model-1")) {
+          throw new LLMClientError(429, "Rate limit", "rate_limit_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const origChat = deps.chat;
+    let callCount = 0;
+    (deps as any).chat = async (model: string, messages: any, params?: any) => {
+      callCount++;
+      // First 3 calls = R1 original, next 2 = replenishment, then R2
+      round = callCount <= 5 ? 1 : 2;
+      return origChat(model, messages, params);
+    };
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([], cooldown);
+
+    const customTeam: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-b/model-1", role: "worker" },
+        { model: "prov-c/model-2", role: "worker" },
+      ],
+    };
+
+    const replenish = mock((_alive: ReadonlySet<string>, _slots: number, _responded: ReadonlySet<string>) => [
+      { model: "prov-c/replenish-1", role: "worker" as const },
+      { model: "prov-c/replenish-2", role: "worker" as const },
+    ]);
+
+    const config = makeConfig({ maxRounds: 2 });
+    const output = await deliberate(customTeam, makeInput(), deps, config, { pool, replenish });
+
+    expect(output.roundsExecuted).toBe(2);
+    // R2 should call replenished workers (they're on the team now)
+    const r2Calls = callLog.filter((_, i) => i >= 5); // R2 calls
+    expect(r2Calls).toContain("prov-c/replenish-1");
+    expect(r2Calls).toContain("prov-c/replenish-2");
+  });
+
+  it("should pass respondedModels to replenish to prevent duplicate selection", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "prov-a/model-0") {
+          throw new LLMClientError(429, "Rate limit", "rate_limit_error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    // Fallback pool has fallback-1 which will be used as swap for model-0
+    const pool = createFallbackPool([makeModelInfo("prov-b/fallback-1")], cooldown);
+
+    const customTeam: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-b/model-1", role: "worker" },
+      ],
+    };
+
+    const replenish = mock(() => []);
+
+    // model-0 fails → swaps to fallback-1 → succeeds. model-1 succeeds.
+    // No empty slots → replenish NOT called (0 empty slots)
+    await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool, replenish });
+
+    // All slots filled via swap, replenish shouldn't be called
+    expect(replenish).not.toHaveBeenCalled();
+  });
+
+  it("should exclude already-responded models from replenishment candidates", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        // model-0 fails, model-1 succeeds
+        if (model === "prov-a/model-0") {
+          throw new LLMClientError(500, "Server error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([], cooldown);
+
+    // 2-worker team: no min_viable enforcement
+    const customTeam: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-b/model-1", role: "worker" },
+      ],
+    };
+
+    let capturedResponded: ReadonlySet<string> | undefined;
+    const replenish = mock((_alive: ReadonlySet<string>, _slots: number, responded: ReadonlySet<string>) => {
+      capturedResponded = responded;
+      return [];
+    });
+
+    await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool, replenish });
+
+    // replenish should receive the set of models that already responded
+    expect(capturedResponded).toBeDefined();
+    expect(capturedResponded!.has("prov-b/model-1")).toBe(true);
+    // model-0 failed, should NOT be in respondedModels
+    expect(capturedResponded!.has("prov-a/model-0")).toBe(false);
+  });
+
+  it("should still abort if replenishment is insufficient for min_viable", async () => {
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        // Only model-0 succeeds → 1 active out of 5
+        if (!model.includes("model-0")) {
+          throw new LLMClientError(500, "Server error");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([], cooldown);
+    // Replenish returns 1 worker that also fails
+    const replenish = mock(() => [
+      { model: "prov-z/replenish-fail", role: "worker" as const },
+    ]);
+
+    const team: TeamComposition = {
+      workers: Array.from({ length: 5 }, (_, i) => ({
+        model: `prov-${i}/model-${i}`,
+        role: "worker" as const,
+      })),
+    };
+
+    try {
+      await deliberate(team, makeInput(), deps, makeConfig(), { pool, replenish });
+      expect.unreachable("should have thrown TeamDegradedError");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TeamDegradedError);
+    }
+  });
+});

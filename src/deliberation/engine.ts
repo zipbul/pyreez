@@ -112,6 +112,11 @@ export interface FallbackPool {
  */
 export interface FallbackDeps {
   readonly pool: FallbackPool;
+  /**
+   * Replenishment callback: given alive provider names, number of empty slots,
+   * and models that already responded, return additional team members to fill.
+   */
+  readonly replenish?: (aliveProviders: ReadonlySet<string>, emptySlots: number, respondedModels: ReadonlySet<string>) => TeamMember[];
 }
 
 /**
@@ -509,7 +514,7 @@ export async function deliberate(
   const minViable = minViableTeamSize(originalTeamSize);
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
-    const roundResult = await executeRound(
+    let roundResult = await executeRound(
       ctx, ctx.rounds.length + 1, deps, cfg, input, fallbackDeps?.pool,
     );
 
@@ -519,22 +524,68 @@ export async function deliberate(
     };
     allModelSwaps.push(...roundResult.modelSwaps);
 
+    // Replenishment: if slots are empty and replenish callback exists, fill from alive providers.
+    const activeCount = roundResult.round.responses.length;
+    const emptySlots = originalTeamSize - activeCount;
+    let replenishedResponses: WorkerResponse[] = [];
+    if (emptySlots > 0 && fallbackDeps?.replenish && i === 1) {
+      const aliveProviders = new Set(
+        roundResult.round.responses.map((r) => extractProvider(r.model)),
+      );
+      const respondedModels = new Set(
+        roundResult.round.responses.map((r) => r.model),
+      );
+      const replacements = fallbackDeps.replenish(aliveProviders, emptySlots, respondedModels);
+      if (replacements.length > 0) {
+        const replenishResults = await Promise.allSettled(
+          replacements.map((member, idx) =>
+            callWithFallback(
+              member, originalTeamSize + idx, ctx, ctx.rounds.length + 1,
+              deps, cfg, input, fallbackDeps?.pool,
+            ),
+          ),
+        );
+        for (const repResult of replenishResults) {
+          if (repResult.status === "fulfilled" && repResult.value.response && !repResult.value.degenerate) {
+            replenishedResponses.push(repResult.value.response);
+            accTokens = {
+              input: accTokens.input + repResult.value.tokens.input,
+              output: accTokens.output + repResult.value.tokens.output,
+            };
+            allModelSwaps.push(...repResult.value.swaps);
+          }
+        }
+      }
+    }
+
+    // Merge replenished responses into round result + expand team
+    if (replenishedResponses.length > 0) {
+      roundResult = {
+        ...roundResult,
+        round: {
+          ...roundResult.round,
+          responses: [...roundResult.round.responses, ...replenishedResponses],
+        },
+      };
+    }
+
     // Check team viability: abort if active workers < min_viable
     // Only enforce for teams of 3+; smaller teams use existing all-fail guard.
-    const activeCount = roundResult.round.responses.length;
-    if (originalTeamSize >= 3 && activeCount > 0 && activeCount < minViable) {
+    const finalActiveCount = roundResult.round.responses.length;
+    if (originalTeamSize >= 3 && finalActiveCount > 0 && finalActiveCount < minViable) {
       const lostSlots = (roundResult.round.failedWorkers ?? []).map((fw) => ({
         model: fw.model,
         reason: fw.error,
       }));
       throw new TeamDegradedError(
-        originalTeamSize, activeCount, lostSlots, accTokens, allModelSwaps,
+        originalTeamSize, finalActiveCount, lostSlots, accTokens, allModelSwaps,
       );
     }
 
     // Update team from actual round responses — the response's model is the FINAL
     // model that succeeded (after all fallback hops). This correctly handles multi-hop
     // swap chains (A→B→C→D) where the swap map would only resolve to the first hop.
+    // Also incorporates replenished workers into the team for subsequent rounds.
     {
       let teamChanged = false;
       const updatedWorkers = currentTeam.workers.map((w, idx) => {
@@ -545,6 +596,13 @@ export async function deliberate(
         }
         return w;
       });
+
+      // Add replenished workers to team (workerIndex >= originalTeamSize)
+      for (const resp of replenishedResponses) {
+        updatedWorkers.push({ model: resp.model, role: "worker" as const });
+        teamChanged = true;
+      }
+
       if (teamChanged) {
         currentTeam = { workers: updatedWorkers };
         const prevRounds = [...ctx.rounds];
