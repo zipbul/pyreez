@@ -1,24 +1,57 @@
-# REMAIN — 미확정 사항 및 잔여 이슈
+# REMAIN — 잔여 이슈
 
-## 1. Debate 최소 성공 워커 수 미적용
+## 1. 프롬프팅 개선
 
-**현상**: debate 라운드에서 워커 1개만 성공해도 라운드가 완료 처리됨. 라운드 2에서 "상호 반박"할 대상이 1개뿐이므로 debate의 가치(다양한 관점 충돌)가 없음. diverge-synth와 동일한 결과를 debate 비용으로 얻는 꼴.
+### 1-1. Critic 프롬프트 비대칭성
 
-**실측**: 2026-03-17 monorepo vs polyrepo deliberation — 라운드 1에서 5개 워커 중 4개 실패(Google 429 ×2, local 미설치, Anthropic degenerate). 1개 응답만으로 라운드 완료 후 라운드 2 진행.
+Critic이 비판만 하고 대안을 제시하지 않음. R1에서 회의론만 나오고 구체적 대안은 R2 debate 규칙에 의해서야 등장.
 
-**파일**: `src/deliberation/engine.ts` — `executeRound`에서 전원 실패만 체크, 최소 성공 수 없음.
+- Critic 프롬프트에 대안 의무 추가 (`<critique>` + `<alternative>` 구조)
+- R1부터 "position + evidence + alternative" 구조 강제
 
-**권장안**: debate 프로토콜에 최소 성공 워커 수(예: 2) 적용. 미달 시 retry 또는 diverge-synth로 자동 전환.
+**파일**: `src/deliberation/prompts.ts`
 
-## 2. 프로바이더 다양성 부재 시 debate 가치 없음
+### 1-2. Acceptance 프롬프트 수동성
 
-**현상**: 실패한 모델 교체 후 팀이 단일 프로바이더(xAI)로만 구성됨. warnings 필드가 추가됐지만, 단일 프로바이더 debate는 훈련 편향이 겹쳐 다양한 시각 확보 불가.
+프롬프트가 "verify if accurately represented"로 수동적이라 거의 항상 accept 반환. `misrepresented`/`unresolved` 파싱 구조가 사실상 사장됨.
 
-**실측**: 위와 동일 세션. Google/Anthropic/local 모두 탈락, xAI 3개 모델만 남음.
+- "Find at least one way the synthesis misrepresents or weakens your position" adversarial 프레이밍
+- `"partial"` verdict 추가
+- Cross-worker 검증 (A가 B의 입장 왜곡 지적)
 
-**권장안**: warnings를 넘어서, 프로바이더 다양성이 임계값 미달이면 protocol을 debate→diverge-synth로 자동 다운그레이드. debate 비용을 절약하고 결과 품질 기대치를 호스트에 명확히 전달.
+**파일**: `src/mcp/server.ts` (acceptance 프롬프트)
 
-## 3. 워크플로우 도구 매핑 (미확정)
+### 1-3. External evaluator에 도메인 컨텍스트 주입
+
+evaluator 프롬프트에 domain/taskType 정보 없음. IDEATION 평가 시 "novel_perspective를 엄격하게, factually_correct는 관대하게" 같은 도메인별 가이드라인 필요.
+
+**파일**: `src/deliberation/external-evaluator.ts` — `buildEvalPrompt()`에 domain 파라미터 추가
+
+---
+
+## 2. Debate 자동 다운그레이드
+
+debate가 유지 불가능할 때 (min_viable 미달 또는 단일 provider) diverge-synth로 자동 전환. 현재는 abort하거나 경고만 함.
+
+- provider 다양성 임계값 미달 시 debate→diverge-synth 다운그레이드
+- debate 비용 절약 + 결과 품질 기대치 명확 전달
+
+**파일**: `src/deliberation/wire.ts`, `src/deliberation/engine.ts`
+
+---
+
+## 3. Provider 분산 강화
+
+`team-composer.ts`의 `maxPerProvider = Math.ceil(count / 2)`. 5명 팀에서 동일 provider 3명 허용 → provider 장애 시 3명 동시 손실.
+
+- `maxPerProvider = 1`로 강화하면 provider 장애 시 최대 1명만 손실
+- 가용 provider 수가 부족할 때의 fallback 정책 필요
+
+**파일**: `src/deliberation/team-composer.ts:399-400`
+
+---
+
+## 4. 워크플로우 도구 매핑 (미확정)
 
 | 단계 | 후보 도구 | 비고 |
 |------|----------|------|
@@ -33,7 +66,9 @@
 | No Test Tampering | Hook (`PreToolUse(Edit)`) | 테스트 파일 삭제/비활성화 차단 |
 | Reflection | Custom Agent | 읽기전용 리뷰어 에이전트 |
 
-## 4. zipbul 생태계 전체 맵
+---
+
+## 5. zipbul 생태계 전체 맵
 
 ```
 제품 레이어:  zipbul(웹 프레임워크) ← baker(검증), toolkit(유틸), cookie, helmet
@@ -47,7 +82,9 @@
 3. **emberdeck** — 컨텍스트 유지
 4. **pyreez** — 어려운 판단 보조
 
-## 5. 미적용 고급 기능
+---
+
+## 6. 미적용 고급 기능
 
 | 기능 | 상태 | 메모 |
 |------|------|------|
