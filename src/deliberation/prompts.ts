@@ -22,7 +22,7 @@
  */
 
 import type { ChatMessage } from "../llm/types";
-import type { SharedContext } from "./types";
+import type { SharedContext, WorkerResponse } from "./types";
 
 // -- Types --
 
@@ -278,6 +278,46 @@ export function buildDebateWorkerMessages(
     { role: "system", content: systemParts.join("\n\n") },
     { role: "user", content: userParts.join("\n\n") },
   ];
+}
+
+// -- Debate Follow-Up (session continuation) --
+
+/**
+ * Build a single user message to append to an existing worker session for R2+.
+ *
+ * Instead of rebuilding the entire prompt, this appends other workers' positions
+ * to the existing conversation. The worker already has its full R1 reasoning
+ * in the session — we only add what's new.
+ *
+ * Falls back to buildDebateWorkerMessages for cold join (no session history).
+ */
+export function buildDebateFollowUp(
+  ctx: SharedContext,
+  otherResponses: readonly WorkerResponse[],
+  roundInfo?: RoundInfo,
+): ChatMessage {
+  const parts: string[] = [];
+
+  // Other workers' positions in 3rd person (sycophancy reduction)
+  if (otherResponses.length > 0) {
+    const others = otherResponses
+      .map((r) => `One analyst argues: ${escapeXmlContent(extractDebateDigest(r.content))}`)
+      .join("\n\n");
+    parts.push(`## Other Positions\n${others}`);
+  }
+
+  // Anti-sycophancy reminder
+  parts.push("If you change position, state exactly what changed your mind. If you maintain, state why the challenge does not apply.");
+
+  // Round strategy
+  if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
+    parts.push("This is the final round. Commit to your strongest position.");
+  }
+
+  // Task reminder at end (Lost-in-the-Middle)
+  parts.push(`## Task\n${ctx.task}`);
+
+  return { role: "user", content: parts.join("\n\n") };
 }
 
 // -- Acceptance Round --

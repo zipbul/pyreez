@@ -17,6 +17,7 @@ import {
   type FallbackDeps,
 } from "./engine";
 import type { TeamComposition, DeliberateInput } from "./types";
+import type { ChatMessage } from "../llm/types";
 import type { ModelInfo } from "../model/types";
 import { createCooldownManager } from "./cooldown";
 import { LLMClientError } from "../llm/errors";
@@ -870,6 +871,78 @@ describe("GenerationParams forwarding", () => {
 
     expect(round.responses).toHaveLength(3);
     expect(round.responses.map((r) => r.workerIndex)).toEqual([0, 1, 2]);
+  });
+});
+
+// ================================================================
+// session continuation — R2+ uses accumulated history
+// ================================================================
+
+describe("session continuation in debate R2+", () => {
+  it("should use accumulated history + follow-up instead of full rebuild in R2", async () => {
+    let followUpCallCount = 0;
+    const allMessages: ChatMessage[][] = [];
+
+    const followUpMock = mock((_ctx: any, _others: any, _round?: any) => {
+      followUpCallCount++;
+      return { role: "user" as const, content: "follow-up-other-positions" };
+    });
+
+    const deps = makeDeps({
+      buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
+        return [
+          { role: "system" as const, content: "debate-system" },
+          { role: "user" as const, content: "debate-user" },
+        ];
+      }),
+      buildDebateFollowUp: followUpMock,
+    });
+
+    // Intercept chat to record message arrays
+    const origChat = deps.chat;
+    (deps as any).chat = async (model: string, messages: ChatMessage[], params?: any) => {
+      allMessages.push([...messages]);
+      return origChat(model, messages, params);
+    };
+
+    const team = makeTeam(2);
+    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+    const output = await deliberate(team, makeInput(), deps, config);
+
+    expect(output.roundsExecuted).toBe(2);
+    // Follow-up builder should have been called for R2 workers that have history
+    expect(followUpCallCount).toBeGreaterThan(0);
+    // R2 messages should include follow-up content
+    const r2Messages = allMessages.filter(msgs =>
+      msgs.some(m => m.content?.includes("follow-up-other-positions")),
+    );
+    expect(r2Messages.length).toBeGreaterThan(0);
+    // R2 messages should be longer than R1 (accumulated history + follow-up)
+    const r1Len = allMessages[0]!.length; // R1: just buildWorkerMessages output
+    const r2Len = r2Messages[0]!.length; // R2: history + follow-up
+    expect(r2Len).toBeGreaterThan(r1Len);
+  });
+
+  it("should fall back to full debate builder when no follow-up builder is provided", async () => {
+    let debateBuilderCalled = false;
+
+    const deps = makeDeps({
+      buildDebateWorkerMessages: mock((_ctx: any) => {
+        debateBuilderCalled = true;
+        return [
+          { role: "system" as const, content: "full-rebuild" },
+          { role: "user" as const, content: "full-rebuild-user" },
+        ];
+      }),
+      // NO buildDebateFollowUp — should fall back to full builder
+    });
+
+    const team = makeTeam(2);
+    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+    const output = await deliberate(team, makeInput(), deps, config);
+
+    expect(output.roundsExecuted).toBe(2);
+    expect(debateBuilderCalled).toBe(true);
   });
 });
 

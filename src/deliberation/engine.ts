@@ -138,14 +138,19 @@ export interface EngineDeps {
     roundInfo?: RoundInfo,
     workerIndex?: number,
   ) => ChatMessage[];
-  /** Debate protocol: worker messages include all previous responses. */
+  /** Debate protocol: full rebuild for cold join or first debate round. */
   readonly buildDebateWorkerMessages?: (
     ctx: SharedContext,
     instructions?: string,
     roundInfo?: RoundInfo,
     workerIndex?: number,
   ) => ChatMessage[];
-  // Cold join is auto-detected inside buildDebateWorkerMessages
+  /** Debate follow-up: append-only user message for session continuation in R2+. */
+  readonly buildDebateFollowUp?: (
+    ctx: SharedContext,
+    otherResponses: readonly WorkerResponse[],
+    roundInfo?: RoundInfo,
+  ) => ChatMessage;
 }
 
 /**
@@ -214,6 +219,8 @@ interface WorkerCallResult {
   degenerate?: boolean;
   swaps: ModelSwap[];
   tokens: TokenUsage;
+  /** Full message history (sent messages + assistant response) for session continuation. */
+  history?: ChatMessage[];
 }
 
 /**
@@ -267,17 +274,29 @@ async function callWithFallback(
   config: EngineConfig,
   input: DeliberateInput,
   pool: FallbackPool | undefined,
+  /** Previous message history for session continuation in R2+. */
+  previousHistory?: ChatMessage[],
 ): Promise<WorkerCallResult> {
   const roundInfo: RoundInfo = { current: roundNumber, max: config.maxRounds };
-  const useDebateBuilder = config.protocol === "debate" && deps.buildDebateWorkerMessages && roundNumber > 1;
+  const isDebateR2 = config.protocol === "debate" && roundNumber > 1;
   const swaps: ModelSwap[] = [];
   let totalInput = 0;
   let totalOutput = 0;
 
-  // Build messages — debate builder auto-detects cold join via participation history
+  // Build messages — session continuation if history exists, full rebuild otherwise
   const buildMessages = (): ChatMessage[] => {
-    if (useDebateBuilder) {
-      return deps.buildDebateWorkerMessages!(ctx, input.workerInstructions, roundInfo, workerIndex);
+    // Session continuation: append follow-up to existing history
+    if (isDebateR2 && previousHistory && deps.buildDebateFollowUp) {
+      const lastRound = ctx.rounds[ctx.rounds.length - 1];
+      const otherResponses = lastRound
+        ? lastRound.responses.filter((r) => r.workerIndex !== workerIndex)
+        : [];
+      const followUp = deps.buildDebateFollowUp(ctx, otherResponses, roundInfo);
+      return [...previousHistory, followUp];
+    }
+    // Full rebuild: cold join or no history available
+    if (isDebateR2 && deps.buildDebateWorkerMessages) {
+      return deps.buildDebateWorkerMessages(ctx, input.workerInstructions, roundInfo, workerIndex);
     }
     return deps.buildWorkerMessages(ctx, input.workerInstructions, roundInfo, workerIndex);
   };
@@ -351,12 +370,16 @@ async function callWithFallback(
         continue; // retry with fallback model
       }
 
+      // Build conversation history for session continuation in next round
+      const fullHistory = [...messages, { role: "assistant" as const, content: result.content }];
+
       return {
         response: { model: currentModel, content: result.content, workerIndex },
         failed: false,
         degenerate: isDegenerate,
         swaps,
         tokens: { input: totalInput, output: totalOutput },
+        history: fullHistory,
       };
     } catch (error) {
       const rawMsg = error instanceof Error ? error.message : String(error);
@@ -422,13 +445,16 @@ export async function executeRound(
   config: EngineConfig,
   input: DeliberateInput,
   pool?: FallbackPool,
-): Promise<{ round: Round; tokens: TokenUsage; modelSwaps: ModelSwap[] }> {
+  /** Per-worker message histories from previous rounds for session continuation. */
+  workerHistories?: ReadonlyMap<number, ChatMessage[]>,
+): Promise<{ round: Round; tokens: TokenUsage; modelSwaps: ModelSwap[]; histories: Map<number, ChatMessage[]> }> {
   const divergeParticipants = [...ctx.team.workers];
 
   // All workers run in parallel, each with its own fallback chain
   const results = await Promise.allSettled(
     divergeParticipants.map((participant, index) =>
-      callWithFallback(participant, index, ctx, roundNumber, deps, config, input, pool),
+      callWithFallback(participant, index, ctx, roundNumber, deps, config, input, pool,
+        workerHistories?.get(index)),
     ),
   );
 
@@ -436,6 +462,7 @@ export async function executeRound(
   const responses: WorkerResponse[] = [];
   const failedWorkers: FailedWorker[] = [];
   const allSwaps: ModelSwap[] = [];
+  const histories = new Map<number, ChatMessage[]>();
   let totalInput = 0;
   let totalOutput = 0;
 
@@ -446,6 +473,8 @@ export async function executeRound(
       totalInput += wr.tokens.input;
       totalOutput += wr.tokens.output;
       allSwaps.push(...wr.swaps);
+      // Store history for session continuation
+      if (wr.history) histories.set(idx, wr.history);
       if (wr.response && !wr.degenerate) {
         responses.push(wr.response);
       } else if (wr.response && wr.degenerate) {
@@ -494,6 +523,7 @@ export async function executeRound(
     },
     tokens: { input: totalInput, output: totalOutput },
     modelSwaps: allSwaps,
+    histories,
   };
 }
 
@@ -525,11 +555,15 @@ export async function deliberate(
   let allLLMCalls = 0;
   const originalTeamSize = team.workers.length;
   const minViable = minViableTeamSize(originalTeamSize);
+  let workerHistories: Map<number, ChatMessage[]> | undefined;
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
     let roundResult = await executeRound(
       ctx, ctx.rounds.length + 1, deps, cfg, input, fallbackDeps?.pool,
+      workerHistories,
     );
+    // Update worker histories for session continuation in next round
+    workerHistories = roundResult.histories;
 
     accTokens = {
       input: accTokens.input + roundResult.tokens.input,

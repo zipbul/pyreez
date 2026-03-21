@@ -24,6 +24,7 @@ import { createCooldownManager } from "./cooldown";
 import {
   buildWorkerMessages,
   buildDebateWorkerMessages,
+  buildDebateFollowUp,
 } from "./prompts";
 
 // -- Public types --
@@ -160,6 +161,7 @@ export function createDeliberateFn(
       chat: deps.chat,
       buildWorkerMessages,
       buildDebateWorkerMessages,
+      buildDebateFollowUp,
     };
 
     // 7. Build engine config

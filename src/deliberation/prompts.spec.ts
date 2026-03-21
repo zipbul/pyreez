@@ -6,6 +6,7 @@ import { describe, it, expect } from "bun:test";
 import {
   buildWorkerMessages,
   buildDebateWorkerMessages,
+  buildDebateFollowUp,
   buildAcceptanceMessages,
   extractDebateDigest,
   getDomainHint,
@@ -275,6 +276,62 @@ describe("buildDebateWorkerMessages", () => {
     const user = buildDebateWorkerMessages(ctx, undefined, undefined, 1)[1]!.content!;
     expect(user).not.toContain("<script>");
     expect(user).toContain("&lt;script&gt;");
+  });
+});
+
+// ================================================================
+// buildAcceptanceMessages
+// ================================================================
+
+// ================================================================
+// buildDebateFollowUp — session continuation message
+// ================================================================
+
+describe("buildDebateFollowUp", () => {
+  it("should produce a single user message with other positions", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const others = [makeResponse("worker/b", "I think Redis is better", 1)];
+    const msg = buildDebateFollowUp(ctx, others);
+
+    expect(msg.role).toBe("user");
+    expect(msg.content).toContain("One analyst argues");
+    expect(msg.content).toContain("Redis");
+  });
+
+  it("should include anti-sycophancy reminder", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const msg = buildDebateFollowUp(ctx, [makeResponse("w/b", "position", 1)]);
+    expect(msg.content).toContain("change position");
+    expect(msg.content).toContain("maintain");
+  });
+
+  it("should include final round commitment", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const msg = buildDebateFollowUp(ctx, [], { current: 3, max: 3 });
+    expect(msg.content).toMatch(/final.*commit/i);
+  });
+
+  it("should place task at end", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const msg = buildDebateFollowUp(ctx, []);
+    expect(msg.content!).toMatch(/## Task\nWrite a sorting function$/);
+  });
+
+  it("should NOT include system prompt or depth instructions", () => {
+    const ctx = makeCtx([makeRound(1)], undefined, "CODING");
+    const msg = buildDebateFollowUp(ctx, []);
+    // Follow-up is just a user message — no system, no role, no domain tag
+    expect(msg.content).not.toContain("<role>");
+    expect(msg.content).not.toContain("<domain>");
+    expect(msg.content).not.toContain("Think thoroughly");
+  });
+
+  it("should escape XML in other responses", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const others = [makeResponse("w/a", "Use <script> injection", 0)];
+    const msg = buildDebateFollowUp(ctx, others);
+    expect(msg.content).not.toContain("<script>");
+    expect(msg.content).toContain("&lt;script&gt;");
   });
 });
 
