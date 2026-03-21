@@ -54,7 +54,7 @@ For `$ARGUMENTS` or when the user provides a topic, copy this checklist and chec
 
 **deliberate**: Call `pyreez_deliberate(task, models, count, ...)`.
 
-**comprehend → evaluate → reflect → synthesize**: Think thoroughly through each phase. Before synthesizing, rephrase the question to surface its hidden assumptions. Question your conclusions repeatedly — after each challenge, ask what deeper assumption it reveals. Assume your synthesis fails in practice — why did it fail? Revise if the failure is plausible. Do not present synthesis to the user yet.
+**comprehend → evaluate → reflect → synthesize**: Think thoroughly through each phase. Before synthesizing, rephrase the question to surface its hidden assumptions. After reaching a synthesis position, construct the strongest argument against it and defend. Then find the failure in your defense — trace each failure reason to its root cause. Stop only when a new challenge reveals nothing you haven't already addressed. Do not present synthesis to the user yet.
 
 **accept**: Call `pyreez_acceptance`. If any worker rejects, revise and re-run. Present synthesis after acceptance.
 
@@ -86,7 +86,7 @@ Before refuting, write one context where the claim could hold true.
 </evaluate>
 
 <reflect>
-Question your own synthesis repeatedly. After each challenge, ask what deeper assumption it reveals. What did you initially dismiss? What would a disagreeing reader argue? Assume your synthesis fails in practice — why? For each issue found, make a concrete change or justify why none is needed.
+Construct the strongest argument against your synthesis and defend. Find the failure in your defense — trace each failure reason to its root cause. What did you initially dismiss? What would a disagreeing reader argue? Stop only when a new challenge reveals nothing you haven't already addressed. For each issue found, make a concrete change or justify why none is needed.
 </reflect>
 
 <principles>

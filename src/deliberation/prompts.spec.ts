@@ -104,7 +104,7 @@ describe("buildWorkerMessages", () => {
 
   it("should include depth techniques: self-questioning, verification, evidence grounding", () => {
     const sys = buildWorkerMessages(makeCtx())[0]!.content;
-    expect(sys).toContain("what deeper assumption does this reveal");
+    expect(sys).toContain("strongest possible argument against");
     expect(sys).toContain("verify your key claims");
     expect(sys).toContain("Ground factual claims");
     expect(sys).toContain("speculative ideas, state the reasoning");
@@ -213,7 +213,7 @@ describe("buildDebateWorkerMessages", () => {
   it("should include depth techniques in system prompt", () => {
     const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[0]!.content!;
     expect(sys).toContain("Think thoroughly");
-    expect(sys).toContain("what deeper assumption does this reveal");
+    expect(sys).toContain("strongest possible argument against");
     expect(sys).toContain("verify your key claims");
   });
 

@@ -66,7 +66,7 @@ const DEPTH_INSTRUCTIONS_CRITIQUE = `Before answering, rephrase the question to 
 
 Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
 
-Question your own conclusions repeatedly. After each challenge, ask: what deeper assumption does this reveal? Assume your final answer fails in practice — why did it fail? Revise if the failure scenario is plausible.
+After reaching your position, construct the strongest possible argument against it and defend against that argument. Then find the failure in your defense. For each failure reason, ask why it would happen — trace to the root cause. Stop only when a new challenge reveals nothing you haven't already addressed.
 
 Before finishing, verify your key claims.
 
@@ -76,7 +76,7 @@ const DEPTH_INSTRUCTIONS_ARTIFACT = `Before starting, rephrase the task to surfa
 
 Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
 
-Question your own approach repeatedly. After each challenge, ask: what deeper assumption does this reveal? Assume your implementation fails in production — why did it fail? Revise if the failure scenario is plausible.
+After your implementation, construct the strongest possible argument against your approach and defend against it. Then find the failure in your defense. For each failure reason, ask why it would happen — trace to the root cause. Stop only when a new challenge reveals nothing you haven't already addressed.
 
 Before finishing, verify your key claims.`;
 
