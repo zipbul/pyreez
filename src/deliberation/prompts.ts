@@ -74,12 +74,13 @@ Keep prose minimal. Artifact has no word limit.
   },
   {
     role: "critic",
-    critiquePrompt: `<role>You are a critic analyst. Find weaknesses, failure modes, and unstated assumptions.</role>
+    critiquePrompt: `<role>You are a critic analyst. Find weaknesses, failure modes, and unstated assumptions — then propose concrete alternatives.</role>
 
 <rules>
 - Attack the problem from failure modes first: what could go wrong?
 - Identify unstated assumptions and boundary conditions that could invalidate common approaches.
 - For each weakness, state the specific scenario where it causes failure.
+- For each weakness, propose a concrete alternative that addresses it.
 </rules>
 
 <output-structure>
@@ -88,6 +89,7 @@ Structure your response. Min 200 characters, max 600 words.
   <position>[Core claim, 1-2 sentences]</position>
   <evidence>[Key evidence, max 3 points]</evidence>
   <concerns>[Risks or counterarguments]</concerns>
+  <alternatives>[For each concern above, a concrete alternative approach]</alternatives>
   <certainty>
     <verifiable_claims>[Claims that can be fact-checked]</verifiable_claims>
     <assumptions>[Unstated assumptions your analysis depends on]</assumptions>
@@ -184,11 +186,13 @@ function escapeXmlContent(text: string): string {
 export function extractDebateDigest(content: string): string {
   const position = content.match(/<position>([\s\S]*?)<\/position>/);
   const evidence = content.match(/<evidence>([\s\S]*?)<\/evidence>/);
+  const alternatives = content.match(/<alternatives>([\s\S]*?)<\/alternatives>/);
 
-  if (position?.[1] || evidence?.[1]) {
+  if (position?.[1] || evidence?.[1] || alternatives?.[1]) {
     const parts: string[] = [];
     if (position?.[1]) parts.push(`Position: ${position[1].trim()}`);
     if (evidence?.[1]) parts.push(`Evidence: ${evidence[1].trim()}`);
+    if (alternatives?.[1]) parts.push(`Alternatives: ${alternatives[1].trim()}`);
     return parts.join("\n");
   }
 
@@ -421,21 +425,22 @@ export function buildAcceptanceMessages(
   originalPosition: string,
   task: string,
 ): ChatMessage[] {
-  const system = `<role>You are a verification reviewer. Check whether a synthesis accurately represents your original position.</role>
+  const system = `<role>You are an adversarial reviewer. Your job is to find ways the synthesis weakens, distorts, or omits your original position.</role>
 
 <rules>
-- Compare the synthesis against your original position carefully.
-- Accept if your key claims are fairly represented, even if the synthesis disagrees with you.
-- Reject ONLY if the synthesis misrepresents your position or ignores critical unresolved issues.
-- Be specific about what was misrepresented or unresolved.
+- Actively search for at least one way the synthesis misrepresents or weakens your position.
+- Check: were your key claims softened, omitted, or attributed incorrectly?
+- Check: were critical concerns you raised left unaddressed?
+- If you find substantive misrepresentation, reject. If you find minor issues that don't change the core meaning, mark as partial.
+- Accept ONLY if you genuinely cannot find any distortion after thorough examination.
 </rules>
 
 <output-format>
 Respond with ONLY the following XML structure:
 <acceptance>
-  <verdict>accept or reject</verdict>
-  <misrepresented>What was distorted or misattributed from your position. "None." if accept.</misrepresented>
-  <unresolved>Critical issues from your position that were ignored. "None." if accept.</unresolved>
+  <verdict>accept, partial, or reject</verdict>
+  <misrepresented>What was distorted, softened, or misattributed from your position. "None." if accept.</misrepresented>
+  <unresolved>Critical issues from your position that were ignored or insufficiently addressed. "None." if accept.</unresolved>
 </acceptance>
 </output-format>`;
 

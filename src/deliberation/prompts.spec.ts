@@ -407,6 +407,18 @@ describe("extractDebateDigest", () => {
     expect(digest).toBe("Evidence: Benchmark shows 3x speedup");
   });
 
+  it("should extract alternatives tag when present", () => {
+    const content = `<response>
+  <position>Use Redis</position>
+  <evidence>Fast caching</evidence>
+  <alternatives>Use Memcached for simpler setups</alternatives>
+</response>`;
+    const digest = extractDebateDigest(content);
+    expect(digest).toContain("Position: Use Redis");
+    expect(digest).toContain("Evidence: Fast caching");
+    expect(digest).toContain("Alternatives: Use Memcached for simpler setups");
+  });
+
   it("should fall back to first 3 lines when neither tag found", () => {
     const content = "line 1\nline 2\nline 3\nline 4\nline 5";
     expect(extractDebateDigest(content)).toBe("line 1\nline 2\nline 3");
@@ -515,11 +527,12 @@ describe("buildAcceptanceMessages", () => {
     expect(user).toContain("Host merged views");
   });
 
-  it("should instruct to reject only on misrepresentation", () => {
+  it("should use adversarial framing with partial verdict", () => {
     const messages = buildAcceptanceMessages("S", "P", "T");
     const system = messages[0]!.content!;
-    expect(system).toContain("Reject ONLY if");
-    expect(system).toContain("misrepresents");
+    expect(system).toContain("adversarial reviewer");
+    expect(system).toContain("partial");
+    expect(system).toContain("misrepresents or weakens");
   });
 });
 

@@ -164,6 +164,37 @@ describe("LLMExternalEvaluator", () => {
     expect(evaluators[0]).not.toBe(evaluators[1]); // different evaluator for 2nd call
   });
 
+  it("should include domain context in evaluator prompt", async () => {
+    const deps = makeDeps();
+    const evaluator = new LLMExternalEvaluator(deps);
+    await evaluator.evaluate(
+      "test task", "worker/model-1", "response",
+      "IDEATION", "BRAINSTORM", "delib-1", new Set(["provX"]),
+    );
+
+    const chatMock = deps.chat as ReturnType<typeof mock>;
+    const messages = chatMock.mock.calls[0]![1];
+    const systemContent = messages[0].content;
+    expect(systemContent).toContain("IDEATION");
+    expect(systemContent).toContain("BRAINSTORM");
+    expect(systemContent).toContain("novel_perspective");
+  });
+
+  it("should include domain without hint for unknown domains", async () => {
+    const deps = makeDeps();
+    const evaluator = new LLMExternalEvaluator(deps);
+    await evaluator.evaluate(
+      "test task", "worker/model-1", "response",
+      "CUSTOM_DOMAIN", "CUSTOM_TYPE", "delib-1", new Set(["provX"]),
+    );
+
+    const chatMock = deps.chat as ReturnType<typeof mock>;
+    const messages = chatMock.mock.calls[0]![1];
+    const systemContent = messages[0].content;
+    expect(systemContent).toContain("CUSTOM_DOMAIN");
+    expect(systemContent).toContain("CUSTOM_TYPE");
+  });
+
   it("should use temperature 0 for deterministic evaluation", async () => {
     const deps = makeDeps();
     const evaluator = new LLMExternalEvaluator(deps);

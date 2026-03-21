@@ -414,6 +414,24 @@ describe("PyreezMcpServer", () => {
       expect((result.content[0] as { text: string }).text).toContain("not available");
     });
 
+    it("should parse partial verdict and include action_required", async () => {
+      const chatFn = stubChatFn(
+        '<acceptance><verdict>partial</verdict><misrepresented>My caching concern was softened</misrepresented><unresolved>None.</unresolved></acceptance>'
+      );
+      const server = new PyreezMcpServer(validConfig({ chatFn }));
+
+      const result = await server.handleAcceptance({
+        task: "Pick a DB",
+        synthesis: "Use PostgreSQL",
+        workers: [{ model: "a/m1", original_position: "Use Redis" }],
+      });
+
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.workers[0].verdict).toBe("partial");
+      expect(parsed.workers[0].misrepresented).toBe("My caching concern was softened");
+      expect(parsed.action_required).toContain("partial");
+    });
+
     it("should omit misrepresented/unresolved when they are 'None.'", async () => {
       const chatFn = stubChatFn();
       const server = new PyreezMcpServer(validConfig({ chatFn }));

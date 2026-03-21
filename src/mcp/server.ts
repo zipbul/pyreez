@@ -17,6 +17,7 @@ import type { RunLogger } from "../report/run-logger";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
 import { resolveTaskNature, shouldAutoDebate } from "../deliberation/task-nature";
 import { NoModelsAvailableError } from "../deliberation/team-composer";
+import { TeamDegradedError } from "../deliberation/engine";
 import { buildAcceptanceMessages } from "../deliberation/prompts";
 import type { GenerationParams } from "../deliberation/types";
 
@@ -339,6 +340,14 @@ export class PyreezMcpServer {
             remediation: error.remediation,
           }));
         }
+        if (error instanceof TeamDegradedError) {
+          return this.errorResult(JSON.stringify({
+            error: error.message,
+            lostSlots: error.lostSlots,
+            modelSwaps: error.modelSwaps,
+            tokensConsumed: error.tokensConsumed,
+          }));
+        }
         return this.errorResult(
           `Error: ${sanitizeError(error)}`,
         );
@@ -387,6 +396,14 @@ export class PyreezMcpServer {
           remediation: error.remediation,
         }));
       }
+      if (error instanceof TeamDegradedError) {
+        return this.errorResult(JSON.stringify({
+          error: error.message,
+          lostSlots: error.lostSlots,
+          modelSwaps: error.modelSwaps,
+          tokensConsumed: error.tokensConsumed,
+        }));
+      }
       return this.errorResult(
         `Error: ${sanitizeError(error)}`,
       );
@@ -424,13 +441,17 @@ export class PyreezMcpServer {
         totalOutput += result.outputTokens;
 
         // Parse XML response
-        const verdict = result.content.match(/<verdict>([\s\S]*?)<\/verdict>/)?.[1]?.trim() ?? "accept";
+        const verdict = result.content.match(/<verdict>([\s\S]*?)<\/verdict>/)?.[1]?.trim()?.toLowerCase() ?? "accept";
         const misrepresented = result.content.match(/<misrepresented>([\s\S]*?)<\/misrepresented>/)?.[1]?.trim();
         const unresolved = result.content.match(/<unresolved>([\s\S]*?)<\/unresolved>/)?.[1]?.trim();
 
+        const parsedVerdict = verdict === "reject" ? "reject" as const
+          : verdict === "partial" ? "partial" as const
+          : "accept" as const;
+
         return {
           model: w.model,
-          verdict: verdict === "reject" ? "reject" as const : "accept" as const,
+          verdict: parsedVerdict,
           ...(misrepresented && misrepresented !== "None." ? { misrepresented } : {}),
           ...(unresolved && unresolved !== "None." ? { unresolved } : {}),
         };
@@ -438,7 +459,7 @@ export class PyreezMcpServer {
 
       const results = await Promise.allSettled(workerPromises);
       const workers = results
-        .filter((r): r is PromiseFulfilledResult<{ model: string; verdict: "accept" | "reject"; misrepresented?: string; unresolved?: string }> => r.status === "fulfilled")
+        .filter((r): r is PromiseFulfilledResult<{ model: string; verdict: "accept" | "partial" | "reject"; misrepresented?: string; unresolved?: string }> => r.status === "fulfilled")
         .map((r) => r.value);
 
       const failed = results.filter((r) => r.status === "rejected");
@@ -449,9 +470,17 @@ export class PyreezMcpServer {
         }));
       }
 
+      const hasPartial = workers.some((w) => w.verdict === "partial");
+      const hasReject = workers.some((w) => w.verdict === "reject");
+
       return this.textResult(JSON.stringify({
         workers,
         totalTokens: { input: totalInput, output: totalOutput },
+        ...(hasReject ? {
+          action_required: "reject — revise synthesis to address misrepresented/unresolved issues, then re-run pyreez_acceptance",
+        } : hasPartial ? {
+          action_required: "partial — review misrepresented/unresolved fields. Revise synthesis for flagged sections, then re-run pyreez_acceptance",
+        } : {}),
         next_required_action: { tool: "pyreez_feedback", reason: "Submit per-model evaluations to update SkillCell scores. Without feedback, team selection degrades." },
       }, null, 2));
     } catch (error) {

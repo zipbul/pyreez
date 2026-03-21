@@ -38,11 +38,31 @@ export interface EvaluatorDeps {
 
 // -- Implementation --
 
+/** Domain-specific evaluation guidance. */
+const DOMAIN_EVAL_HINTS: Record<string, string> = {
+  IDEATION: "Weight novel_perspective strictly (creative tasks demand originality). Be lenient on factually_correct (speculative ideas are acceptable).",
+  CODING: "Weight factually_correct and internally_consistent strictly (code must be correct). Be lenient on novel_perspective.",
+  DEBUGGING: "Weight factually_correct strictly (diagnosis must be accurate). novel_perspective is less important.",
+  REVIEW: "Weight addresses_task and provides_evidence strictly. novel_perspective matters only for overlooked issues.",
+  ARCHITECTURE: "All dimensions matter equally. Weight internally_consistent strictly (design must be coherent).",
+  RESEARCH: "Weight provides_evidence and factually_correct strictly. novel_perspective is a bonus.",
+  PLANNING: "Weight addresses_task and internally_consistent strictly. provides_evidence matters for feasibility claims.",
+  REQUIREMENTS: "Weight addresses_task strictly. provides_evidence matters for completeness. novel_perspective is a bonus for gap discovery.",
+  TESTING: "Weight factually_correct and addresses_task strictly. provides_evidence matters for coverage justification.",
+  DOCUMENTATION: "Weight addresses_task and internally_consistent strictly. factually_correct matters for technical accuracy.",
+  OPERATIONS: "Weight factually_correct and addresses_task strictly. provides_evidence matters for reliability claims.",
+  COMMUNICATION: "Weight addresses_task strictly. All other dimensions at standard weight.",
+};
+
 /** Build the evaluation prompt for binary judgment. */
-function buildEvalPrompt(task: string, responseContent: string): ChatMessage[] {
+function buildEvalPrompt(task: string, responseContent: string, domain?: string, taskType?: string): ChatMessage[] {
+  const domainHint = domain && DOMAIN_EVAL_HINTS[domain]
+    ? `\n\nDomain: ${domain}${taskType ? ` / ${taskType}` : ""}\nEvaluation guidance: ${DOMAIN_EVAL_HINTS[domain]}`
+    : (domain ? `\n\nDomain: ${domain}${taskType ? ` / ${taskType}` : ""}` : "");
+
   const system = `You are an evaluation judge. Assess the following response to a deliberation task.
 For each dimension, answer true (pass) or false (fail). For each failure flag, answer true (present) or false (absent).
-Respond ONLY with a JSON object, no other text.
+Respond ONLY with a JSON object, no other text.${domainHint}
 
 JSON format:
 {
@@ -131,7 +151,7 @@ export class LLMExternalEvaluator implements ExternalEvaluator {
       throw new Error("No evaluator model available outside team providers");
     }
 
-    const messages = buildEvalPrompt(task, responseContent);
+    const messages = buildEvalPrompt(task, responseContent, domain, taskType);
 
     // Try candidates in order — if one fails, try next
     let lastError: Error | null = null;

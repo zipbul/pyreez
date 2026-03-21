@@ -11,9 +11,9 @@ Critic이 비판만 하고 대안을 제시하지 않음. R1에서 회의론만 
 
 **파일**: `src/deliberation/prompts.ts`
 
-### 1-2. Acceptance 프롬프트 수동성
+### 1-2. Acceptance 프롬프트 accept 편향
 
-프롬프트가 "verify if accurately represented"로 수동적이라 거의 항상 accept 반환. `misrepresented`/`unresolved` 파싱 구조가 사실상 사장됨.
+프롬프트가 "Accept if fairly represented" + "Reject ONLY if misrepresents"로 reject 임계치가 높아 거의 항상 accept 반환. `misrepresented`/`unresolved` 파싱 구조가 사실상 사장됨.
 
 - "Find at least one way the synthesis misrepresents or weakens your position" adversarial 프레이밍
 - `"partial"` verdict 추가
@@ -31,7 +31,7 @@ evaluator 프롬프트에 domain/taskType 정보 없음. IDEATION 평가 시 "no
 
 ## 2. Debate 자동 다운그레이드
 
-debate가 유지 불가능할 때 (min_viable 미달 또는 단일 provider) diverge-synth로 자동 전환. 현재는 abort하거나 경고만 함.
+debate가 유지 불가능할 때 (min_viable 미달 또는 단일 provider) diverge-synth로 자동 전환. 현재는 검증 없이 debate를 그대로 실행하고 사후 경고만 출력.
 
 - provider 다양성 임계값 미달 시 debate→diverge-synth 다운그레이드
 - debate 비용 절약 + 결과 품질 기대치 명확 전달
