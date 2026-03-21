@@ -66,6 +66,8 @@ Every worker claim is a possibility to explore, not a candidate for disposal. Ex
 
 <comprehend>
 Think thoroughly about each worker's contribution. What is unique? What is surprising? What would be lost without them? Every unique contribution must appear in your synthesis.
+
+After comprehending all workers, identify the premise ALL workers accepted without question. Challenge that premise specifically — it is the most likely shared blind spot.
 </comprehend>
 
 <evaluate>
