@@ -64,6 +64,8 @@ export class TeamDegradedError extends Error {
     public readonly lostSlots: readonly { model: string; reason: string }[],
     public readonly tokensConsumed?: TokenUsage,
     public readonly modelSwaps?: readonly ModelSwap[],
+    /** Partial round with successful responses — not discarded despite degradation. */
+    public readonly partialRound?: Round,
   ) {
     super(`Team degraded below minimum viable size (${activeSize}/${originalSize}, min ${minViableTeamSize(originalSize)})`);
     this.name = "TeamDegradedError";
@@ -223,6 +225,44 @@ interface WorkerCallResult {
  * Call a worker with per-worker fallback on failure.
  * Tries the original model, then falls back to pool candidates until one succeeds or pool exhausts.
  */
+interface FallbackResult {
+  readonly id: string;
+}
+
+/**
+ * 3-phase fallback model lookup:
+ * 1. Unique model from pool (prefer diversity)
+ * 2. Team-duplicate model from pool (allow reuse)
+ * 3. Alive team member directly (bypass pool, last resort for when pool is exhausted)
+ */
+function findFallbackModel(
+  pool: FallbackPool,
+  excludeIds: Set<string>,
+  ctx: SharedContext,
+): FallbackResult | undefined {
+  // Phase 1: unique model (exclude team members)
+  const teamExclude = new Set([
+    ...excludeIds,
+    ...ctx.team.workers.map((w) => w.model),
+  ]);
+  const unique = pool.getNext(teamExclude);
+  if (unique) return unique;
+
+  // Phase 2: team-duplicate from pool (only exclude failed models)
+  const duplicate = pool.getNext(excludeIds);
+  if (duplicate) return duplicate;
+
+  // Phase 3: reuse alive team member directly (pool exhausted)
+  // Find any team model that isn't failed and isn't on cooldown
+  for (const worker of ctx.team.workers) {
+    if (!excludeIds.has(worker.model) && !pool.isOnCooldown(worker.model)) {
+      return { id: worker.model };
+    }
+  }
+
+  return undefined;
+}
+
 async function callWithFallback(
   participant: TeamMember,
   workerIndex: number,
@@ -261,11 +301,7 @@ async function callWithFallback(
   // skip directly to fallback without wasting an API call.
   if (pool?.isOnCooldown(currentModel)) {
     excludeIds.add(currentModel);
-    const teamExclude = new Set([
-      ...excludeIds,
-      ...ctx.team.workers.map((w) => w.model),
-    ]);
-    const next = pool.getNext(teamExclude);
+    const next = findFallbackModel(pool, excludeIds, ctx);
 
     const priorEntry = pool.getEntry(currentModel);
     swaps.push({
@@ -302,11 +338,7 @@ async function callWithFallback(
         // Don't propagate to provider level — degenerate is model-specific, not provider-wide.
         excludeIds.add(currentModel);
 
-        const teamExclude = new Set([
-          ...excludeIds,
-          ...ctx.team.workers.map((w) => w.model),
-        ]);
-        const next = pool.getNext(teamExclude);
+        const next = findFallbackModel(pool, excludeIds, ctx);
 
         swaps.push({
           original: currentModel,
@@ -364,13 +396,8 @@ async function callWithFallback(
       pool.markFailed(currentModel, errorMsg, errorType);
       excludeIds.add(currentModel);
 
-      // Try next from pool
-      // Exclude all current team workers to avoid replacing A with B
-      const teamExclude = new Set([
-        ...excludeIds,
-        ...ctx.team.workers.map((w) => w.model),
-      ]);
-      const next = pool.getNext(teamExclude);
+      // Try next from pool — prefer unique, allow team duplicate, last resort reuse alive team member
+      const next = findFallbackModel(pool, excludeIds, ctx);
 
       swaps.push({
         original: currentModel,
@@ -579,6 +606,7 @@ export async function deliberate(
       }));
       throw new TeamDegradedError(
         originalTeamSize, finalActiveCount, lostSlots, accTokens, allModelSwaps,
+        roundResult.round,
       );
     }
 

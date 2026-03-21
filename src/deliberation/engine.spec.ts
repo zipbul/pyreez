@@ -444,6 +444,80 @@ describe("deliberate", () => {
     expect(output.modelsUsed).toContain("prov-y/fallback-b");
   });
 
+  it("should allow duplicate team models as fallback when pool has no unique candidates", async () => {
+    // Scenario: 3-worker team, 2 workers fail, pool is empty.
+    // Worker 0's model is already on the team. Fallback should allow reusing it
+    // rather than leaving an empty slot.
+    const team: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-a", role: "worker" },
+        { model: "prov-b/model-b", role: "worker" },
+        { model: "prov-c/model-c", role: "worker" },
+      ],
+    };
+    const input = makeInput();
+    const config = makeConfig({ maxRounds: 1 });
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        // prov-b and prov-c fail, prov-a succeeds
+        if (model.startsWith("prov-b/") || model.startsWith("prov-c/")) {
+          throw new Error("provider down");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    // Pool only has prov-a/model-a — same model already on team
+    const pool = createFallbackPool(
+      [makeModelInfo("prov-a/model-a")],
+      cooldown,
+    );
+
+    const output = await deliberate(team, input, deps, config, { pool });
+
+    // Should succeed by reusing prov-a/model-a for all 3 slots
+    expect(output.roundsExecuted).toBe(1);
+    expect(output.rounds![0]!.responses!.length).toBe(3);
+    expect(output.rounds![0]!.responses!.every(r => r.model === "prov-a/model-a")).toBe(true);
+  });
+
+  it("should prefer unique models over duplicates in fallback", async () => {
+    // When both unique and duplicate candidates exist, prefer unique
+    const team: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-a", role: "worker" },
+        { model: "prov-b/model-b", role: "worker" },
+      ],
+    };
+    const input = makeInput();
+    const config = makeConfig({ maxRounds: 1 });
+
+    const callLog: string[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        callLog.push(model);
+        if (model === "prov-b/model-b") {
+          throw new Error("down");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    // Pool has both a unique model AND the duplicate team model
+    const pool = createFallbackPool(
+      [makeModelInfo("prov-c/unique-model"), makeModelInfo("prov-a/model-a")],
+      cooldown,
+    );
+
+    const output = await deliberate(team, input, deps, config, { pool });
+
+    // Should pick the unique model first, not the duplicate
+    expect(output.modelsUsed).toContain("prov-c/unique-model");
+  });
+
   it("should not duplicate fallback models when two workers fail simultaneously", async () => {
     const team = makeTeam(2);
     const input = makeInput();
@@ -1629,9 +1703,11 @@ describe("cooldown check before team worker call", () => {
     expect(model0Calls).toHaveLength(1); // Only R1, not R2
   });
 
-  it("should propagate original error info in cooldown skip swap", async () => {
+  it("should recover cooled model via Phase 3 in R1 and use recovered model in R2", async () => {
+    const callLog: string[] = [];
     const deps = makeDeps({
       chat: mock(async (model: string) => {
+        callLog.push(model);
         if (model === "prov-a/model-0") {
           throw new LLMClientError(429, "Rate limit", "rate_limit_error");
         }
@@ -1652,14 +1728,14 @@ describe("cooldown check before team worker call", () => {
     const config = makeConfig({ maxRounds: 2 });
     const output = await deliberate(customTeam, makeInput(), deps, config, { pool });
 
-    // R2 swap for cooled model should carry original error info
-    const r2Swaps = output.modelSwaps!.filter(s => s.round === 2);
-    expect(r2Swaps.length).toBeGreaterThanOrEqual(1);
-    const skipSwap = r2Swaps.find(s => s.original === "prov-a/model-0");
-    expect(skipSwap).toBeDefined();
-    expect(skipSwap!.errorCode).toBe("rate_limit");
-    expect(skipSwap!.retryable).toBe(true);
-    expect(skipSwap!.error).toBe("Rate limit");
+    // R1: model-0 fails → Phase 3 recovers with model-1 → team updated
+    // R2: both workers use model-1 (no cooldown issue)
+    expect(output.roundsExecuted).toBe(2);
+    const r2Responses = output.rounds![1]!.responses!;
+    expect(r2Responses.every(r => r.model === "prov-b/model-1")).toBe(true);
+    // model-0 should NOT appear in R2 calls (team was updated)
+    const r2Calls = callLog.slice(callLog.lastIndexOf("prov-b/model-1"));
+    expect(r2Calls.every(m => m === "prov-b/model-1")).toBe(true);
   });
 });
 
@@ -1711,6 +1787,9 @@ describe("team degradation", () => {
       expect(tde.originalSize).toBe(5);
       expect(tde.activeSize).toBe(2);
       expect(tde.lostSlots).toHaveLength(3);
+      // Partial round preserves successful responses
+      expect(tde.partialRound).toBeDefined();
+      expect(tde.partialRound!.responses.length).toBe(2);
     }
   });
 
@@ -1878,7 +1957,7 @@ describe("cooldown pre-check success path", () => {
 // =============================================================================
 
 describe("replenishment after R1 failures", () => {
-  it("should fill empty slots via replenish callback", async () => {
+  it("should recover failed workers via alive team member duplicate when pool is empty", async () => {
     const callLog: string[] = [];
     const deps = makeDeps({
       chat: mock(async (model: string) => {
@@ -1891,7 +1970,7 @@ describe("replenishment after R1 failures", () => {
     });
 
     const cooldown = createCooldownManager();
-    const pool = createFallbackPool([], cooldown); // empty pool — no fallback
+    const pool = createFallbackPool([], cooldown); // empty pool
 
     const customTeam: TeamComposition = {
       workers: [
@@ -1901,29 +1980,19 @@ describe("replenishment after R1 failures", () => {
       ],
     };
 
-    // Replenish returns 2 new workers from alive provider (prov-c)
-    const replenish = mock((aliveProviders: ReadonlySet<string>, emptySlots: number, _responded: ReadonlySet<string>) => {
-      expect(aliveProviders.has("prov-c")).toBe(true);
-      expect(emptySlots).toBe(2);
-      return [
-        { model: "prov-c/replenish-1", role: "worker" as const },
-        { model: "prov-c/replenish-2", role: "worker" as const },
-      ];
-    });
-
+    const replenish = mock(() => []);
     const output = await deliberate(
       customTeam, makeInput(), deps, makeConfig(),
       { pool, replenish },
     );
 
-    // Original: 3 workers, 2 failed, 1 success
-    // Replenishment: 2 additional from prov-c → both succeed
-    // Total: 3 responses
-    expect(output.modelsUsed).toContain("prov-c/model-2");
-    expect(output.modelsUsed).toContain("prov-c/replenish-1");
-    expect(output.modelsUsed).toContain("prov-c/replenish-2");
-    expect(callLog).toContain("prov-c/replenish-1");
-    expect(callLog).toContain("prov-c/replenish-2");
+    // Phase 3 fallback: failed workers recover by reusing alive model-2
+    expect(output.roundsExecuted).toBe(1);
+    expect(output.rounds![0]!.responses!.length).toBe(3);
+    // model-2 used for all 3 slots (original + 2 duplicates)
+    expect(output.rounds![0]!.responses!.every(r => r.model === "prov-c/model-2")).toBe(true);
+    // Replenishment not needed — Phase 3 handled recovery
+    expect(replenish).not.toHaveBeenCalled();
   });
 
   it("should not call replenish when all workers succeed", async () => {
@@ -1937,7 +2006,7 @@ describe("replenishment after R1 failures", () => {
     expect(replenish).not.toHaveBeenCalled();
   });
 
-  it("should include replenished workers in team for R2", async () => {
+  it("should use recovered duplicate models in R2", async () => {
     const callLog: string[] = [];
     let round = 1;
     const deps = makeDeps({
@@ -1955,7 +2024,7 @@ describe("replenishment after R1 failures", () => {
     let callCount = 0;
     (deps as any).chat = async (model: string, messages: any, params?: any) => {
       callCount++;
-      // First 3 calls = R1 original, next 2 = replenishment, then R2
+      // R1: 3 original + up to 2 fallback retries, then R2
       round = callCount <= 5 ? 1 : 2;
       return origChat(model, messages, params);
     };
@@ -1971,19 +2040,14 @@ describe("replenishment after R1 failures", () => {
       ],
     };
 
-    const replenish = mock((_alive: ReadonlySet<string>, _slots: number, _responded: ReadonlySet<string>) => [
-      { model: "prov-c/replenish-1", role: "worker" as const },
-      { model: "prov-c/replenish-2", role: "worker" as const },
-    ]);
-
+    const replenish = mock(() => []);
     const config = makeConfig({ maxRounds: 2 });
     const output = await deliberate(customTeam, makeInput(), deps, config, { pool, replenish });
 
     expect(output.roundsExecuted).toBe(2);
-    // R2 should call replenished workers (they're on the team now)
-    const r2Calls = callLog.filter((_, i) => i >= 5); // R2 calls
-    expect(r2Calls).toContain("prov-c/replenish-1");
-    expect(r2Calls).toContain("prov-c/replenish-2");
+    // R2 should call model-2 for all 3 slots (team updated from R1 recovery)
+    const r2Models = output.rounds![1]!.responses!.map(r => r.model);
+    expect(r2Models.every(m => m === "prov-c/model-2")).toBe(true);
   });
 
   it("should pass respondedModels to replenish to prevent duplicate selection", async () => {
@@ -2017,10 +2081,12 @@ describe("replenishment after R1 failures", () => {
     expect(replenish).not.toHaveBeenCalled();
   });
 
-  it("should exclude already-responded models from replenishment candidates", async () => {
+  it("should recover failed worker via alive team duplicate (2-worker team)", async () => {
+    const callLog: string[] = [];
     const deps = makeDeps({
       chat: mock(async (model: string) => {
-        // model-0 fails, model-1 succeeds
+        callLog.push(model);
+        // model-0 fails, model-1 succeeds (also succeeds as duplicate for model-0 slot)
         if (model === "prov-a/model-0") {
           throw new LLMClientError(500, "Server error");
         }
@@ -2031,7 +2097,6 @@ describe("replenishment after R1 failures", () => {
     const cooldown = createCooldownManager();
     const pool = createFallbackPool([], cooldown);
 
-    // 2-worker team: no min_viable enforcement
     const customTeam: TeamComposition = {
       workers: [
         { model: "prov-a/model-0", role: "worker" },
@@ -2039,25 +2104,17 @@ describe("replenishment after R1 failures", () => {
       ],
     };
 
-    let capturedResponded: ReadonlySet<string> | undefined;
-    const replenish = mock((_alive: ReadonlySet<string>, _slots: number, responded: ReadonlySet<string>) => {
-      capturedResponded = responded;
-      return [];
-    });
+    const output = await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
 
-    await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool, replenish });
-
-    // replenish should receive the set of models that already responded
-    expect(capturedResponded).toBeDefined();
-    expect(capturedResponded!.has("prov-b/model-1")).toBe(true);
-    // model-0 failed, should NOT be in respondedModels
-    expect(capturedResponded!.has("prov-a/model-0")).toBe(false);
+    // model-0 fails → Phase 3 finds model-1 → both slots filled
+    expect(output.rounds![0]!.responses!.length).toBe(2);
+    expect(callLog).toContain("prov-b/model-1");
   });
 
-  it("should still abort if replenishment is insufficient for min_viable", async () => {
+  it("should recover all failed slots via Phase 3 duplicate when one model survives", async () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
-        // Only model-0 succeeds → 1 active out of 5
+        // Only model-0 succeeds — others fail with server_error
         if (!model.includes("model-0")) {
           throw new LLMClientError(500, "Server error");
         }
@@ -2067,10 +2124,6 @@ describe("replenishment after R1 failures", () => {
 
     const cooldown = createCooldownManager();
     const pool = createFallbackPool([], cooldown);
-    // Replenish returns 1 worker that also fails
-    const replenish = mock(() => [
-      { model: "prov-z/replenish-fail", role: "worker" as const },
-    ]);
 
     const team: TeamComposition = {
       workers: Array.from({ length: 5 }, (_, i) => ({
@@ -2079,11 +2132,11 @@ describe("replenishment after R1 failures", () => {
       })),
     };
 
-    try {
-      await deliberate(team, makeInput(), deps, makeConfig(), { pool, replenish });
-      expect.unreachable("should have thrown TeamDegradedError");
-    } catch (error) {
-      expect(error).toBeInstanceOf(TeamDegradedError);
-    }
+    // Phase 3 finds model-0 (alive, not cooled) for all failed slots
+    const output = await deliberate(team, makeInput(), deps, makeConfig(), { pool });
+
+    expect(output.roundsExecuted).toBe(1);
+    expect(output.rounds![0]!.responses!.length).toBe(5);
+    expect(output.rounds![0]!.responses!.every(r => r.model === "prov-0/model-0")).toBe(true);
   });
 });
