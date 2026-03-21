@@ -1,18 +1,14 @@
 /**
  * Unit tests for prompts.ts — deliberation prompt builders.
- *
- * SUT: buildWorkerMessages, buildDebateWorkerMessages,
- *      assignWorkerRole, extractDebateDigest
  */
 
 import { describe, it, expect } from "bun:test";
 import {
   buildWorkerMessages,
   buildDebateWorkerMessages,
-  buildColdJoinMessages,
   buildAcceptanceMessages,
-  assignWorkerRole,
   extractDebateDigest,
+  getDomainHint,
 } from "./prompts";
 import type {
   SharedContext,
@@ -20,7 +16,6 @@ import type {
   TeamComposition,
   TeamMember,
   WorkerResponse,
-  DeliberationRole,
 } from "./types";
 
 // -- Fixtures --
@@ -30,351 +25,293 @@ function makeWorker(model: string): TeamMember {
 }
 
 function makeTeam(): TeamComposition {
+  return { workers: [makeWorker("worker/a"), makeWorker("worker/b")] };
+}
+
+function makeCtx(
+  rounds: readonly Round[] = [],
+  taskNature?: "artifact" | "critique",
+  domain?: string,
+): SharedContext {
   return {
-    workers: [makeWorker("worker/a"), makeWorker("worker/b")],
+    task: "Write a sorting function",
+    team: makeTeam(),
+    rounds,
+    ...(taskNature ? { taskNature } : {}),
+    ...(domain ? { domain } : {}),
   };
 }
 
-function makeCtx(rounds: readonly Round[] = [], taskNature?: "artifact" | "critique"): SharedContext {
-  return { task: "Write a sorting function", team: makeTeam(), rounds, ...(taskNature ? { taskNature } : {}) };
+function makeResponse(model: string, content: string, workerIndex = 0): WorkerResponse {
+  return { model, content, workerIndex };
 }
 
-function makeResponse(model: string, content: string, role?: DeliberationRole, workerIndex = 0): WorkerResponse {
-  return { model, content, workerIndex, ...(role ? { role } : {}) };
-}
-
-function makeRound(
-  number: number,
-  options?: {
-    responses?: WorkerResponse[];
-  },
-): Round {
+function makeRound(number: number, options?: { responses?: WorkerResponse[] }): Round {
   return {
     number,
     responses: options?.responses ?? [
-      makeResponse("worker/a", `Response A round ${number}`, "advocate"),
-      makeResponse("worker/b", `Response B round ${number}`, "critic"),
+      makeResponse("worker/a", `Response A round ${number}`, 0),
+      makeResponse("worker/b", `Response B round ${number}`, 1),
     ],
   };
 }
 
 // ================================================================
-// assignWorkerRole
+// getDomainHint
 // ================================================================
 
-describe("assignWorkerRole", () => {
-  it("should assign advocate to index 0", () => {
-    expect(assignWorkerRole(0)).toBe("advocate");
+describe("getDomainHint", () => {
+  it("should return hint for known domains", () => {
+    expect(getDomainHint("CODING")).toContain("execution paths");
+    expect(getDomainHint("IDEATION")).toContain("analogous cases");
+    expect(getDomainHint("ARCHITECTURE")).toContain("scalability");
   });
 
-  it("should assign critic to index 1", () => {
-    expect(assignWorkerRole(1)).toBe("critic");
+  it("should return empty string for unknown domain", () => {
+    expect(getDomainHint("UNKNOWN")).toBe("");
   });
 
-  it("should assign wildcard to index 2", () => {
-    expect(assignWorkerRole(2)).toBe("wildcard");
-  });
-
-  it("should wrap around for index 3+", () => {
-    expect(assignWorkerRole(3)).toBe("advocate");
-    expect(assignWorkerRole(4)).toBe("critic");
-    expect(assignWorkerRole(5)).toBe("wildcard");
+  it("should return empty string when undefined", () => {
+    expect(getDomainHint(undefined)).toBe("");
   });
 });
 
 // ================================================================
-// buildWorkerMessages
+// buildWorkerMessages — all workers get identical prompts
 // ================================================================
 
 describe("buildWorkerMessages", () => {
-  it("should return system + user for initial round with advocate role (index 0)", () => {
-    const ctx = makeCtx();
-    const messages = buildWorkerMessages(ctx, undefined, undefined, 0);
-
+  it("should return system + user with depth instructions", () => {
+    const messages = buildWorkerMessages(makeCtx());
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toContain("advocate analyst");
-    expect(messages[0]!.content).toContain("<output-structure>");
+    expect(messages[0]!.content).toContain("Think thoroughly");
+    expect(messages[0]!.content).toContain("underlying principles");
     expect(messages[1]!.role).toBe("user");
     expect(messages[1]!.content).toContain("Write a sorting function");
   });
 
-  it("should use critic role for index 1", () => {
-    const ctx = makeCtx();
-    const messages = buildWorkerMessages(ctx, undefined, undefined, 1);
-    expect(messages[0]!.content).toContain("critic analyst");
+  it("should NOT contain roles, output-structure, or rules", () => {
+    const sys = buildWorkerMessages(makeCtx())[0]!.content;
+    expect(sys).not.toContain("advocate");
+    expect(sys).not.toContain("critic");
+    expect(sys).not.toContain("wildcard");
+    expect(sys).not.toContain("<output-structure>");
+    expect(sys).not.toContain("<rules>");
+    expect(sys).not.toContain("200 characters");
+    expect(sys).not.toContain("600 words");
   });
 
-  it("should use wildcard role for index 2", () => {
-    const ctx = makeCtx();
-    const messages = buildWorkerMessages(ctx, undefined, undefined, 2);
-    expect(messages[0]!.content).toContain("wildcard analyst");
+  it("should include depth techniques: self-questioning, verification, evidence grounding", () => {
+    const sys = buildWorkerMessages(makeCtx())[0]!.content;
+    expect(sys).toContain("Keep questioning until your position is stable");
+    expect(sys).toContain("verify your key claims");
+    expect(sys).toContain("Ground factual claims");
+    expect(sys).toContain("speculative ideas, state the reasoning");
   });
 
-  it("should include host instructions with role-specific prompt", () => {
-    const ctx = makeCtx();
-    const messages = buildWorkerMessages(ctx, "Use TypeScript strict mode", undefined, 0);
-    expect(messages[0]!.content).toContain("Use TypeScript strict mode");
-    expect(messages[0]!.content).toContain("advocate analyst");
+  it("should include domain hint when domain is set", () => {
+    const messages = buildWorkerMessages(makeCtx([], undefined, "CODING"));
+    expect(messages[0]!.content).toContain("<domain>");
+    expect(messages[0]!.content).toContain("execution paths");
   });
 
-  it("should include XML output structure in system message", () => {
-    const ctx = makeCtx();
-    const messages = buildWorkerMessages(ctx, undefined, undefined, 0);
-    expect(messages[0]!.content).toContain("<position>");
-    expect(messages[0]!.content).toContain("<evidence>");
-    expect(messages[0]!.content).toContain("<concerns>");
-    expect(messages[0]!.content).toContain("<certainty>");
+  it("should NOT include domain tag when domain is absent", () => {
+    expect(buildWorkerMessages(makeCtx())[0]!.content).not.toContain("<domain>");
   });
 
-  it("should default to advocate (index 0) when workerIndex is omitted", () => {
-    const ctx = makeCtx();
-    const messages = buildWorkerMessages(ctx);
-    expect(messages[0]!.content).toContain("advocate analyst");
+  it("should include one-line summary for critique", () => {
+    const sys = buildWorkerMessages(makeCtx([], "critique"))[0]!.content;
+    expect(sys).toContain("one-line summary");
   });
 
-  it("should include round budget when roundInfo is provided", () => {
-    const ctx = makeCtx();
-    const messages = buildWorkerMessages(ctx, undefined, { current: 2, max: 3 });
-    const user = messages[1]!.content!;
-    expect(user).toContain("Round 2");
-    expect(user).toContain("3");
+  it("should NOT include summary for artifact", () => {
+    const sys = buildWorkerMessages(makeCtx([], "artifact"))[0]!.content;
+    expect(sys).not.toContain("one-line summary");
   });
 
-  it("should include FINAL marker when current equals max", () => {
+  it("should produce identical prompts for different workerIndex values", () => {
     const ctx = makeCtx();
-    const messages = buildWorkerMessages(ctx, undefined, { current: 1, max: 1 });
-    expect(messages[1]!.content!).toMatch(/final/i);
+    const m0 = buildWorkerMessages(ctx, undefined, undefined, 0);
+    const m1 = buildWorkerMessages(ctx, undefined, undefined, 1);
+    const m2 = buildWorkerMessages(ctx, undefined, undefined, 2);
+    expect(m0).toEqual(m1);
+    expect(m1).toEqual(m2);
   });
 
-  it("should NOT include FINAL marker when current less than max", () => {
-    const ctx = makeCtx();
-    const messages = buildWorkerMessages(ctx, undefined, { current: 1, max: 3 });
-    expect(messages[1]!.content!).not.toMatch(/final/i);
+  it("should include host instructions", () => {
+    const sys = buildWorkerMessages(makeCtx(), "Use TypeScript strict mode")[0]!.content;
+    expect(sys).toContain("Use TypeScript strict mode");
   });
 
-  it("should start user message with task section", () => {
-    const ctx = makeCtx();
-    const messages = buildWorkerMessages(ctx);
-    expect(messages[1]!.content).toMatch(/^## Task\n/);
+  it("should include diverge strategy on R1 of multi-round", () => {
+    const user = buildWorkerMessages(makeCtx(), undefined, { current: 1, max: 3 })[1]!.content!;
+    expect(user).toContain("Explore broadly");
+  });
+
+  it("should NOT include diverge strategy on single-round", () => {
+    const user = buildWorkerMessages(makeCtx(), undefined, { current: 1, max: 1 })[1]!.content!;
+    expect(user).not.toContain("Explore broadly");
+  });
+
+  it("should include commit strategy on final round", () => {
+    const user = buildWorkerMessages(makeCtx(), undefined, { current: 3, max: 3 })[1]!.content!;
+    expect(user).toMatch(/final.*commit/i);
+  });
+
+  it("should place task at end of user message", () => {
+    const user = buildWorkerMessages(makeCtx(), undefined, { current: 1, max: 3 })[1]!.content!;
+    expect(user).toMatch(/## Task\nWrite a sorting function$/);
   });
 });
 
 // ================================================================
-// buildDebateWorkerMessages
+// buildDebateWorkerMessages — with cold join auto-detection
 // ================================================================
 
 describe("buildDebateWorkerMessages", () => {
-  it("should include other workers' full responses (not just summary)", () => {
+  it("should present other workers in 3rd person", () => {
     const round1 = makeRound(1, {
-      responses: [
-        makeResponse("worker/a", "Round 1 answer A", "advocate", 0),
-        makeResponse("worker/b", "Round 1 answer B", "critic", 1),
-      ],
+      responses: [makeResponse("worker/a", "Answer A", 0), makeResponse("worker/b", "Answer B", 1)],
     });
     const ctx = makeCtx([round1]);
+    const user = buildDebateWorkerMessages(ctx, undefined, undefined, 0)[1]!.content!;
 
-    const messages = buildDebateWorkerMessages(ctx, undefined, undefined, 0);
-    const user = messages[1]!.content!;
+    expect(user).toContain("One analyst argues");
+    expect(user).not.toContain('role="');
+  });
 
-    // Should see other worker's digest
-    expect(user).toContain("Other Workers' Positions");
-    // Should NOT see own response in "Other Workers" (only in "Your Previous Response")
+  it("should include own previous response when worker participated", () => {
+    const round1 = makeRound(1, {
+      responses: [makeResponse("worker/a", "My quicksort analysis", 0), makeResponse("worker/b", "My mergesort analysis", 1)],
+    });
+    const ctx = makeCtx([round1]);
+    const user = buildDebateWorkerMessages(ctx, undefined, undefined, 0)[1]!.content!;
+
     expect(user).toContain("Your Previous Response");
-    expect(user).toContain("Round 1 answer A");
+    expect(user).toContain("My quicksort analysis");
   });
 
-  it("should label other workers by role, not model name", () => {
+  it("should show full transcript as cold join when worker has no previous response", () => {
+    const round1 = makeRound(1, {
+      responses: [makeResponse("worker/a", "R1 Answer A", 0), makeResponse("worker/b", "R1 Answer B", 1)],
+    });
+    const round2 = makeRound(2, {
+      responses: [makeResponse("worker/a", "R2 Answer A", 0), makeResponse("worker/b", "R2 Answer B", 1)],
+    });
+    const ctx = makeCtx([round1, round2]);
+
+    // Worker index 5 never participated — cold join
+    const user = buildDebateWorkerMessages(ctx, undefined, undefined, 5)[1]!.content!;
+
+    expect(user).toContain("## Debate So Far");
+    expect(user).toContain("### Round 1");
+    expect(user).toContain("### Round 2");
+    expect(user).not.toContain("Your Previous Response");
+  });
+
+  it("should include depth techniques in system prompt", () => {
+    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[0]!.content!;
+    expect(sys).toContain("Think thoroughly");
+    expect(sys).toContain("Keep questioning until your position is stable");
+    expect(sys).toContain("verify your key claims");
+  });
+
+  it("should include compressed anti-sycophancy rules", () => {
+    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[0]!.content!;
+    expect(sys).toContain("change position");
+    expect(sys).toContain("maintain your position");
+    expect(sys).not.toContain("Do NOT agree merely to be polite");
+  });
+
+  it("should include domain hint", () => {
+    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)], undefined, "ARCHITECTURE"))[0]!.content!;
+    expect(sys).toContain("scalability");
+  });
+
+  it("should include host instructions", () => {
+    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]), "Focus on performance")[0]!.content!;
+    expect(sys).toContain("Focus on performance");
+  });
+
+  it("should include final round commitment", () => {
+    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, { current: 3, max: 3 })[1]!.content!;
+    expect(user).toMatch(/final.*commit/i);
+  });
+
+  it("should place task at end of user message", () => {
+    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, undefined, 0)[1]!.content!;
+    expect(user).toMatch(/## Task\nWrite a sorting function$/);
+  });
+
+  it("should handle 4+ workers", () => {
     const round1 = makeRound(1, {
       responses: [
-        makeResponse("worker/a", "Answer A", "advocate", 0),
-        makeResponse("worker/b", "Answer B", "critic", 1),
-        makeResponse("worker/c", "Answer C", "wildcard", 2),
+        makeResponse("worker/a", "A response", 0),
+        makeResponse("worker/b", "B response", 1),
+        makeResponse("worker/c", "C response", 2),
+        makeResponse("worker/d", "D response", 3),
       ],
     });
     const ctx = makeCtx([round1]);
+    const user = buildDebateWorkerMessages(ctx, undefined, undefined, 0)[1]!.content!;
 
-    const messages = buildDebateWorkerMessages(ctx, undefined, undefined, 0);
-    const user = messages[1]!.content!;
-
-    expect(user).toContain('role="critic"');
-    expect(user).toContain('role="wildcard"');
-    // Worker/a is the current worker (index 0 = advocate) — should be in "Your Previous Response", not in others
-    expect(user).not.toContain('role="advocate"');
-  });
-
-  it("should only see LAST round responses (not full history)", () => {
-    const r1 = makeRound(1, {
-      responses: [makeResponse("worker/a", "R1-answer-A", "advocate")],
-    });
-    const r2 = makeRound(2, {
-      responses: [makeResponse("worker/a", "R2-answer-A", "advocate")],
-    });
-    const ctx = makeCtx([r1, r2]);
-
-    const messages = buildDebateWorkerMessages(ctx, undefined, undefined);
-    const user = messages[1]!.content!;
-
-    expect(user).toContain("R2-answer-A");
-    expect(user).not.toContain("R1-answer-A");
-  });
-
-  it("should include debate role in system message", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildDebateWorkerMessages(ctx, undefined, undefined, 0);
-    expect(messages[0]!.content).toContain("advocate debater");
-  });
-
-  it("should NOT contain Self-Doubt (replaced by <concerns>)", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildDebateWorkerMessages(ctx);
-    expect(messages[0]!.content).not.toContain("Self-Doubt");
-  });
-
-  it("should include final round instruction on last round", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildDebateWorkerMessages(ctx, undefined, { current: 3, max: 3 });
-    expect(messages[1]!.content!).toMatch(/final/i);
-  });
-
-  it("should use host instructions combined with debate context", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildDebateWorkerMessages(ctx, "Focus on performance");
-    expect(messages[0]!.content).toContain("Focus on performance");
-    expect(messages[0]!.content).toContain("debater");
-  });
-
-  it("should include worker's own previous response when workerIndex is provided", () => {
-    const round1 = makeRound(1, {
-      responses: [
-        makeResponse("worker/a", "My analysis of quicksort", "advocate", 0),
-        makeResponse("worker/b", "My analysis of mergesort", "critic", 1),
-      ],
-    });
-    const ctx = makeCtx([round1]);
-
-    const messages = buildDebateWorkerMessages(ctx, undefined, undefined, 0);
-    const user = messages[1]!.content!;
     expect(user).toContain("Your Previous Response");
-    expect(user).toContain("My analysis of quicksort");
+    expect((user.match(/One analyst argues/g) ?? []).length).toBe(3);
   });
 
-  it("should NOT include previous response section when workerIndex is not provided", () => {
+  it("should NOT contain output-structure", () => {
+    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[0]!.content!;
+    expect(sys).not.toContain("<output-structure>");
+    expect(sys).not.toContain("<position>");
+  });
+
+  it("should escape XML in worker responses", () => {
     const round1 = makeRound(1, {
-      responses: [makeResponse("worker/a", "My analysis", "advocate", 0)],
+      responses: [makeResponse("worker/a", "Use <script> for injection", 0)],
     });
     const ctx = makeCtx([round1]);
-
-    const messages = buildDebateWorkerMessages(ctx);
-    expect(messages[1]!.content).not.toContain("Your Previous Response");
-  });
-
-  it("should instruct workers to rebut and refine positions", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildDebateWorkerMessages(ctx);
-    const system = messages[0]!.content!;
-    expect(system).toMatch(/rebut|refine|concede/i);
-  });
-
-  it("should skip output-structure for artifact tasks in debate mode", () => {
-    const ctx = makeCtx([makeRound(1)], "artifact");
-    const messages = buildDebateWorkerMessages(ctx);
-    expect(messages[0]!.content).not.toContain("<output-structure>");
-  });
-
-  it("should handle 4+ workers without role collision (index-based filtering)", () => {
-    // 4 workers: index 0=advocate, 1=critic, 2=wildcard, 3=advocate (collision)
-    const round1 = makeRound(1, {
-      responses: [
-        makeResponse("worker/a", "Advocate-0 response", "advocate", 0),
-        makeResponse("worker/b", "Critic-1 response", "critic", 1),
-        makeResponse("worker/c", "Wildcard-2 response", "wildcard", 2),
-        makeResponse("worker/d", "Advocate-3 response", "advocate", 3),
-      ],
-    });
-    const ctx = makeCtx([round1]);
-
-    // Worker index 0 (advocate) should see index 3's response (also advocate) in Others
-    const msgs0 = buildDebateWorkerMessages(ctx, undefined, undefined, 0);
-    const user0 = msgs0[1]!.content!;
-    expect(user0).toContain("Advocate-3 response");   // Other advocate visible
-    expect(user0).toContain("Critic-1 response");
-    expect(user0).toContain("Wildcard-2 response");
-    expect(user0).toContain("Your Previous Response");
-    expect(user0).toContain("Advocate-0 response");    // Own response in "Your Previous"
-
-    // Worker index 3 (advocate) should see index 0's response (also advocate) in Others
-    const msgs3 = buildDebateWorkerMessages(ctx, undefined, undefined, 3);
-    const user3 = msgs3[1]!.content!;
-    expect(user3).toContain("Advocate-0 response");   // Other advocate visible
-    expect(user3).toContain("Your Previous Response");
-    expect(user3).toContain("Advocate-3 response");    // Own response
+    // Worker index 1 sees worker 0's response
+    const user = buildDebateWorkerMessages(ctx, undefined, undefined, 1)[1]!.content!;
+    expect(user).not.toContain("<script>");
+    expect(user).toContain("&lt;script&gt;");
   });
 });
 
 // ================================================================
-// Cross-function tests
+// buildAcceptanceMessages
 // ================================================================
 
-describe("cross-function", () => {
-  it("should always return exactly 2 messages (system + user) for buildWorkerMessages", () => {
-    const ctx0 = makeCtx();
-    const ctx1 = makeCtx([makeRound(1)]);
-    const ctx2 = makeCtx([makeRound(1), makeRound(2)]);
-
-    for (const ctx of [ctx0, ctx1, ctx2]) {
-      const worker = buildWorkerMessages(ctx);
-
-      expect(worker).toHaveLength(2);
-      expect(worker[0]!.role).toBe("system");
-      expect(worker[1]!.role).toBe("user");
-    }
+describe("buildAcceptanceMessages", () => {
+  it("should produce system + user pair", () => {
+    const messages = buildAcceptanceMessages("Synth", "Pos", "Task");
+    expect(messages).toHaveLength(2);
+    expect(messages[0]!.role).toBe("system");
+    expect(messages[1]!.role).toBe("user");
   });
 
-  it("should return identical messages for identical inputs (idempotent)", () => {
-    const ctx = makeCtx([makeRound(1)]);
-
-    const w1 = buildWorkerMessages(ctx, "inst", undefined, 0);
-    const w2 = buildWorkerMessages(ctx, "inst", undefined, 0);
-
-    expect(w1).toEqual(w2);
+  it("should keep acceptance XML output schema", () => {
+    const sys = buildAcceptanceMessages("S", "P", "T")[0]!.content!;
+    expect(sys).toContain("<acceptance>");
+    expect(sys).toContain("<verdict>");
   });
 
-  it("should handle empty responses array in a round", () => {
-    const round: Round = { number: 1, responses: [] };
-    const ctx = makeCtx([round]);
-
-    const worker = buildWorkerMessages(ctx);
-
-    expect(worker).toHaveLength(2);
-  });
-});
-
-// ================================================================
-// TaskNature-aware prompts
-// ================================================================
-
-describe("artifact worker prompts", () => {
-  it("should use artifact role prompt when taskNature is artifact", () => {
-    const ctx = makeCtx([], "artifact");
-    const messages = buildWorkerMessages(ctx, undefined, undefined, 0);
-    expect(messages[0]!.content).toContain("advocate implementer");
-    expect(messages[0]!.content).not.toContain("advocate analyst");
-    expect(messages[0]!.content).toContain("<artifact>");
+  it("should include all content in user message", () => {
+    const user = buildAcceptanceMessages("Host merged", "Use Redis", "Pick cache")[1]!.content!;
+    expect(user).toContain("Pick cache");
+    expect(user).toContain("Use Redis");
+    expect(user).toContain("Host merged");
   });
 
-  it("should include host instructions with artifact role prompt", () => {
-    const ctx = makeCtx([], "artifact");
-    const messages = buildWorkerMessages(ctx, "Use TypeScript", undefined, 0);
-    expect(messages[0]!.content).toContain("Use TypeScript");
-    expect(messages[0]!.content).toContain("advocate implementer");
+  it("should place task at end", () => {
+    const user = buildAcceptanceMessages("S", "P", "My task")[1]!.content!;
+    expect(user).toMatch(/## Task\nMy task$/);
   });
 
-  it("should use critique (default) prompt when taskNature is critique", () => {
-    const ctx = makeCtx([], "critique");
-    const messages = buildWorkerMessages(ctx, undefined, undefined, 0);
-    expect(messages[0]!.content).toContain("advocate analyst");
-    expect(messages[0]!.content).toContain("<position>");
+  it("should NOT be over-prompting", () => {
+    const sys = buildAcceptanceMessages("S", "P", "T")[0]!.content!;
+    expect(sys).not.toContain("Actively search");
+    expect(sys).not.toContain("ONLY if you genuinely");
   });
 });
 
@@ -383,45 +320,27 @@ describe("artifact worker prompts", () => {
 // ================================================================
 
 describe("extractDebateDigest", () => {
-  it("should extract position and evidence tags", () => {
-    const content = `<response>
-  <position>Quicksort is optimal for this case</position>
-  <evidence>O(n log n) average, in-place</evidence>
-  <concerns>Worst case O(n²)</concerns>
-</response>`;
+  it("should extract position and evidence tags (backward compat)", () => {
+    const content = `<position>Quicksort is optimal</position>\n<evidence>O(n log n) average</evidence>\n<concerns>Worst case</concerns>`;
     const digest = extractDebateDigest(content);
-    expect(digest).toContain("Position: Quicksort is optimal for this case");
-    expect(digest).toContain("Evidence: O(n log n) average, in-place");
+    expect(digest).toContain("Position: Quicksort is optimal");
+    expect(digest).toContain("Evidence: O(n log n) average");
     expect(digest).not.toContain("concerns");
   });
 
-  it("should extract position only when evidence is absent", () => {
-    const content = "<position>Use Redis</position>\nSome other text";
+  it("should extract alternatives tag", () => {
+    const content = `<position>Use Redis</position>\n<evidence>Fast</evidence>\n<alternatives>Use Memcached</alternatives>`;
     const digest = extractDebateDigest(content);
-    expect(digest).toBe("Position: Use Redis");
+    expect(digest).toContain("Alternatives: Use Memcached");
   });
 
-  it("should extract evidence only when position is absent", () => {
-    const content = "Analysis:\n<evidence>Benchmark shows 3x speedup</evidence>\nConclusion";
-    const digest = extractDebateDigest(content);
-    expect(digest).toBe("Evidence: Benchmark shows 3x speedup");
+  it("should fall back to first 3 lines for short content", () => {
+    expect(extractDebateDigest("line 1\nline 2\nline 3")).toBe("line 1\nline 2\nline 3");
   });
 
-  it("should extract alternatives tag when present", () => {
-    const content = `<response>
-  <position>Use Redis</position>
-  <evidence>Fast caching</evidence>
-  <alternatives>Use Memcached for simpler setups</alternatives>
-</response>`;
-    const digest = extractDebateDigest(content);
-    expect(digest).toContain("Position: Use Redis");
-    expect(digest).toContain("Evidence: Fast caching");
-    expect(digest).toContain("Alternatives: Use Memcached for simpler setups");
-  });
-
-  it("should fall back to first 3 lines when neither tag found", () => {
-    const content = "line 1\nline 2\nline 3\nline 4\nline 5";
-    expect(extractDebateDigest(content)).toBe("line 1\nline 2\nline 3");
+  it("should use last line as summary for long free-form content", () => {
+    const content = "P1.\nP2.\nP3.\nP4.\nIn conclusion, Redis is the best choice.";
+    expect(extractDebateDigest(content)).toContain("Redis is the best choice");
   });
 
   it("should trim whitespace in extracted tags", () => {
@@ -432,207 +351,66 @@ describe("extractDebateDigest", () => {
   });
 });
 
-describe("buildDebateWorkerMessages uses digest sharing", () => {
-  it("should share digest instead of full content in debate round 2+", () => {
-    const round1Responses = [
-      {
-        model: "a/m1", content: "<response>\n<position>Use A</position>\n<evidence>Fast</evidence>\n<concerns>Cost</concerns>\n</response>",
-        role: "advocate" as const, workerIndex: 0,
-      },
-      {
-        model: "b/m2", content: "<response>\n<position>Use B</position>\n<evidence>Cheap</evidence>\n<concerns>Slow</concerns>\n</response>",
-        role: "critic" as const, workerIndex: 1,
-      },
+// ================================================================
+// Cross-function
+// ================================================================
+
+describe("cross-function", () => {
+  it("should always return 2 messages", () => {
+    for (const ctx of [makeCtx(), makeCtx([makeRound(1)])]) {
+      const msgs = buildWorkerMessages(ctx);
+      expect(msgs).toHaveLength(2);
+      expect(msgs[0]!.role).toBe("system");
+      expect(msgs[1]!.role).toBe("user");
+    }
+  });
+
+  it("should be idempotent", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    expect(buildWorkerMessages(ctx, "inst")).toEqual(buildWorkerMessages(ctx, "inst"));
+  });
+
+  it("should handle empty responses", () => {
+    expect(buildWorkerMessages(makeCtx([{ number: 1, responses: [] }]))).toHaveLength(2);
+  });
+});
+
+// ================================================================
+// Artifact prompts
+// ================================================================
+
+describe("artifact prompts", () => {
+  it("should use artifact role for artifact taskNature", () => {
+    const sys = buildWorkerMessages(makeCtx([], "artifact"))[0]!.content;
+    expect(sys).toContain("Think thoroughly");
+    expect(sys).not.toContain("one-line summary");
+  });
+
+  it("should use critique depth for critique taskNature", () => {
+    const sys = buildWorkerMessages(makeCtx([], "critique"))[0]!.content;
+    expect(sys).toContain("one-line summary");
+  });
+});
+
+// ================================================================
+// Digest sharing in debate
+// ================================================================
+
+describe("debate digest sharing", () => {
+  it("should share digest in 3rd person format", () => {
+    const responses = [
+      { model: "a/m1", content: "<position>Use A</position>\n<evidence>Fast</evidence>\n<concerns>Cost</concerns>", workerIndex: 0 },
+      { model: "b/m2", content: "<position>Use B</position>\n<evidence>Cheap</evidence>\n<concerns>Slow</concerns>", workerIndex: 1 },
     ];
     const ctx: SharedContext = {
-      task: "Pick the best DB",
-      team: { workers: [makeWorker("a/m1"), makeWorker("b/m2")] },
-      rounds: [{ number: 1, responses: round1Responses }],
+      task: "Pick DB", team: { workers: [makeWorker("a/m1"), makeWorker("b/m2")] },
+      rounds: [{ number: 1, responses }],
     };
-    const messages = buildDebateWorkerMessages(ctx, undefined, { current: 2, max: 3 }, 0);
-    const userContent = messages[1]!.content!;
-    // Should contain plain text digest (position + evidence), XML-escaped, not full content
-    expect(userContent).toContain("Position: Use B");
-    expect(userContent).toContain("Evidence: Cheap");
-    // Should NOT contain concerns (not part of digest)
-    expect(userContent).not.toContain("Slow");
-  });
-});
+    const user = buildDebateWorkerMessages(ctx, undefined, { current: 2, max: 3 }, 0)[1]!.content!;
 
-// ================================================================
-// Certainty / Confidence expression
-// ================================================================
-
-describe("certainty and confidence expression", () => {
-  it("should include <certainty> with structured markers in critique worker prompt", () => {
-    const ctx = makeCtx([], "critique");
-    const messages = buildWorkerMessages(ctx);
-    expect(messages[0]!.content).toContain("<certainty>");
-    expect(messages[0]!.content).toContain("<verifiable_claims>");
-    expect(messages[0]!.content).toContain("<assumptions>");
-    expect(messages[0]!.content).toContain("<uncertainty>");
-  });
-
-  it("should include <confidence> justification (no numeric score) in artifact worker prompt", () => {
-    const ctx = makeCtx([], "artifact");
-    const messages = buildWorkerMessages(ctx);
-    expect(messages[0]!.content).toContain("<confidence>");
-    // No numeric 0-10 scale
-    expect(messages[0]!.content).not.toContain("[0-10]");
-    expect(messages[0]!.content).toContain("Justify your approach");
-  });
-});
-
-// ================================================================
-// Anti-sycophancy in debate prompts
-// ================================================================
-
-describe("anti-sycophancy in debate prompts", () => {
-  it("should include anti-sycophancy rules in debate worker prompt", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildDebateWorkerMessages(ctx);
-    const system = messages[0]!.content!;
-    expect(system).toContain("Do NOT agree merely to be polite");
-    expect(system).toContain("Disagreement backed by evidence");
-    expect(system).toContain("maintain it and explain why");
-  });
-});
-
-// ================================================================
-// buildAcceptanceMessages
-// ================================================================
-
-describe("buildAcceptanceMessages", () => {
-  it("should produce system + user message pair", () => {
-    const messages = buildAcceptanceMessages("Synthesis text", "My position", "The task");
-    expect(messages).toHaveLength(2);
-    expect(messages[0]!.role).toBe("system");
-    expect(messages[1]!.role).toBe("user");
-  });
-
-  it("should include acceptance XML schema in system prompt", () => {
-    const messages = buildAcceptanceMessages("S", "P", "T");
-    const system = messages[0]!.content!;
-    expect(system).toContain("<acceptance>");
-    expect(system).toContain("<verdict>");
-    expect(system).toContain("<misrepresented>");
-    expect(system).toContain("<unresolved>");
-  });
-
-  it("should include task, original position, and synthesis in user message", () => {
-    const messages = buildAcceptanceMessages("Host merged views", "Use Redis for caching", "Pick a cache layer");
-    const user = messages[1]!.content!;
-    expect(user).toContain("Pick a cache layer");
-    expect(user).toContain("Use Redis for caching");
-    expect(user).toContain("Host merged views");
-  });
-
-  it("should use adversarial framing with partial verdict", () => {
-    const messages = buildAcceptanceMessages("S", "P", "T");
-    const system = messages[0]!.content!;
-    expect(system).toContain("adversarial reviewer");
-    expect(system).toContain("partial");
-    expect(system).toContain("misrepresents or weakens");
-  });
-});
-
-// ================================================================
-// buildColdJoinMessages — replacement worker joining debate mid-round
-// ================================================================
-
-describe("buildColdJoinMessages", () => {
-  it("should include full debate transcript with all previous rounds", () => {
-    const round1 = makeRound(1);
-    const round2 = makeRound(2);
-    const ctx = makeCtx([round1, round2]);
-
-    const messages = buildColdJoinMessages(ctx, undefined, { current: 3, max: 3 }, 0);
-    const user = messages[1]!.content!;
-
-    expect(user).toContain("## Full Debate Transcript");
-    expect(user).toContain("### Round 1");
-    expect(user).toContain("### Round 2");
-  });
-
-  it("should NOT include 'Your Previous Response' section", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildColdJoinMessages(ctx, undefined, { current: 2, max: 3 }, 0);
-    const user = messages[1]!.content!;
-
-    expect(user).not.toContain("Your Previous Response");
-  });
-
-  it("should assign role based on workerIndex", () => {
-    const ctx = makeCtx([makeRound(1)]);
-
-    const msgs0 = buildColdJoinMessages(ctx, undefined, undefined, 0);
-    expect(msgs0[0]!.content).toContain("advocate");
-
-    const msgs1 = buildColdJoinMessages(ctx, undefined, undefined, 1);
-    expect(msgs1[0]!.content).toContain("critic");
-
-    const msgs2 = buildColdJoinMessages(ctx, undefined, undefined, 2);
-    expect(msgs2[0]!.content).toContain("wildcard");
-  });
-
-  it("should include host instructions when provided", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildColdJoinMessages(ctx, "Focus on security", undefined, 0);
-    const system = messages[0]!.content!;
-
-    expect(system).toContain("<host-instructions>Focus on security</host-instructions>");
-  });
-
-  it("should include round budget", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildColdJoinMessages(ctx, undefined, { current: 2, max: 3 }, 0);
-    const user = messages[1]!.content!;
-
-    expect(user).toContain("Round 2 of 3");
-  });
-
-  it("should mark final round with warning", () => {
-    const ctx = makeCtx([makeRound(1), makeRound(2)]);
-    const messages = buildColdJoinMessages(ctx, undefined, { current: 3, max: 3 }, 0);
-    const user = messages[1]!.content!;
-
-    expect(user).toContain("FINAL round");
-  });
-
-  it("should handle empty rounds gracefully", () => {
-    const ctx = makeCtx([]);
-    const messages = buildColdJoinMessages(ctx, undefined, { current: 1, max: 1 }, 0);
-    const user = messages[1]!.content!;
-
-    expect(user).not.toContain("## Full Debate Transcript");
-    expect(user).toContain("## Task");
-  });
-
-  it("should escape XML in worker responses", () => {
-    const response = makeResponse("worker/a", "<position>Use <script> tags</position>", "advocate");
-    const ctx = makeCtx([{ number: 1, responses: [response] }]);
-    const messages = buildColdJoinMessages(ctx, undefined, undefined, 1);
-    const user = messages[1]!.content!;
-
-    expect(user).not.toContain("<script>");
-    expect(user).toContain("&lt;script&gt;");
-  });
-
-  it("should show worker role labels in transcript", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildColdJoinMessages(ctx, undefined, undefined, 0);
-    const user = messages[1]!.content!;
-
-    expect(user).toContain('role="advocate"');
-    expect(user).toContain('role="critic"');
-  });
-
-  it("should instruct to identify what participants missed", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const messages = buildColdJoinMessages(ctx, undefined, undefined, 0);
-    const system = messages[0]!.content!;
-
-    expect(system).toContain("missed");
-    expect(system).toContain("new participant");
+    expect(user).toContain("One analyst argues");
+    expect(user).toContain("Position: Use B");
+    expect(user).toContain("Evidence: Cheap");
+    expect(user).not.toContain("Slow");
   });
 });

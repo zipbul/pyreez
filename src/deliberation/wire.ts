@@ -16,7 +16,7 @@ import type { DeliberateInput, DeliberateOutput, GenerationParams } from "./type
 import type { ChatResult, EngineDeps, EngineConfig, FallbackDeps } from "./engine";
 import { createFallbackPool } from "./engine";
 import type { DeliberationStore } from "./store-types";
-import { composeTeam, orderWorkersByRole } from "./team-composer";
+import { composeTeam } from "./team-composer";
 import type { SkillCellStore } from "../model/skillcell-store";
 import type { ExternalEvaluator } from "./external-evaluator";
 import { deliberate } from "./engine";
@@ -24,7 +24,6 @@ import { createCooldownManager } from "./cooldown";
 import {
   buildWorkerMessages,
   buildDebateWorkerMessages,
-  buildColdJoinMessages,
 } from "./prompts";
 
 // -- Public types --
@@ -156,16 +155,11 @@ export function createDeliberateFn(
       },
     );
 
-    // 5. Reorder workers by capability → role fit
-    const orderedWorkers = orderWorkersByRole(team.workers, (id) => deps.registry.getById(id));
-    team = { workers: orderedWorkers };
-
-    // 6. Assemble engine deps
+    // 5. Assemble engine deps (no role ordering — diversity comes from heterogeneous models)
     const engineDeps: EngineDeps = {
       chat: deps.chat,
       buildWorkerMessages,
       buildDebateWorkerMessages,
-      buildColdJoinMessages,
     };
 
     // 7. Build engine config
@@ -173,7 +167,7 @@ export function createDeliberateFn(
     const effectiveMaxRounds = input.maxRounds ?? (isDebate ? 3 : 1);
     const workerGenParams: GenerationParams = {
       temperature: 1.0,
-      max_tokens: 2048,
+      max_tokens: 4096,
     };
     const config: EngineConfig = {
       maxRounds: effectiveMaxRounds,

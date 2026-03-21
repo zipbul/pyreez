@@ -29,14 +29,6 @@ export interface GenerationParams {
 export type TeamRole = "worker";
 
 /**
- * Deliberation role assigned to workers for diversity of perspective.
- * advocate: champions the best solution with evidence.
- * critic: attacks weaknesses, focuses on failure modes.
- * wildcard: explores unconventional angles and cross-domain ideas.
- */
-export type DeliberationRole = "advocate" | "critic" | "wildcard";
-
-/**
  * A single team member assignment.
  */
 export interface TeamMember {
@@ -61,8 +53,7 @@ export interface TeamComposition {
 export interface WorkerResponse {
   readonly model: string;
   readonly content: string;
-  readonly role?: DeliberationRole;
-  /** Positional index in the diverge phase. Used for identity in debates (role can collide with 4+ workers). */
+  /** Positional index in the diverge phase. */
   readonly workerIndex: number;
 }
 
@@ -100,6 +91,7 @@ export interface SharedContext {
   readonly team: TeamComposition;
   readonly rounds: readonly Round[];
   readonly taskNature?: TaskNature;
+  readonly domain?: string;
 }
 
 // -- Token Usage --
@@ -174,7 +166,7 @@ export interface DeliberateOutput {
   /** Per-round details for diagnostics. */
   readonly rounds?: readonly {
     number: number;
-    responses?: readonly { model: string; content: string; role?: string }[];
+    responses?: readonly { model: string; content: string }[];
     failedWorkers?: readonly FailedWorker[];
   }[];
   /** Warnings about deliberation quality (e.g., low provider diversity). */

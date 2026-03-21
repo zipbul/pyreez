@@ -26,7 +26,7 @@ import type {
   TokenUsage,
   WorkerResponse,
 } from "./types";
-import { assignWorkerRole } from "./prompts";
+// No role assignment — diversity comes from heterogeneous models
 import {
   createSharedContext,
   addRound,
@@ -45,7 +45,8 @@ import type { ChatResult } from "../axis/types";
 /**
  * Minimum character length for a valid worker response.
  * Responses shorter than this are treated as degenerate (empty, provider failure, etc.)
- * and excluded. Workers are instructed of this requirement in their prompts.
+ * and trigger fallback to next model. Safety net for truly broken responses,
+ * not a quality bar — worker prompts do not specify this limit.
  */
 export const MIN_WORKER_RESPONSE_LENGTH = 200;
 
@@ -144,13 +145,7 @@ export interface EngineDeps {
     roundInfo?: RoundInfo,
     workerIndex?: number,
   ) => ChatMessage[];
-  /** Cold join: replacement worker joining debate mid-round with full transcript. */
-  readonly buildColdJoinMessages?: (
-    ctx: SharedContext,
-    instructions?: string,
-    roundInfo?: RoundInfo,
-    workerIndex?: number,
-  ) => ChatMessage[];
+  // Cold join is auto-detected inside buildDebateWorkerMessages
 }
 
 /**
@@ -279,11 +274,8 @@ async function callWithFallback(
   let totalInput = 0;
   let totalOutput = 0;
 
-  // Build messages for the original worker
-  const buildMessages = (isColdJoin: boolean): ChatMessage[] => {
-    if (isColdJoin && deps.buildColdJoinMessages) {
-      return deps.buildColdJoinMessages(ctx, input.workerInstructions, roundInfo, workerIndex);
-    }
+  // Build messages — debate builder auto-detects cold join via participation history
+  const buildMessages = (): ChatMessage[] => {
     if (useDebateBuilder) {
       return deps.buildDebateWorkerMessages!(ctx, input.workerInstructions, roundInfo, workerIndex);
     }
@@ -292,7 +284,6 @@ async function callWithFallback(
 
   // Try original model
   let currentModel = participant.model;
-  let isColdJoin = false; // Original worker is never cold join
 
   // Attempt loop: original → fallback1 → fallback2 → ...
   const excludeIds = new Set<string>();
@@ -318,17 +309,15 @@ async function callWithFallback(
     }
 
     currentModel = next.id;
-    isColdJoin = roundNumber > 1 && config.protocol === "debate" && !!deps.buildColdJoinMessages;
   }
 
   while (true) {
     try {
-      const messages = buildMessages(isColdJoin);
+      const messages = buildMessages();
       const result = await deps.chat(currentModel, messages, config.workerGenParams);
       totalInput += result.inputTokens;
       totalOutput += result.outputTokens;
 
-      const role = assignWorkerRole(workerIndex);
       const isDegenerate = result.content.trim().length < MIN_WORKER_RESPONSE_LENGTH;
 
       if (isDegenerate && pool) {
@@ -350,7 +339,7 @@ async function callWithFallback(
         if (!next) {
           // Pool exhausted — return degenerate as-is
           return {
-            response: { model: currentModel, content: result.content, role, workerIndex },
+            response: { model: currentModel, content: result.content, workerIndex },
             failed: false,
             degenerate: true,
             swaps,
@@ -359,12 +348,11 @@ async function callWithFallback(
         }
 
         currentModel = next.id;
-        isColdJoin = roundNumber > 1;
         continue; // retry with fallback model
       }
 
       return {
-        response: { model: currentModel, content: result.content, role, workerIndex },
+        response: { model: currentModel, content: result.content, workerIndex },
         failed: false,
         degenerate: isDegenerate,
         swaps,
@@ -414,10 +402,8 @@ async function callWithFallback(
         return { failed: true, swaps, tokens: { input: totalInput, output: totalOutput } };
       }
 
-      // Swap to next model
+      // Swap to next model — debate builder auto-detects cold join
       currentModel = next.id;
-      // Cold join: swap in R2+ debate
-      isColdJoin = roundNumber > 1 && config.protocol === "debate" && !!deps.buildColdJoinMessages;
     }
   }
 }
@@ -531,7 +517,7 @@ export async function deliberate(
 ): Promise<DeliberateOutput> {
   const cfg = config ?? DEFAULT_CONFIG;
   let currentTeam = team;
-  let ctx = createSharedContext(input.task, currentTeam, input.taskNature);
+  let ctx = createSharedContext(input.task, currentTeam, input.taskNature, input.domain);
   let accTokens: TokenUsage = { input: 0, output: 0 };
   const allRounds: Round[] = [];
   const allModels = new Set<string>();
@@ -634,7 +620,7 @@ export async function deliberate(
       if (teamChanged) {
         currentTeam = { workers: updatedWorkers };
         const prevRounds = [...ctx.rounds];
-        ctx = createSharedContext(input.task, currentTeam, input.taskNature);
+        ctx = createSharedContext(input.task, currentTeam, input.taskNature, input.domain);
         for (const prevRound of prevRounds) {
           ctx = addRound(ctx, prevRound);
         }
@@ -652,7 +638,7 @@ export async function deliberate(
   // -- Assemble output --
   const roundsSummary = allRounds.map((r, idx) => ({
     number: idx + 1,
-    responses: r.responses.map((resp) => ({ model: resp.model, content: resp.content, role: resp.role })),
+    responses: r.responses.map((resp) => ({ model: resp.model, content: resp.content })),
     ...(r.failedWorkers?.length ? { failedWorkers: r.failedWorkers } : {}),
   }));
 

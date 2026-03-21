@@ -24,6 +24,7 @@ export function createSharedContext(
   task: string,
   team: TeamComposition,
   taskNature?: TaskNature,
+  domain?: string,
 ): SharedContext {
   if (!task || task.trim().length === 0) {
     throw new Error("Task description must be a non-empty string");
@@ -31,7 +32,11 @@ export function createSharedContext(
   if (!team.workers || team.workers.length === 0) {
     throw new Error("Team must have at least one worker");
   }
-  return { task: task.trim(), team, rounds: [], ...(taskNature ? { taskNature } : {}) };
+  return {
+    task: task.trim(), team, rounds: [],
+    ...(taskNature ? { taskNature } : {}),
+    ...(domain ? { domain } : {}),
+  };
 }
 
 /**

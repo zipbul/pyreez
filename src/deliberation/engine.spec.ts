@@ -127,9 +127,7 @@ describe("executeRound", () => {
     expect(round.number).toBe(1);
     expect(round.responses).toHaveLength(2);
     expect(round.responses[0]!.model).toBe("worker/model-0");
-    expect(round.responses[0]!.role).toBe("advocate");
     expect(round.responses[1]!.model).toBe("worker/model-1");
-    expect(round.responses[1]!.role).toBe("critic");
 
     // Token accumulation: 2 workers (10+10=20 input, 20+20=40 output)
     expect(tokens.input).toBe(20);
@@ -162,7 +160,6 @@ describe("executeRound", () => {
     // Only worker-1 succeeded
     expect(round.responses).toHaveLength(1);
     expect(round.responses[0]!.model).toBe("worker/model-1");
-    expect(round.responses[0]!.role).toBe("critic");
 
     // Tokens: 1 successful worker (10 input, 20 output)
     expect(tokens.input).toBe(10);
@@ -872,9 +869,7 @@ describe("GenerationParams forwarding", () => {
     const { round } = await executeRound(ctx, 1, deps, config, input);
 
     expect(round.responses).toHaveLength(3);
-    const roles = round.responses.map((r) => r.role);
-    expect(roles).toEqual(["advocate", "critic", "wildcard"]);
-    expect(new Set(roles).size).toBe(3); // all distinct
+    expect(round.responses.map((r) => r.workerIndex)).toEqual([0, 1, 2]);
   });
 });
 
@@ -882,62 +877,17 @@ describe("GenerationParams forwarding", () => {
 // debate fallback — cold join + swap tracking
 // ================================================================
 
-describe("debate fallback with cold join", () => {
-  it("should use cold join messages for replacement worker in debate R2+", async () => {
-    // 2 workers, 2 rounds. Worker-1 fails in R2 → fallback/d replaces via cold join
-    let coldJoinCalled = false;
+describe("debate fallback (cold join auto-detected by debate builder)", () => {
+  it("should use debate builder for replacement worker in R2+ (cold join auto-detected)", async () => {
+    // 2 workers, 2 rounds. Worker-1 fails in R2 → fallback/d replaces
+    // Debate builder auto-detects cold join via missing participation in last round
+    let debateBuilderCallCount = 0;
     let round = 0;
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model === "worker/model-1" && round === 2) {
           throw new Error("R2 failure");
         }
-        return chatResult(validWorkerContent(`response-from-${model}`));
-      }),
-      buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
-        return [{ role: "user" as const, content: "debate" }];
-      }),
-      buildColdJoinMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
-        coldJoinCalled = true;
-        return [{ role: "user" as const, content: "cold-join" }];
-      }),
-    });
-
-    const team = makeTeam(2);
-    const cooldown = createCooldownManager();
-    const pool = createFallbackPool([makeModelInfo("prov-z/fallback-d")], cooldown);
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
-
-    // Track round number by intercepting chat
-    const origChat = deps.chat;
-    let callCount = 0;
-    (deps as any).chat = async (model: string, messages: any, params?: any) => {
-      callCount++;
-      // R1: calls 1-2, R2: calls 3-4
-      round = callCount <= 2 ? 1 : 2;
-      return origChat(model, messages, params);
-    };
-
-    const result = await deliberate(team, makeInput(), deps, config, { pool });
-
-    expect(result.roundsExecuted).toBe(2);
-    expect(coldJoinCalled).toBe(true);
-    expect(result.modelSwaps).toBeDefined();
-    expect(result.modelSwaps!.some(s => s.replacement === "prov-z/fallback-d")).toBe(true);
-  });
-
-  it("should preserve swapped worker's response for next round debate context", async () => {
-    // Worker-0 fails in R1 → swapped to fallback/d
-    // R2: fallback/d should use buildDebateWorkerMessages (not cold join — already has R1 response)
-    let debateBuilderCallCount = 0;
-    const r2ChatModels: string[] = [];
-    let round = 0;
-    const deps = makeDeps({
-      chat: mock(async (model: string) => {
-        if (model === "worker/model-0" && round === 1) {
-          throw new Error("R1 failure");
-        }
-        if (round === 2) r2ChatModels.push(model);
         return chatResult(validWorkerContent(`response-from-${model}`));
       }),
       buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
@@ -955,16 +905,49 @@ describe("debate fallback with cold join", () => {
     let callCount = 0;
     (deps as any).chat = async (model: string, messages: any, params?: any) => {
       callCount++;
-      round = callCount <= 3 ? 1 : 2; // R1: up to 3 calls (worker-0 fail, fallback-d, worker-1), R2: rest
+      round = callCount <= 2 ? 1 : 2;
       return origChat(model, messages, params);
     };
 
     const result = await deliberate(team, makeInput(), deps, config, { pool });
 
-    // fallback/d should be called in R2 via chat (proving it's a team member)
-    expect(r2ChatModels).toContain("prov-z/fallback-d");
-    // buildDebateWorkerMessages was called (R2 uses debate builder)
+    expect(result.roundsExecuted).toBe(2);
+    // Debate builder handles both normal debate and cold join
     expect(debateBuilderCallCount).toBeGreaterThan(0);
+    expect(result.modelSwaps).toBeDefined();
+    expect(result.modelSwaps!.some(s => s.replacement === "prov-z/fallback-d")).toBe(true);
+  });
+
+  it("should preserve swapped worker in team for R2", async () => {
+    const r2ChatModels: string[] = [];
+    let round = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0" && round === 1) {
+          throw new Error("R1 failure");
+        }
+        if (round === 2) r2ChatModels.push(model);
+        return chatResult(validWorkerContent(`response-from-${model}`));
+      }),
+      buildDebateWorkerMessages: mock(() => [{ role: "user" as const, content: "debate" }]),
+    });
+
+    const team = makeTeam(2);
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([makeModelInfo("prov-z/fallback-d")], cooldown);
+    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+
+    const origChat = deps.chat;
+    let callCount = 0;
+    (deps as any).chat = async (model: string, messages: any, params?: any) => {
+      callCount++;
+      round = callCount <= 3 ? 1 : 2;
+      return origChat(model, messages, params);
+    };
+
+    const result = await deliberate(team, makeInput(), deps, config, { pool });
+
+    expect(r2ChatModels).toContain("prov-z/fallback-d");
     expect(result.roundsExecuted).toBe(2);
   });
 });
@@ -1112,23 +1095,15 @@ describe("multi-hop token accumulation", () => {
 });
 
 // =============================================================================
-// Cold join NOT applied in diverge-synth
+// Diverge-synth uses worker builder (not debate builder) for fallback
 // =============================================================================
 
-describe("cold join not applied in diverge-synth", () => {
-  it("should NOT use cold join messages for replacement in diverge-synth mode", async () => {
-    // Team of 2, diverge-synth (default), maxRounds=1. Worker-0 fails, pool has fallback/d.
-    let coldJoinCalled = false;
+describe("diverge-synth fallback uses worker builder", () => {
+  it("should use buildWorkerMessages for replacement in diverge-synth mode", async () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
-        if (model === "worker/model-0") {
-          throw new Error("failure");
-        }
+        if (model === "worker/model-0") throw new Error("failure");
         return chatResult(validWorkerContent(`response-from-${model}`));
-      }),
-      buildColdJoinMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
-        coldJoinCalled = true;
-        return [{ role: "user" as const, content: "cold-join" }];
       }),
     });
 
@@ -1139,59 +1114,8 @@ describe("cold join not applied in diverge-synth", () => {
 
     const output = await deliberate(team, makeInput(), deps, config, { pool });
 
-    expect(coldJoinCalled).toBe(false);
     expect(deps.buildWorkerMessages).toHaveBeenCalled();
     expect(output.modelsUsed).toContain("prov-z/fallback-d");
-  });
-});
-
-// =============================================================================
-// Cold join NOT applied when buildColdJoinMessages is undefined
-// =============================================================================
-
-describe("cold join fallback to debate builder when buildColdJoinMessages is undefined", () => {
-  it("should fall back to buildDebateWorkerMessages when buildColdJoinMessages is not provided in debate swap", async () => {
-    // Team of 2, debate, maxRounds=2. Worker-0 fails in R2.
-    // Deps has buildDebateWorkerMessages but NOT buildColdJoinMessages.
-    let debateBuilderCallCount = 0;
-    let round = 0;
-    const deps = makeDeps({
-      chat: mock(async (model: string) => {
-        if (model === "worker/model-0" && round === 2) {
-          throw new Error("R2 failure");
-        }
-        return chatResult(validWorkerContent(`response-from-${model}`));
-      }),
-      buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
-        debateBuilderCallCount++;
-        return [{ role: "user" as const, content: "debate" }];
-      }),
-      // buildColdJoinMessages is NOT provided
-    });
-
-    const team = makeTeam(2);
-    const cooldown = createCooldownManager();
-    const pool = createFallbackPool([makeModelInfo("prov-z/fallback-d")], cooldown);
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
-
-    // Track round number via chat interception
-    const origChat = deps.chat;
-    let callCount = 0;
-    (deps as any).chat = async (model: string, messages: any, params?: any) => {
-      callCount++;
-      // R1: calls 1-2, R2: calls 3+
-      round = callCount <= 2 ? 1 : 2;
-      return origChat(model, messages, params);
-    };
-
-    const output = await deliberate(team, makeInput(), deps, config, { pool });
-
-    expect(output.roundsExecuted).toBe(2);
-    // buildDebateWorkerMessages should be called for the fallback worker in R2
-    // R2 has 2 workers using debate builder, plus fallback/d replaces worker-0
-    expect(debateBuilderCallCount).toBeGreaterThanOrEqual(1);
-    expect(output.modelSwaps).toBeDefined();
-    expect(output.modelSwaps!.some(s => s.replacement === "prov-z/fallback-d")).toBe(true);
   });
 });
 

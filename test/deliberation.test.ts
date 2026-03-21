@@ -207,9 +207,9 @@ describe("Deliberation E2E", () => {
       workerInstructions: "Use TypeScript strictly",
     });
 
-    // Assert — worker instructions appear in worker calls (with role-specific prompt).
+    // Assert — worker instructions appear in worker calls (with role prompt).
     const workerMsgs = capturedSystemMessages.filter(
-      (msg) => msg.includes("Use TypeScript strictly") && msg.includes("analyst"),
+      (msg) => msg.includes("Use TypeScript strictly") && msg.includes("<role>"),
     );
     expect(workerMsgs.length).toBeGreaterThanOrEqual(1);
   });

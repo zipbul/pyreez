@@ -1,19 +1,28 @@
 /**
  * Deliberation prompt builders — multi-model deliberation.
  *
- * Exported functions:
- *   buildWorkerMessages — build ChatMessage[] for a worker LLM (per-worker, role-aware)
- *   buildDebateWorkerMessages — build ChatMessage[] for debate-mode workers (full-sharing)
- *   assignWorkerRole — deterministic role assignment by worker index
- *
- * Pure functions: SharedContext in → ChatMessage[] out.
- * Host provides instructions; pyreez uses minimal defaults when absent.
+ * Design principles (2025-2026 research-backed):
+ *   - No role differentiation: diversity comes from heterogeneous models, not assigned roles
+ *     (Jekyll & Hyde, ICLR 2025: fixed personas hurt; model diversity is the real value)
+ *   - Over-prompting hurts on latest models (Anthropic/OpenAI/Google consensus)
+ *   - "Think thoroughly" > prescriptive steps (Anthropic official)
+ *   - Depth techniques as general instructions:
+ *     · Step-Back: identify underlying principles (ICLR 2024, +7-27%)
+ *     · Recursive self-questioning until stable (Socratic recursive, EMNLP; AB-MCTS, NeurIPS 2025)
+ *     · Self-verification before finishing (Anthropic official; OPENDEV self-critique)
+ *     · Ground facts in evidence, speculative ideas need reasoning chain (CoVe principle)
+ *   - Structured output forced on reasoning hurts 10-15% (cross-verified)
+ *   - Input XML tags help parsing (3-provider consensus); output XML removed
+ *   - Task at end of user message (Lost-in-the-Middle, MIT 2025)
+ *   - 3rd person for other positions reduces sycophancy (cross-verified)
+ *   - Diverge R1 / Converge final round (CreativeDC, NeurIPS 2025)
+ *   - Cold join merged into debate builder (auto-detected via participation history)
  *
  * @module Deliberation Prompts
  */
 
 import type { ChatMessage } from "../llm/types";
-import type { DeliberationRole, SharedContext } from "./types";
+import type { SharedContext } from "./types";
 
 // -- Types --
 
@@ -22,147 +31,75 @@ export interface RoundInfo {
   readonly max: number;
 }
 
-export interface WorkerRoleConfig {
-  readonly role: DeliberationRole;
-  readonly critiquePrompt: string;
-  readonly artifactPrompt: string;
-}
-
-// -- Worker Role Configs --
-
-const WORKER_ROLES: readonly WorkerRoleConfig[] = [
-  {
-    role: "advocate",
-    critiquePrompt: `<role>You are an advocate analyst. Champion the strongest solution with concrete evidence.</role>
-
-<rules>
-- Present the best available answer and defend it with specific data, sources, or reasoning chains.
-- Ground every claim in evidence. State what you know vs. what you infer.
-- Anticipate objections and address them preemptively.
-</rules>
-
-<output-structure>
-Structure your response. Min 200 characters, max 600 words.
-<response>
-  <position>[Core claim, 1-2 sentences]</position>
-  <evidence>[Key evidence, max 3 points]</evidence>
-  <concerns>[Risks or counterarguments]</concerns>
-  <certainty>
-    <verifiable_claims>[Claims that can be fact-checked]</verifiable_claims>
-    <assumptions>[Unstated assumptions your analysis depends on]</assumptions>
-    <uncertainty>[What you're least sure about and why]</uncertainty>
-  </certainty>
-</response>
-</output-structure>`,
-    artifactPrompt: `<role>You are an advocate implementer. Pick the strongest approach and deliver a complete implementation.</role>
-
-<rules>
-- Choose the best approach and implement it fully. State your choice in one line.
-- Cover edge cases, error handling, and boundary conditions in the artifact itself.
-- If the task specifies a language, framework, or format — follow it exactly.
-- Your response MUST be at least 200 characters.
-</rules>
-
-<output-structure>
-Keep prose minimal. Artifact has no word limit.
-<response>
-  <summary>APPROACH: [1 line] / TRADEOFF: [1 line] / ASSUMPTION: [1 line]</summary>
-  <artifact>[The deliverable]</artifact>
-  <confidence>[Justify your approach: why this solution, what tradeoffs were made]</confidence>
-</response>
-</output-structure>`,
-  },
-  {
-    role: "critic",
-    critiquePrompt: `<role>You are a critic analyst. Find weaknesses, failure modes, and unstated assumptions — then propose concrete alternatives.</role>
-
-<rules>
-- Attack the problem from failure modes first: what could go wrong?
-- Identify unstated assumptions and boundary conditions that could invalidate common approaches.
-- For each weakness, state the specific scenario where it causes failure.
-- For each weakness, propose a concrete alternative that addresses it.
-</rules>
-
-<output-structure>
-Structure your response. Min 200 characters, max 600 words.
-<response>
-  <position>[Core claim, 1-2 sentences]</position>
-  <evidence>[Key evidence, max 3 points]</evidence>
-  <concerns>[Risks or counterarguments]</concerns>
-  <alternatives>[For each concern above, a concrete alternative approach]</alternatives>
-  <certainty>
-    <verifiable_claims>[Claims that can be fact-checked]</verifiable_claims>
-    <assumptions>[Unstated assumptions your analysis depends on]</assumptions>
-    <uncertainty>[What you're least sure about and why]</uncertainty>
-  </certainty>
-</response>
-</output-structure>`,
-    artifactPrompt: `<role>You are a critic implementer. Focus on edge cases, error handling, and robustness.</role>
-
-<rules>
-- Prioritize correctness over elegance. Cover every edge case explicitly.
-- Add defensive error handling and input validation.
-- If the task specifies a language, framework, or format — follow it exactly.
-- Your response MUST be at least 200 characters.
-</rules>
-
-<output-structure>
-Keep prose minimal. Artifact has no word limit.
-<response>
-  <summary>APPROACH: [1 line] / TRADEOFF: [1 line] / ASSUMPTION: [1 line]</summary>
-  <artifact>[The deliverable]</artifact>
-  <confidence>[Justify your approach: why this solution, what tradeoffs were made]</confidence>
-</response>
-</output-structure>`,
-  },
-  {
-    role: "wildcard",
-    critiquePrompt: `<role>You are a wildcard analyst. Explore unconventional angles and cross-domain insights.</role>
-
-<rules>
-- Look beyond the obvious. Draw from adjacent domains, unusual patterns, or contrarian viewpoints.
-- Question the framing of the problem itself — is there a better question to ask?
-- Propose at least one approach that others are unlikely to consider.
-</rules>
-
-<output-structure>
-Structure your response. Min 200 characters, max 600 words.
-<response>
-  <position>[Core claim, 1-2 sentences]</position>
-  <evidence>[Key evidence, max 3 points]</evidence>
-  <concerns>[Risks or counterarguments]</concerns>
-  <certainty>
-    <verifiable_claims>[Claims that can be fact-checked]</verifiable_claims>
-    <assumptions>[Unstated assumptions your analysis depends on]</assumptions>
-    <uncertainty>[What you're least sure about and why]</uncertainty>
-  </certainty>
-</response>
-</output-structure>`,
-    artifactPrompt: `<role>You are a wildcard implementer. Explore alternative approaches and unconventional patterns.</role>
-
-<rules>
-- Consider approaches others would skip. If a non-obvious pattern fits better, use it.
-- Still deliver working, production-quality code — creativity does not mean impractical.
-- If the task specifies a language, framework, or format — follow it exactly.
-- Your response MUST be at least 200 characters.
-</rules>
-
-<output-structure>
-Keep prose minimal. Artifact has no word limit.
-<response>
-  <summary>APPROACH: [1 line] / TRADEOFF: [1 line] / ASSUMPTION: [1 line]</summary>
-  <artifact>[The deliverable]</artifact>
-  <confidence>[Justify your approach: why this solution, what tradeoffs were made]</confidence>
-</response>
-</output-structure>`,
-  },
-];
+// -- Domain Hints --
 
 /**
- * Assign a deliberation role by worker index (round-robin).
+ * Domain-specific hints injected into worker prompts.
+ * Aligns worker "evidence" interpretation with evaluator expectations.
  */
-export function assignWorkerRole(workerIndex: number): DeliberationRole {
-  return WORKER_ROLES[workerIndex % WORKER_ROLES.length]!.role;
+const DOMAIN_WORKER_HINTS: Record<string, string> = {
+  IDEATION: "In this domain, evidence means analogous cases, market data, and user behavior patterns.",
+  CODING: "In this domain, evidence means execution paths, boundary conditions, and type safety.",
+  DEBUGGING: "In this domain, evidence means reproduction steps and root cause vs symptom distinction.",
+  REVIEW: "In this domain, evidence means specific code references and concrete impact of issues.",
+  ARCHITECTURE: "In this domain, evidence means scalability analysis, failure scenarios, and dependency impact.",
+  RESEARCH: "In this domain, evidence means source citations and methodology evaluation.",
+  PLANNING: "In this domain, evidence means resource constraints, dependency ordering, and risk scenarios.",
+  REQUIREMENTS: "In this domain, evidence means stakeholder needs, acceptance criteria, and edge cases.",
+  TESTING: "In this domain, evidence means coverage gaps, edge cases, and failure reproduction.",
+  DOCUMENTATION: "In this domain, evidence means accuracy of descriptions, completeness, and audience fit.",
+  OPERATIONS: "In this domain, evidence means uptime data, incident patterns, and capacity metrics.",
+  COMMUNICATION: "In this domain, evidence means audience context, clarity of message, and actionability.",
+};
+
+/**
+ * Get domain hint for worker prompts. Returns empty string if domain unknown.
+ */
+export function getDomainHint(domain?: string): string {
+  if (!domain) return "";
+  return DOMAIN_WORKER_HINTS[domain] ?? "";
+}
+
+// -- Core Prompt Fragments --
+
+const DEPTH_INSTRUCTIONS_CRITIQUE = `Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
+
+Question your own conclusions. Where you are most uncertain, explore what happens if you're wrong. Keep questioning until your position is stable.
+
+Before finishing, verify your key claims.
+
+End with a one-line summary of your position.`;
+
+const DEPTH_INSTRUCTIONS_ARTIFACT = `Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
+
+Question your own conclusions. Where you are most uncertain, explore what happens if you're wrong. Keep questioning until your position is stable.
+
+Before finishing, verify your key claims.`;
+
+// -- Helpers --
+
+function buildSystemPrompt(
+  roleDescription: string,
+  nature: "artifact" | "critique",
+  domain?: string,
+  instructions?: string,
+): string {
+  const parts: string[] = [];
+
+  if (instructions) {
+    parts.push(`<host-instructions>${instructions}</host-instructions>`);
+  }
+
+  parts.push(`<role>${roleDescription}</role>`);
+
+  const hint = getDomainHint(domain);
+  if (hint) {
+    parts.push(`<domain>${hint}</domain>`);
+  }
+
+  parts.push(nature === "artifact" ? DEPTH_INSTRUCTIONS_ARTIFACT : DEPTH_INSTRUCTIONS_CRITIQUE);
+
+  return parts.join("\n\n");
 }
 
 // -- Debate Digest Helpers --
@@ -179,11 +116,14 @@ function escapeXmlContent(text: string): string {
 
 /**
  * Extract debate-relevant digest from a worker response as plain text.
- * Pulls <position> and <evidence> tag contents for compact cross-worker sharing.
- * Falls back to first 3 lines if neither tag is found.
- * Returns plain text (no XML tags) — caller wraps in safe outer tags.
+ *
+ * Extraction priority:
+ * 1. <position> and <evidence> tags (backward compat with old structured output)
+ * 2. Last non-empty line (workers prompted to end with one-line summary)
+ * 3. First 3 lines as fallback
  */
 export function extractDebateDigest(content: string): string {
+  // Try structured tags first (backward compat)
   const position = content.match(/<position>([\s\S]*?)<\/position>/);
   const evidence = content.match(/<evidence>([\s\S]*?)<\/evidence>/);
   const alternatives = content.match(/<alternatives>([\s\S]*?)<\/alternatives>/);
@@ -196,48 +136,50 @@ export function extractDebateDigest(content: string): string {
     return parts.join("\n");
   }
 
+  // Try last non-empty line as summary
+  const lines = content.trim().split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length > 3) {
+    const lastLine = lines[lines.length - 1]!.trim();
+    if (lastLine.length > 10 && lastLine.length < 500 && !lastLine.startsWith("```")) {
+      return lastLine;
+    }
+  }
+
   return content.split("\n").slice(0, 3).join("\n").trim();
 }
 
 // -- Exported Builders --
 
 /**
- * Build messages for a worker LLM.
+ * Build messages for a worker LLM (R1 or diverge-synth).
  *
- * Each worker receives a role-specific prompt based on workerIndex.
+ * All workers receive identical prompts — diversity comes from heterogeneous models.
+ * No role differentiation. Depth via general instructions (Step-Back, recursive self-questioning).
  */
 export function buildWorkerMessages(
   ctx: SharedContext,
   instructions?: string,
   roundInfo?: RoundInfo,
-  workerIndex?: number,
+  _workerIndex?: number,
 ): ChatMessage[] {
-  const userParts: string[] = [`## Task\n${ctx.task}`];
-
-  if (roundInfo) {
-    const budget = `## Round Budget\nRound ${roundInfo.current} of ${roundInfo.max}`;
-    userParts.push(
-      roundInfo.current === roundInfo.max
-        ? `${budget}\n⚠️ This is the FINAL round.`
-        : budget,
-    );
-  }
-
   const nature = ctx.taskNature ?? "critique";
-  const idx = workerIndex ?? 0;
-  const roleConfig = WORKER_ROLES[idx % WORKER_ROLES.length]!;
+  const systemContent = buildSystemPrompt(
+    "Think thoroughly. Identify the underlying principles before answering.",
+    nature, ctx.domain, instructions,
+  );
 
-  let systemContent: string;
-  if (instructions) {
-    const rolePrompt = nature === "artifact"
-      ? roleConfig.artifactPrompt
-      : roleConfig.critiquePrompt;
-    systemContent = `<host-instructions>${instructions}</host-instructions>\n\n${rolePrompt}`;
-  } else {
-    systemContent = nature === "artifact"
-      ? roleConfig.artifactPrompt
-      : roleConfig.critiquePrompt;
+  const userParts: string[] = [];
+
+  // Round strategy (CreativeDC: diverge R1, converge final)
+  if (roundInfo && roundInfo.current === 1 && roundInfo.max > 1) {
+    userParts.push("Explore broadly. Do not converge prematurely.");
   }
+  if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
+    userParts.push("This is the final round. Commit to your strongest position.");
+  }
+
+  // Task at end (Lost-in-the-Middle)
+  userParts.push(`## Task\n${ctx.task}`);
 
   return [
     { role: "system", content: systemContent },
@@ -248,8 +190,9 @@ export function buildWorkerMessages(
 /**
  * Build messages for a worker in debate mode (round 2+).
  *
- * Full-sharing: workers see ALL other workers' raw responses from the previous round,
- * labeled by role (not model name) to prevent sycophancy bias.
+ * Cold join auto-detected: if workerIndex has no response in last round,
+ * full transcript is shown instead of last-round-only digests.
+ * Other positions presented in 3rd person (sycophancy reduction).
  */
 export function buildDebateWorkerMessages(
   ctx: SharedContext,
@@ -257,158 +200,78 @@ export function buildDebateWorkerMessages(
   roundInfo?: RoundInfo,
   workerIndex?: number,
 ): ChatMessage[] {
-  const userParts: string[] = [`## Task\n${ctx.task}`];
+  const nature = ctx.taskNature ?? "critique";
+
+  // System: same depth instructions + debate-specific rules
+  const systemParts: string[] = [];
+
+  if (instructions) {
+    systemParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  }
+
+  systemParts.push(`<role>Think thoroughly. You are seeing other analysts' positions.</role>`);
+
+  const hint = getDomainHint(ctx.domain);
+  if (hint) {
+    systemParts.push(`<domain>${hint}</domain>`);
+  }
+
+  systemParts.push(
+    `<rules>\n` +
+    `- If you change position, state exactly what changed your mind.\n` +
+    `- If you maintain your position, state why the challenge does not apply.\n` +
+    `</rules>`,
+  );
+
+  systemParts.push(nature === "artifact" ? DEPTH_INSTRUCTIONS_ARTIFACT : DEPTH_INSTRUCTIONS_CRITIQUE);
+
+  // User: context + task at end
+  const userParts: string[] = [];
 
   const lastRound = ctx.rounds[ctx.rounds.length - 1];
 
-  // Full-sharing: show all other workers' responses (labeled by role, not model).
-  // Filter by workerIndex (positional identity) to correctly handle 4+ worker teams
-  // where roles collide (index 0 and 3 are both "advocate").
-  if (lastRound && lastRound.responses.length > 0) {
-    const others = lastRound.responses
-      .filter((r) => workerIndex == null || r.workerIndex !== workerIndex)
-      .map((r) => `<worker role="${r.role ?? "worker"}">\n${escapeXmlContent(extractDebateDigest(r.content))}\n</worker>`)
-      .join("\n\n");
-    if (others) {
-      userParts.push(`## Other Workers' Positions\n${others}`);
-    }
-  }
+  // Auto-detect cold join: check if this worker has a response in the last round
+  const ownPrevious = (workerIndex != null && lastRound)
+    ? lastRound.responses.find((r) => r.workerIndex === workerIndex)
+    : undefined;
 
-  // Include this worker's own previous response for identity continuity
-  if (workerIndex != null && lastRound) {
-    const ownResponse = lastRound.responses.find((r) => r.workerIndex === workerIndex);
-    if (ownResponse) {
-      userParts.push(`## Your Previous Response\n${ownResponse.content}`);
-    }
-  }
-
-  if (roundInfo) {
-    const budget = `## Round Budget\nRound ${roundInfo.current} of ${roundInfo.max}`;
-    if (roundInfo.current === roundInfo.max) {
-      userParts.push(`${budget}\n⚠️ This is the FINAL round. State your final position clearly.`);
-    } else {
-      userParts.push(budget);
-    }
-  }
-
-  const idx = workerIndex ?? 0;
-  const roleConfig = WORKER_ROLES[idx % WORKER_ROLES.length]!;
-  const nature = ctx.taskNature ?? "critique";
-
-  const debateInstructions = instructions
-    ? `<host-instructions>${instructions}</host-instructions>\n\n`
-    : "";
-
-  const debateContext =
-    `${debateInstructions}` +
-    `<role>You are a ${roleConfig.role} debater in a structured multi-model deliberation.</role>\n\n` +
-    `<rules>\n` +
-    `- You can now see all other workers' full responses directly.\n` +
-    `- Before rebutting, restate each criticism in its strongest form.\n` +
-    `- Concede where others are stronger — but ONLY when presented with new evidence or a logical flaw in your reasoning.\n` +
-    `- Do NOT agree merely to be polite or to reach consensus. Disagreement backed by evidence is more valuable than premature agreement.\n` +
-    `- If no new evidence was presented against your position, maintain it and explain why the criticism does not change your conclusion.\n` +
-    `- If you change position, explain exactly what new evidence or argument caused the change.\n` +
-    `</rules>`;
-
-  const outputStructure = nature === "artifact"
-    ? "\n\nYour response MUST be at least 200 characters."
-    : `\n\n<output-structure>
-Structure your response. Min 200 characters, max 600 words.
-<response>
-  <position>[Core claim, 1-2 sentences]</position>
-  <evidence>[Key evidence, max 3 points]</evidence>
-  <concerns>[Risks or counterarguments]</concerns>
-  <certainty>
-    <verifiable_claims>[Claims that can be fact-checked]</verifiable_claims>
-    <assumptions>[Unstated assumptions your analysis depends on]</assumptions>
-    <uncertainty>[What you're least sure about and why]</uncertainty>
-  </certainty>
-</response>
-</output-structure>`;
-
-  return [
-    { role: "system", content: debateContext + outputStructure },
-    { role: "user", content: userParts.join("\n\n") },
-  ];
-}
-
-// -- Cold Join (Replacement Worker in Debate R2+) --
-
-/**
- * Build messages for a replacement worker joining a debate mid-round.
- *
- * Unlike buildDebateWorkerMessages, this shows the FULL debate transcript
- * (all rounds, all workers) instead of just the last round's positions.
- * No "Your Previous Response" section — the replacement has no prior participation.
- */
-export function buildColdJoinMessages(
-  ctx: SharedContext,
-  instructions?: string,
-  roundInfo?: RoundInfo,
-  workerIndex?: number,
-): ChatMessage[] {
-  const userParts: string[] = [`## Task\n${ctx.task}`];
-
-  // Full debate transcript — all rounds, all workers
-  if (ctx.rounds.length > 0) {
-    const transcriptParts: string[] = [];
-    for (const round of ctx.rounds) {
-      const header = `### Round ${round.number}`;
-      const workers = round.responses
-        .map((r) => `<worker role="${r.role ?? "worker"}">\n${escapeXmlContent(extractDebateDigest(r.content))}\n</worker>`)
+  if (ownPrevious) {
+    // Normal debate: show last round digests (others) + own previous
+    if (lastRound && lastRound.responses.length > 0) {
+      const others = lastRound.responses
+        .filter((r) => workerIndex == null || r.workerIndex !== workerIndex)
+        .map((r) => `One analyst argues: ${escapeXmlContent(extractDebateDigest(r.content))}`)
         .join("\n\n");
-      transcriptParts.push(`${header}\n${workers}`);
+      if (others) {
+        userParts.push(`## Other Positions\n${others}`);
+      }
     }
-    userParts.push(`## Full Debate Transcript\n${transcriptParts.join("\n\n")}`);
+    userParts.push(`## Your Previous Response\n${ownPrevious.content}`);
+  } else {
+    // Cold join: show full transcript (worker has no prior participation)
+    if (ctx.rounds.length > 0) {
+      const transcriptParts: string[] = [];
+      for (const round of ctx.rounds) {
+        const header = `### Round ${round.number}`;
+        const workers = round.responses
+          .map((r) => `One analyst argues: ${escapeXmlContent(extractDebateDigest(r.content))}`)
+          .join("\n\n");
+        transcriptParts.push(`${header}\n${workers}`);
+      }
+      userParts.push(`## Debate So Far\n${transcriptParts.join("\n\n")}`);
+    }
   }
 
-  if (roundInfo) {
-    const budget = `## Round Budget\nRound ${roundInfo.current} of ${roundInfo.max}`;
-    if (roundInfo.current === roundInfo.max) {
-      userParts.push(`${budget}\n⚠️ This is the FINAL round. State your position clearly.`);
-    } else {
-      userParts.push(budget);
-    }
+  // Round strategy
+  if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
+    userParts.push("This is the final round. Commit to your strongest position.");
   }
 
-  const idx = workerIndex ?? 0;
-  const roleConfig = WORKER_ROLES[idx % WORKER_ROLES.length]!;
-  const nature = ctx.taskNature ?? "critique";
-
-  const coldJoinInstructions = instructions
-    ? `<host-instructions>${instructions}</host-instructions>\n\n`
-    : "";
-
-  const coldJoinContext =
-    `${coldJoinInstructions}` +
-    `<role>You are a ${roleConfig.role} joining an ongoing multi-round debate as a new participant.</role>\n\n` +
-    `<rules>\n` +
-    `- Read the full debate transcript carefully before responding.\n` +
-    `- You have no prior position to defend — this is your advantage.\n` +
-    `- Identify what ALL existing participants missed or got wrong.\n` +
-    `- Bring fresh perspective: challenge consensus, surface overlooked angles.\n` +
-    `- If you agree with an existing position, add NEW evidence or reasoning not yet presented.\n` +
-    `</rules>`;
-
-  const outputStructure = nature === "artifact"
-    ? "\n\nYour response MUST be at least 200 characters."
-    : `\n\n<output-structure>
-Structure your response. Min 200 characters, max 600 words.
-<response>
-  <position>[Core claim, 1-2 sentences]</position>
-  <evidence>[Key evidence, max 3 points]</evidence>
-  <concerns>[Risks or counterarguments]</concerns>
-  <certainty>
-    <verifiable_claims>[Claims that can be fact-checked]</verifiable_claims>
-    <assumptions>[Unstated assumptions your analysis depends on]</assumptions>
-    <uncertainty>[What you're least sure about and why]</uncertainty>
-  </certainty>
-</response>
-</output-structure>`;
+  // Task at end
+  userParts.push(`## Task\n${ctx.task}`);
 
   return [
-    { role: "system", content: coldJoinContext + outputStructure },
+    { role: "system", content: systemParts.join("\n\n") },
     { role: "user", content: userParts.join("\n\n") },
   ];
 }
@@ -417,34 +280,25 @@ Structure your response. Min 200 characters, max 600 words.
 
 /**
  * Build messages for an acceptance round worker.
- * The worker verifies whether the host's synthesis accurately represents
- * their original position and addresses key concerns.
+ * Acceptance KEEPS structured XML output — host needs to parse verdict.
  */
 export function buildAcceptanceMessages(
   synthesis: string,
   originalPosition: string,
   task: string,
 ): ChatMessage[] {
-  const system = `<role>You are an adversarial reviewer. Your job is to find ways the synthesis weakens, distorts, or omits your original position.</role>
-
-<rules>
-- Actively search for at least one way the synthesis misrepresents or weakens your position.
-- Check: were your key claims softened, omitted, or attributed incorrectly?
-- Check: were critical concerns you raised left unaddressed?
-- If you find substantive misrepresentation, reject. If you find minor issues that don't change the core meaning, mark as partial.
-- Accept ONLY if you genuinely cannot find any distortion after thorough examination.
-</rules>
+  const system = `<role>You are reviewing whether this synthesis accurately represents your position.</role>
 
 <output-format>
 Respond with ONLY the following XML structure:
 <acceptance>
   <verdict>accept, partial, or reject</verdict>
-  <misrepresented>What was distorted, softened, or misattributed from your position. "None." if accept.</misrepresented>
-  <unresolved>Critical issues from your position that were ignored or insufficiently addressed. "None." if accept.</unresolved>
+  <misrepresented>What was distorted. "None." if accept.</misrepresented>
+  <unresolved>Critical issues ignored. "None." if accept.</unresolved>
 </acceptance>
 </output-format>`;
 
-  const user = `## Task\n${task}\n\n## Your Original Position\n${originalPosition}\n\n## Host Synthesis\n${synthesis}`;
+  const user = `## Your Original Position\n${originalPosition}\n\n## Synthesis\n${synthesis}\n\n## Task\n${task}`;
 
   return [
     { role: "system", content: system },

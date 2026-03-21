@@ -238,6 +238,550 @@
         "degenerate": 0
       },
       "total": 1
+    },
+    "anthropic/claude-opus-4.6:ARCHITECTURE:TRADEOFF_ANALYSIS": {
+      "model_id": "anthropic/claude-opus-4.6",
+      "domain": "ARCHITECTURE",
+      "task_type": "TRADEOFF_ANALYSIS",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 11,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 11,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 11,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 10,
+          "beta": 2
+        },
+        "internally_consistent": {
+          "alpha": 11,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 10
+    },
+    "xai/grok-4:ARCHITECTURE:TRADEOFF_ANALYSIS": {
+      "model_id": "xai/grok-4",
+      "domain": "ARCHITECTURE",
+      "task_type": "TRADEOFF_ANALYSIS",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 3,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 2
+    },
+    "xai/grok-code-fast-1:ARCHITECTURE:TRADEOFF_ANALYSIS": {
+      "model_id": "xai/grok-code-fast-1",
+      "domain": "ARCHITECTURE",
+      "task_type": "TRADEOFF_ANALYSIS",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 2,
+          "beta": 2
+        },
+        "addresses_task": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 2,
+          "beta": 2
+        },
+        "novel_perspective": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 2,
+          "beta": 2
+        }
+      },
+      "failure_counts": {
+        "hallucination": 1,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 2
+    },
+    "anthropic/claude-opus-4.6:IDEATION:BRAINSTORM": {
+      "model_id": "anthropic/claude-opus-4.6",
+      "domain": "IDEATION",
+      "task_type": "BRAINSTORM",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 5,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 5,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 5,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 5,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 5,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 4
+    },
+    "xai/grok-4-1-fast-non-reasoning:IDEATION:BRAINSTORM": {
+      "model_id": "xai/grok-4-1-fast-non-reasoning",
+      "domain": "IDEATION",
+      "task_type": "BRAINSTORM",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 2,
+          "beta": 2
+        },
+        "novel_perspective": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 3,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 2
+    },
+    "xai/grok-4:IDEATION:BRAINSTORM": {
+      "model_id": "xai/grok-4",
+      "domain": "IDEATION",
+      "task_type": "BRAINSTORM",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 4,
+          "beta": 2
+        },
+        "addresses_task": {
+          "alpha": 5,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 4,
+          "beta": 2
+        },
+        "novel_perspective": {
+          "alpha": 4,
+          "beta": 2
+        },
+        "internally_consistent": {
+          "alpha": 5,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 4
+    },
+    "xai/grok-4-1-fast-reasoning:IDEATION:BRAINSTORM": {
+      "model_id": "xai/grok-4-1-fast-reasoning",
+      "domain": "IDEATION",
+      "task_type": "BRAINSTORM",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 2,
+          "beta": 2
+        },
+        "internally_consistent": {
+          "alpha": 3,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 2
+    },
+    "anthropic/claude-opus-4.6:ARCHITECTURE:SYSTEM_DESIGN": {
+      "model_id": "anthropic/claude-opus-4.6",
+      "domain": "ARCHITECTURE",
+      "task_type": "SYSTEM_DESIGN",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 2,
+          "beta": 2
+        },
+        "addresses_task": {
+          "alpha": 2,
+          "beta": 2
+        },
+        "provides_evidence": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 3,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 2
+    },
+    "local/ai/deepseek-r1-distill-llama:ARCHITECTURE:SYSTEM_DESIGN": {
+      "model_id": "local/ai/deepseek-r1-distill-llama",
+      "domain": "ARCHITECTURE",
+      "task_type": "SYSTEM_DESIGN",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "addresses_task": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "provides_evidence": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "novel_perspective": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "internally_consistent": {
+          "alpha": 1,
+          "beta": 2
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 1
+      },
+      "total": 1
+    },
+    "local/ai/qwen3-coder:ARCHITECTURE:SYSTEM_DESIGN": {
+      "model_id": "local/ai/qwen3-coder",
+      "domain": "ARCHITECTURE",
+      "task_type": "SYSTEM_DESIGN",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "addresses_task": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "provides_evidence": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "novel_perspective": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "internally_consistent": {
+          "alpha": 1,
+          "beta": 2
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 1
+      },
+      "total": 1
+    },
+    "anthropic/claude-opus-4.6:REVIEW:CRITIQUE": {
+      "model_id": "anthropic/claude-opus-4.6",
+      "domain": "REVIEW",
+      "task_type": "CRITIQUE",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 3,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 3,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 2
+    },
+    "xai/grok-code-fast-1:COMMUNICATION:QUESTION_ANSWER": {
+      "model_id": "xai/grok-code-fast-1",
+      "domain": "COMMUNICATION",
+      "task_type": "QUESTION_ANSWER",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "provides_evidence": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "internally_consistent": {
+          "alpha": 2,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 1
+    },
+    "xai/grok-4-1-fast-non-reasoning:COMMUNICATION:QUESTION_ANSWER": {
+      "model_id": "xai/grok-4-1-fast-non-reasoning",
+      "domain": "COMMUNICATION",
+      "task_type": "QUESTION_ANSWER",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "addresses_task": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "provides_evidence": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "novel_perspective": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "internally_consistent": {
+          "alpha": 1,
+          "beta": 2
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 1,
+        "degenerate": 0
+      },
+      "total": 1
+    },
+    "xai/grok-4:COMMUNICATION:QUESTION_ANSWER": {
+      "model_id": "xai/grok-4",
+      "domain": "COMMUNICATION",
+      "task_type": "QUESTION_ANSWER",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "addresses_task": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "provides_evidence": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "novel_perspective": {
+          "alpha": 1,
+          "beta": 2
+        },
+        "internally_consistent": {
+          "alpha": 1,
+          "beta": 2
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 1
+      },
+      "total": 1
+    },
+    "anthropic/claude-opus-4.6:REVIEW:CODE_REVIEW": {
+      "model_id": "anthropic/claude-opus-4.6",
+      "domain": "REVIEW",
+      "task_type": "CODE_REVIEW",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 2,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 1
+    },
+    "anthropic/claude-opus-4.6:ARCHITECTURE:RISK_ASSESSMENT": {
+      "model_id": "anthropic/claude-opus-4.6",
+      "domain": "ARCHITECTURE",
+      "task_type": "RISK_ASSESSMENT",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 2,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 1
     }
   }
 }
