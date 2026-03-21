@@ -62,17 +62,21 @@ export function getDomainHint(domain?: string): string {
 
 // -- Core Prompt Fragments --
 
-const DEPTH_INSTRUCTIONS_CRITIQUE = `Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
+const DEPTH_INSTRUCTIONS_CRITIQUE = `Before answering, rephrase the question to surface its hidden assumptions.
 
-Question your own conclusions. Where you are most uncertain, explore what happens if you're wrong. Keep questioning until your position is stable.
+Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
+
+Question your own conclusions repeatedly. After each challenge, ask: what deeper assumption does this reveal? Assume your final answer fails in practice — why did it fail? Revise if the failure scenario is plausible.
 
 Before finishing, verify your key claims.
 
 End with a one-line summary of your position.`;
 
-const DEPTH_INSTRUCTIONS_ARTIFACT = `Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
+const DEPTH_INSTRUCTIONS_ARTIFACT = `Before starting, rephrase the task to surface its hidden assumptions and constraints.
 
-Question your own conclusions. Where you are most uncertain, explore what happens if you're wrong. Keep questioning until your position is stable.
+Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
+
+Question your own approach repeatedly. After each challenge, ask: what deeper assumption does this reveal? Assume your implementation fails in production — why did it fail? Revise if the failure scenario is plausible.
 
 Before finishing, verify your key claims.`;
 
