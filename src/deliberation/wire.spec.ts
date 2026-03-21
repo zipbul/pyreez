@@ -35,10 +35,17 @@ const mockDeliberate = mock<
 
 mock.module("./team-composer", () => ({
   composeTeam: (...args: any[]) => (mockComposeTeam as Function)(...args),
+  orderWorkersByRole: (_workers: any[], _getById: any) => _workers,
 }));
 
 mock.module("./engine", () => ({
   deliberate: (...args: any[]) => (mockDeliberate as Function)(...args),
+  createFallbackPool: () => ({
+    getNext: () => undefined,
+    markFailed: () => {},
+    isOnCooldown: () => false,
+    getEntry: () => undefined,
+  }),
 }));
 
 // Import SUT after mocks
@@ -135,25 +142,21 @@ describe("stripThinkTags", () => {
 
 describe("createChatAdapter", () => {
   it("should return ChatResult with content and token usage on success", async () => {
-    // Arrange
     const rawChat = mock(() =>
       Promise.resolve(makeChatResponse("Hello world", 30, 60)),
     );
     const adapter = createChatAdapter(rawChat);
 
-    // Act
     const result = await adapter("openai/gpt-4.1", [
       { role: "user", content: "Say hello" },
     ]);
 
-    // Assert
     expect(result.content).toBe("Hello world");
     expect(result.inputTokens).toBe(30);
     expect(result.outputTokens).toBe(60);
   });
 
   it("should throw immediately on any error without retrying", async () => {
-    // Arrange
     let callCount = 0;
     const rawChat = mock(() => {
       callCount++;
@@ -161,7 +164,6 @@ describe("createChatAdapter", () => {
     });
     const adapter = createChatAdapter(rawChat);
 
-    // Act & Assert
     await expect(
       adapter("openai/gpt-4.1", [{ role: "user", content: "test" }]),
     ).rejects.toThrow("Rate limited");
@@ -169,7 +171,6 @@ describe("createChatAdapter", () => {
   });
 
   it("should strip think tags from response content", async () => {
-    // Arrange
     const rawChat = mock(() =>
       Promise.resolve(
         makeChatResponse("<think>reasoning</think>Clean answer", 10, 20),
@@ -177,30 +178,25 @@ describe("createChatAdapter", () => {
     );
     const adapter = createChatAdapter(rawChat);
 
-    // Act
     const result = await adapter("deepseek/deepseek-r1", [
       { role: "user", content: "test" },
     ]);
 
-    // Assert
     expect(result.content).toBe("Clean answer");
   });
 
   it("should forward GenerationParams to rawChatFn when provided", async () => {
-    // Arrange
     const rawChat = mock((_req: any) =>
       Promise.resolve(makeChatResponse("ok", 10, 20)),
     );
     const adapter = createChatAdapter(rawChat);
 
-    // Act
     await adapter(
       "openai/gpt-4.1",
       [{ role: "user", content: "test" }],
       { temperature: 0.5, max_tokens: 1024, top_p: 0.9 },
     );
 
-    // Assert
     expect(rawChat).toHaveBeenCalledTimes(1);
     const req = rawChat.mock.calls[0]![0] as any;
     expect(req.temperature).toBe(0.5);
@@ -209,7 +205,6 @@ describe("createChatAdapter", () => {
   });
 
   it("should set truncated=true when finish_reason is 'length'", async () => {
-    // Arrange
     const rawChat = mock(() =>
       Promise.resolve({
         ...makeChatResponse("partial content", 30, 60),
@@ -224,43 +219,35 @@ describe("createChatAdapter", () => {
     );
     const adapter = createChatAdapter(rawChat);
 
-    // Act
     const result = await adapter("openai/gpt-4.1", [
       { role: "user", content: "Generate a long essay" },
     ]);
 
-    // Assert
     expect(result.truncated).toBe(true);
     expect(result.content).toBe("partial content");
   });
 
   it("should not set truncated when finish_reason is 'stop'", async () => {
-    // Arrange
     const rawChat = mock(() =>
       Promise.resolve(makeChatResponse("complete content", 30, 60)),
     );
     const adapter = createChatAdapter(rawChat);
 
-    // Act
     const result = await adapter("openai/gpt-4.1", [
       { role: "user", content: "Say hello" },
     ]);
 
-    // Assert
     expect(result.truncated).toBeUndefined();
   });
 
   it("should NOT include generation params keys when params is undefined", async () => {
-    // Arrange
     const rawChat = mock((_req: any) =>
       Promise.resolve(makeChatResponse("ok", 10, 20)),
     );
     const adapter = createChatAdapter(rawChat);
 
-    // Act
     await adapter("openai/gpt-4.1", [{ role: "user", content: "test" }]);
 
-    // Assert
     const req = rawChat.mock.calls[0]![0] as any;
     expect(req.temperature).toBeUndefined();
     expect(req.max_tokens).toBeUndefined();
@@ -298,41 +285,34 @@ describe("createDeliberateFn", () => {
     };
   }
 
-  it("should compose team from registry available models", async () => {
-    // Arrange
+  it("should compose team from specified models", async () => {
     mockComposeTeam.mockImplementation((_opts: any, _deps: any) => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
     const deps = makeWireDeps();
     const deliberateFn = createDeliberateFn(deps);
 
-    // Act
-    await deliberateFn({ task: "Build a feature" });
+    await deliberateFn({ task: "Build a feature", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"] });
 
-    // Assert
     expect(mockComposeTeam).toHaveBeenCalledTimes(1);
-    const [composeOpts, composeDeps] = mockComposeTeam.mock.calls[0]!;
+    const [composeOpts] = mockComposeTeam.mock.calls[0]!;
     expect(composeOpts.task).toBe("Build a feature");
-    expect(composeOpts.modelIds).toEqual(STUB_MODELS.map((m) => m.id));
-    expect(typeof composeDeps.getModels).toBe("function");
-    expect(typeof composeDeps.getById).toBe("function");
+    expect(composeOpts.modelIds).toEqual(["openai/gpt-4.1", "deepseek/deepseek-r1"]);
   });
 
   it("should pass input correctly to deliberation engine", async () => {
-    // Arrange
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
     const deps = makeWireDeps();
     const deliberateFn = createDeliberateFn(deps);
     const input: DeliberateInput = {
       task: "Review this code",
+      models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
       workerInstructions: "Focus on security",
       maxRounds: 2,
     };
 
-    // Act
     await deliberateFn(input);
 
-    // Assert
     expect(mockDeliberate).toHaveBeenCalledTimes(1);
     const [team, passedInput, engineDeps, config] = mockDeliberate.mock.calls[0]!;
     expect(team).toEqual(STUB_TEAM);
@@ -343,16 +323,13 @@ describe("createDeliberateFn", () => {
   });
 
   it("should return deliberation output", async () => {
-    // Arrange
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
     const deps = makeWireDeps();
     const deliberateFn = createDeliberateFn(deps);
 
-    // Act
-    const result = await deliberateFn({ task: "Build something" });
+    const result = await deliberateFn({ task: "Build something", models: ["openai/gpt-4.1"] });
 
-    // Assert
     expect(result.roundsExecuted).toBe(1);
     expect(result.totalTokens).toEqual({ input: 100, output: 200 });
     expect(result.totalLLMCalls).toBe(2);
@@ -363,7 +340,6 @@ describe("createDeliberateFn", () => {
   });
 
   it("should auto-save to store when store is provided", async () => {
-    // Arrange
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
     const mockSave = mock((_record: any) => Promise.resolve());
@@ -371,13 +347,12 @@ describe("createDeliberateFn", () => {
     const deps = makeWireDeps({ store });
     const deliberateFn = createDeliberateFn(deps);
 
-    // Act
     await deliberateFn({
       task: "Test task",
+      models: ["openai/gpt-4.1"],
       workerInstructions: "worker instructions",
     });
 
-    // Assert
     expect(mockSave).toHaveBeenCalledTimes(1);
     const savedRecord = mockSave.mock.calls[0]![0] as any;
     expect(savedRecord.task).toBe("Test task");
@@ -399,21 +374,90 @@ describe("createDeliberateFn", () => {
     const deps = makeWireDeps();
     const deliberateFn = createDeliberateFn(deps);
 
-    await deliberateFn({ task: "Analyze this code" });
+    await deliberateFn({ task: "Analyze this code", models: ["openai/gpt-4.1"] });
 
     const [, , , config] = mockDeliberate.mock.calls[0]!;
     expect(config.workerGenParams.max_tokens).toBe(2048);
   });
 
-  it("should set artifact worker max_tokens to 2048", async () => {
-    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+  it("should duplicate models round-robin when count > models.length", async () => {
+    mockComposeTeam.mockImplementation((opts: any) => ({
+      workers: opts.modelIds.map((id: string) => ({ model: id, role: "worker" })),
+    }));
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
     const deps = makeWireDeps();
     const deliberateFn = createDeliberateFn(deps);
 
-    await deliberateFn({ task: "Write code", taskNature: "artifact" });
+    await deliberateFn({ task: "Debate this", models: ["openai/gpt-4.1"], count: 3 });
 
-    const [, , , config] = mockDeliberate.mock.calls[0]!;
-    expect(config.workerGenParams.max_tokens).toBe(2048);
+    const [composeOpts] = mockComposeTeam.mock.calls[0]!;
+    expect(composeOpts.modelIds).toEqual(["openai/gpt-4.1", "openai/gpt-4.1", "openai/gpt-4.1"]);
+  });
+
+  it("should cap count at 7", async () => {
+    mockComposeTeam.mockImplementation((opts: any) => ({
+      workers: opts.modelIds.map((id: string) => ({ model: id, role: "worker" })),
+    }));
+    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({ task: "Debate", models: ["openai/gpt-4.1"], count: 20 });
+
+    const [composeOpts] = mockComposeTeam.mock.calls[0]!;
+    expect(composeOpts.modelIds.length).toBe(7);
+  });
+
+  it("should use count models from front when count < models.length", async () => {
+    mockComposeTeam.mockImplementation((opts: any) => ({
+      workers: opts.modelIds.map((id: string) => ({ model: id, role: "worker" })),
+    }));
+    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({
+      task: "Debate",
+      models: ["openai/gpt-4.1", "deepseek/deepseek-r1", "anthropic/claude-sonnet-4.6"],
+      count: 2,
+    });
+
+    const [composeOpts] = mockComposeTeam.mock.calls[0]!;
+    expect(composeOpts.modelIds).toEqual(["openai/gpt-4.1", "deepseek/deepseek-r1"]);
+  });
+
+  it("should throw with available models list for unknown model IDs", async () => {
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await expect(
+      deliberateFn({ task: "task", models: ["nonexistent/model"] }),
+    ).rejects.toThrow(/Unknown model.*Available/);
+  });
+
+  it("should default count to models.length when not specified", async () => {
+    mockComposeTeam.mockImplementation((opts: any) => ({
+      workers: opts.modelIds.map((id: string) => ({ model: id, role: "worker" })),
+    }));
+    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({
+      task: "task",
+      models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
+    });
+
+    const [composeOpts] = mockComposeTeam.mock.calls[0]!;
+    expect(composeOpts.modelIds).toEqual(["openai/gpt-4.1", "deepseek/deepseek-r1"]);
+  });
+
+  it("should throw when models is empty array", async () => {
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await expect(
+      deliberateFn({ task: "task", models: [] }),
+    ).rejects.toThrow("models is required");
   });
 });

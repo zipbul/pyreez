@@ -91,6 +91,7 @@ const MODEL_C: ModelInfo = {
 };
 
 const FIXTURE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
+const FIXTURE_MODEL_IDS = FIXTURE_MODELS.map((m) => m.id);
 
 function fixtureRegistry() {
   return {
@@ -130,6 +131,7 @@ describe("Deliberation E2E", () => {
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
     const input: DeliberateInput = {
       task: "Write a Hello World function",
+      models: FIXTURE_MODEL_IDS,
     };
 
     // Act
@@ -154,6 +156,7 @@ describe("Deliberation E2E", () => {
     // Act
     const result = await fn({
       task: "Implement error handler",
+      models: FIXTURE_MODEL_IDS,
       maxRounds: 3,
     });
 
@@ -175,6 +178,7 @@ describe("Deliberation E2E", () => {
     // Act
     const result = await fn({
       task: "Hard problem",
+      models: FIXTURE_MODEL_IDS,
       maxRounds: 3,
     });
 
@@ -199,6 +203,7 @@ describe("Deliberation E2E", () => {
     // Act
     await fn({
       task: "Instruction test",
+      models: FIXTURE_MODEL_IDS,
       workerInstructions: "Use TypeScript strictly",
     });
 
@@ -228,6 +233,7 @@ describe("Deliberation E2E", () => {
     // Act
     const result = await fn({
       task: "Partial failure test",
+      models: FIXTURE_MODEL_IDS,
     });
 
     // Assert — deliberation should still complete with partial worker responses
@@ -244,7 +250,7 @@ describe("Deliberation E2E", () => {
 
     // Act & Assert
     expect(
-      fn({ task: "" }),
+      fn({ task: "", models: FIXTURE_MODEL_IDS }),
     ).rejects.toThrow("Task description must be a non-empty string");
   });
 
@@ -262,6 +268,7 @@ describe("Deliberation E2E", () => {
     // Act
     const result = await fn({
       task: "Output field test",
+      models: FIXTURE_MODEL_IDS,
     });
 
     // Assert — every field in DeliberateOutput
@@ -292,8 +299,8 @@ describe("Deliberation E2E", () => {
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
 
     // Act
-    const result1 = await fn({ task: "Call 1" });
-    const result2 = await fn({ task: "Call 2" });
+    const result1 = await fn({ task: "Call 1", models: FIXTURE_MODEL_IDS });
+    const result2 = await fn({ task: "Call 2", models: FIXTURE_MODEL_IDS });
 
     // Assert — different tasks, different contexts
     // Round counts are independent
@@ -315,6 +322,7 @@ describe("Deliberation E2E", () => {
     // Act
     const result = await fn({
       task: "Token accumulation test",
+      models: FIXTURE_MODEL_IDS,
       maxRounds: 3,
     });
 

@@ -34,6 +34,7 @@ function makeTeam(workerCount = 2): TeamComposition {
 function makeInput(overrides?: Partial<DeliberateInput>): DeliberateInput {
   return {
     task: "Write a function",
+    models: ["test/model-a", "test/model-b"],
     ...overrides,
   };
 }

@@ -4,7 +4,6 @@ description: ALWAYS invoke this skill for any question involving design, tradeof
 allowed-tools:
   - mcp__pyreez__pyreez_deliberate
   - mcp__pyreez__pyreez_scores
-  - mcp__pyreez__pyreez_route
   - mcp__pyreez__pyreez_acceptance
   - mcp__pyreez__pyreez_feedback
   - WebSearch
@@ -22,23 +21,31 @@ The reason this works: workers are diverse models from different providers with 
 <checklist>
 For `$ARGUMENTS` or when the user provides a topic, copy this checklist and check off each item as you complete it:
 
-- [ ] deliberate: called pyreez_deliberate, worker responses received
+- [ ] scores: called pyreez_scores to get model information
+- [ ] deliberate: called pyreez_deliberate with chosen models, worker responses received
 - [ ] comprehend: unique_contribution, most_unexpected_claim, loss_if_removed filled for every worker
 - [ ] evaluate: every factual claim labeled [x] or [ ], creative proposals amplified
 - [ ] reflect: Uncertainty, Dismissed, Counterargument each with concrete change
 - [ ] synthesize: draft ready, not yet presented to user
 - [ ] accept: called pyreez_acceptance, all workers accepted
-- [ ] feedback: called pyreez_feedback with pairwise preferences and optional evaluations
+- [ ] feedback: called pyreez_feedback with per-model evaluations
 </checklist>
 
 <workflow>
-**deliberate**: Call `pyreez_deliberate` with `auto_route: true` and the appropriate `domain`. Use `pyreez_route` for dry-run. Use `pyreez_scores` + manual `models` when the user specifies models.
+**scores**: Call `pyreez_scores(domain, task_type)` to get available models with scores and costs. Review scored (data-backed) and unscored (world knowledge only) models.
+
+**model selection**: Based on scores, costs, and task difficulty:
+- Pick models appropriate for the task complexity
+- Set `count` for desired worker count (models are duplicated round-robin if count > models.length)
+- Include 1 unscored model from `trial_recommended` for exploration
+
+**deliberate**: Call `pyreez_deliberate(task, models, count, ...)` with chosen models.
 
 **comprehend → evaluate → reflect → synthesize**: Walk through the Metacognitive Synthesis Process below. Think thoroughly through each phase, then draft the synthesis. Do not present it to the user yet.
 
 **accept**: Call `pyreez_acceptance` with the draft synthesis. Skip only when both: (a) brainstorming/ideation with low stakes, and (b) user explicitly asked for speed. If any worker rejects, revise and re-run. Present synthesis to the user after acceptance — not before, because presenting early causes the remaining steps to be forgotten.
 
-**feedback**: Call `pyreez_feedback` with pairwise preferences. Without feedback, Bradley-Terry ratings stagnate and team selection degrades.
+**feedback**: Call `pyreez_feedback` with per-model evaluations. Without feedback, SkillCell scores stagnate and model selection degrades.
 </workflow>
 
 <protocol_selection>
@@ -99,6 +106,7 @@ Worker claims "Haiku costs $0.07/sim-day for 100 characters."
 
 <principles>
 - Workers disagree → determine which has stronger evidence. Do not split the difference. Do not present both positions as parallel options.
+- Workers disagree and evidence is comparable → do NOT silently compromise. Add an **Unresolved Disagreements** section to the synthesis listing each disagreement: the two positions, the evidence behind each, and why you could not resolve it. Omitting this section when genuine disagreements exist is a synthesis failure.
 - Workers agree → verify harder. Consensus among LLMs often means shared training bias. Do not treat agreement as confirmation.
 - Adopt strengths and improve upon them — don't repeat what workers said.
 - Add your own analysis using tools workers lack.

@@ -16,7 +16,7 @@ import type { DeliberateInput, DeliberateOutput, GenerationParams } from "./type
 import type { ChatResult, EngineDeps, EngineConfig, FallbackDeps } from "./engine";
 import { createFallbackPool } from "./engine";
 import type { DeliberationStore } from "./store-types";
-import { composeTeam, selectDiverseModels, orderWorkersByRole, thompsonSelect } from "./team-composer";
+import { composeTeam, orderWorkersByRole } from "./team-composer";
 import type { SkillCellStore } from "../model/skillcell-store";
 import type { ExternalEvaluator } from "./external-evaluator";
 import { deliberate } from "./engine";
@@ -42,7 +42,7 @@ export interface WireDeps {
   readonly store?: DeliberationStore;
   /** Shared CooldownManager (process-scoped). When omitted, a per-call instance is created. */
   readonly cooldown?: import("./cooldown").CooldownManager;
-  /** SkillCell store for Thompson Sampling model selection. */
+  /** SkillCell store for evaluator SkillCell updates. */
   readonly skillCellStore?: SkillCellStore;
   /** External evaluator for binary dimension feedback. */
   readonly externalEvaluator?: ExternalEvaluator;
@@ -104,66 +104,63 @@ export function createChatAdapter(
 
 // -- Deliberate Factory --
 
+/** Hard cap on worker count to prevent cost explosion. */
+const MAX_WORKERS = 7;
+
 /**
  * Create a fully-wired `deliberateFn` that can be passed to PyreezMcpServer.
  *
+ * Host provides models (required) and optional count.
  * Wires: composeTeam + prompt builders + engine.deliberate + chat adapter.
  */
 export function createDeliberateFn(
   deps: WireDeps,
 ): (input: DeliberateInput) => Promise<DeliberateOutput> {
   return async (input) => {
-    let team: import("./types").TeamComposition;
     const cooldown = deps.cooldown ?? createCooldownManager();
 
-    if (input.models && input.models.length >= 2) {
-      // Validate all model IDs exist in registry
-      const invalid = input.models.filter((id) => !deps.registry.getById(id));
-      if (invalid.length > 0) {
-        throw new Error(`Unknown model(s): ${invalid.join(", ")}. Check scores/models.json.`);
-      }
-      // All specified models are workers.
-      const specifiedModels = input.models
-        .map((id) => deps.registry.getById(id)!)
-        .filter(Boolean);
-      team = composeTeam(
-        { task: input.task, modelIds: [...input.models] },
-        {
-          getModels: () => specifiedModels,
-          getById: (id) => deps.registry.getById(id),
-        },
-      );
-    } else {
-      // Auto compose from available models, capped to prevent cost explosion.
-      // Filter out models on cooldown (dead providers from previous calls in this session).
-      const available = deps.registry.getAvailable().filter((m) => !cooldown.isOnCooldown(m.id));
-      const MAX_AUTO_TEAM = input.taskNature === "artifact" ? 3 : 5;
-
-      // Thompson Sampling if SkillCell store is available and domain is known
-      let selected = (deps.skillCellStore && input.domain)
-        ? thompsonSelect(input.domain, input.taskType ?? "QUESTION_ANSWER", available, MAX_AUTO_TEAM, deps.skillCellStore)
-        : selectDiverseModels(available, MAX_AUTO_TEAM);
-
-      // Fallback: if TS excluded too many and returned fewer than 2, use selectDiverseModels
-      if (selected.length < 2 && available.length >= 2) {
-        selected = selectDiverseModels(available, MAX_AUTO_TEAM);
-      }
-      const modelIds = selected.map((m) => m.id);
-      team = composeTeam(
-        { task: input.task, modelIds },
-        {
-          getModels: () => selected,
-          getById: (id) => deps.registry.getById(id),
-        },
+    // 1. Validate models array non-empty and all IDs exist in registry
+    if (!input.models.length) {
+      throw new Error("models is required (min 1)");
+    }
+    const invalid = input.models.filter((id) => !deps.registry.getById(id));
+    if (invalid.length > 0) {
+      const available = deps.registry.getAvailable().map((m) => m.id);
+      throw new Error(
+        `Unknown model(s): ${invalid.join(", ")}. Available: ${available.join(", ")}`,
       );
     }
 
-    // 2.5. Reorder workers by capability → role fit
-    //       advocate(idx 0)=REASONING, critic(idx 1)=ANALYSIS, wildcard(idx 2)=CREATIVITY
+    // 2. Determine effective count: clamp to [1, MAX_WORKERS]
+    const effectiveCount = Math.min(
+      Math.max(input.count ?? input.models.length, 1),
+      MAX_WORKERS,
+    );
+
+    // 3. Build model list: take first `effectiveCount` from models,
+    //    round-robin duplicate if count > models.length
+    const modelIds: string[] = [];
+    for (let i = 0; i < effectiveCount; i++) {
+      modelIds.push(input.models[i % input.models.length]!);
+    }
+
+    // 4. Compose team
+    const specifiedModels = modelIds
+      .map((id) => deps.registry.getById(id)!)
+      .filter(Boolean);
+    let team = composeTeam(
+      { task: input.task, modelIds },
+      {
+        getModels: () => specifiedModels,
+        getById: (id) => deps.registry.getById(id),
+      },
+    );
+
+    // 5. Reorder workers by capability → role fit
     const orderedWorkers = orderWorkersByRole(team.workers, (id) => deps.registry.getById(id));
     team = { workers: orderedWorkers };
 
-    // 3. Assemble engine deps — deps.chat already returns ChatResult
+    // 6. Assemble engine deps
     const engineDeps: EngineDeps = {
       chat: deps.chat,
       buildWorkerMessages,
@@ -171,10 +168,9 @@ export function createDeliberateFn(
       buildColdJoinMessages,
     };
 
-    // 4. Build engine config
+    // 7. Build engine config
     const isDebate = input.protocol === "debate";
-    const effectiveMaxRounds = input.maxRounds
-      ?? (isDebate ? 3 : 1);
+    const effectiveMaxRounds = input.maxRounds ?? (isDebate ? 3 : 1);
     const workerGenParams: GenerationParams = {
       temperature: 1.0,
       max_tokens: 2048,
@@ -185,40 +181,37 @@ export function createDeliberateFn(
       workerGenParams,
     };
 
-    // 5. Build fallback pool + replenishment (auto mode only)
-    let fallbackDeps: FallbackDeps | undefined;
-    if (!input.models) {
-      const allAvailable = deps.registry.getAvailable();
-      const pool = createFallbackPool(allAvailable, cooldown);
-      const teamModelIds = new Set(team.workers.map((w) => w.model));
+    // 8. Build fallback pool + replenishment
+    //    Fallback: cost descending (expensive = likely more capable)
+    const allAvailable = deps.registry.getAvailable();
+    const sortedByCost = [...allAvailable].sort(
+      (a, b) => b.cost.outputPer1M - a.cost.outputPer1M,
+    );
+    const pool = createFallbackPool(sortedByCost, cooldown);
+    const teamModelIds = new Set(team.workers.map((w) => w.model));
 
-      fallbackDeps = {
-        pool,
-        replenish(aliveProviders, emptySlots, respondedModels) {
-          // Select replacement models from alive providers, excluding current team + already responded
-          const candidates = allAvailable.filter(
-            (m) => aliveProviders.has(m.provider) && !teamModelIds.has(m.id)
-              && !cooldown.isOnCooldown(m.id) && !respondedModels.has(m.id),
-          );
-          if (candidates.length === 0) return [];
+    const fallbackDeps: FallbackDeps = {
+      pool,
+      replenish(aliveProviders, emptySlots, respondedModels) {
+        // Select replacement models from alive providers, cost descending
+        const candidates = sortedByCost.filter(
+          (m) => aliveProviders.has(m.provider) && !teamModelIds.has(m.id)
+            && !cooldown.isOnCooldown(m.id) && !respondedModels.has(m.id),
+        );
+        if (candidates.length === 0) return [];
 
-          // Use Thompson Sampling for replenishment selection when possible
-          const selected = (deps.skillCellStore && input.domain)
-            ? thompsonSelect(input.domain, input.taskType ?? "QUESTION_ANSWER", candidates, emptySlots, deps.skillCellStore)
-            : selectDiverseModels(candidates, emptySlots);
+        // Take top N by cost (already sorted)
+        return candidates.slice(0, emptySlots).map((m) => ({
+          model: m.id,
+          role: "worker" as const,
+        }));
+      },
+    };
 
-          return selected.map((m) => ({
-            model: m.id,
-            role: "worker" as const,
-          }));
-        },
-      };
-    }
-
-    // 6. Run deliberation
+    // 9. Run deliberation
     let result = await deliberate(team, input, engineDeps, config, fallbackDeps);
 
-    // 7. External evaluator → SkillCell update (best-effort)
+    // 10. External evaluator → SkillCell update (best-effort)
     if (deps.externalEvaluator && deps.skillCellStore && result.rounds && input.domain) {
       try {
         const lastRound = result.rounds[result.rounds.length - 1];
@@ -235,20 +228,18 @@ export function createDeliberateFn(
                 input.domain, taskType, deliberationId, teamProviders,
               );
               deps.skillCellStore.update(feedback);
-            } catch (evalErr) {
-              // Per-worker evaluation failure — skip this worker, continue others
+            } catch {
               // Per-worker evaluation failure — skip this worker, continue others
             }
           }
           await deps.skillCellStore.save();
         }
-      } catch (outerEvalErr) {
-        // best-effort — do not fail deliberation
+      } catch {
         // best-effort — do not fail deliberation
       }
     }
 
-    // 8. Auto-save to store (best-effort, errors are swallowed)
+    // 11. Auto-save to store (best-effort)
     if (deps.store) {
       try {
         await deps.store.save({

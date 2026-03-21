@@ -1,10 +1,8 @@
 /**
  * PyreezMcpServer — MCP server exposing infrastructure tools.
  *
- * Tools: pyreez_deliberate, pyreez_acceptance, pyreez_feedback
+ * Tools: pyreez_scores, pyreez_deliberate, pyreez_acceptance, pyreez_feedback
  * Architecture: pyreez = Infrastructure layer, Host = Orchestrator + Synthesizer.
- *
- * Classification: host provides domain (required), task_type and complexity are auto-inferred if omitted.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -15,34 +13,12 @@ import type { ModelRegistry } from "../model/registry";
 
 import type { RunLogger } from "../report/run-logger";
 import type { DeliberateInput, DeliberateOutput } from "../deliberation/types";
-import { resolveTaskNature, shouldAutoDebate } from "../deliberation/task-nature";
+import { resolveTaskNature } from "../deliberation/task-nature";
 import { NoModelsAvailableError } from "../deliberation/team-composer";
 import { TeamDegradedError } from "../deliberation/engine";
 import { buildAcceptanceMessages } from "../deliberation/prompts";
 import type { GenerationParams } from "../deliberation/types";
-
-/** Domain → default task_type mapping. Used when host omits task_type. */
-const DOMAIN_DEFAULTS: Record<string, string> = {
-  CODING: "IMPLEMENT_FEATURE",
-  DEBUGGING: "FIX_IMPLEMENT",
-  TESTING: "UNIT_TEST_WRITE",
-  REVIEW: "CODE_REVIEW",
-  DOCUMENTATION: "API_DOC",
-  ARCHITECTURE: "SYSTEM_DESIGN",
-  PLANNING: "SCOPE_DEFINITION",
-  REQUIREMENTS: "REQUIREMENT_EXTRACTION",
-  IDEATION: "BRAINSTORM",
-  OPERATIONS: "ENVIRONMENT_SETUP",
-  RESEARCH: "TECH_RESEARCH",
-  COMMUNICATION: "QUESTION_ANSWER",
-};
-
-/** Infer complexity from task description length when host omits it. */
-function inferComplexity(task: string): "simple" | "moderate" | "complex" {
-  if (task.length < 200) return "simple";
-  if (task.length < 1000) return "moderate";
-  return "complex";
-}
+import { BINARY_DIMENSIONS, getDomainWeights } from "../axis/types";
 
 export interface PyreezMcpServerConfig {
   mcpServer: McpServer;
@@ -51,8 +27,14 @@ export interface PyreezMcpServerConfig {
   runLogger?: RunLogger;
   /** Chat function for acceptance rounds. When omitted, pyreez_acceptance is unavailable. */
   chatFn?: (model: string, messages: import("../llm/types").ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
-  /** SkillCell store for binary dimension feedback. */
+  /** SkillCell store for binary dimension feedback and scores. */
   skillCellStore?: import("../model/skillcell-store").SkillCellStore;
+  /** Filtered registry (only models with configured providers). */
+  filteredRegistry?: {
+    getAll(): import("../model/types").ModelInfo[];
+    getAvailable(): import("../model/types").ModelInfo[];
+    getById(id: string): import("../model/types").ModelInfo | undefined;
+  };
 }
 
 
@@ -76,6 +58,7 @@ export class PyreezMcpServer {
   private readonly runLogger?: RunLogger;
   private readonly chatFn?: PyreezMcpServerConfig["chatFn"];
   private readonly skillCellStore?: import("../model/skillcell-store").SkillCellStore;
+  private readonly filteredRegistry?: PyreezMcpServerConfig["filteredRegistry"];
 
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
@@ -89,11 +72,39 @@ export class PyreezMcpServer {
     this.runLogger = config.runLogger;
     this.chatFn = config.chatFn;
     this.skillCellStore = config.skillCellStore;
+    this.filteredRegistry = config.filteredRegistry;
 
     this.registerTools();
   }
 
   private registerTools(): void {
+    this.mcpServer.registerTool(
+      "pyreez_scores",
+      {
+        title: "Pyreez Scores",
+        description:
+          "Get model scores for a domain. Returns scored models (with SkillCell data) and unscored models (no data yet). Use this to choose models before calling pyreez_deliberate.",
+        inputSchema: z.object({
+          domain: z
+            .enum([
+              "IDEATION", "PLANNING", "REQUIREMENTS", "ARCHITECTURE",
+              "CODING", "TESTING", "REVIEW", "DOCUMENTATION",
+              "DEBUGGING", "OPERATIONS", "RESEARCH", "COMMUNICATION",
+            ])
+            .describe("Task domain"),
+          task_type: z
+            .string()
+            .optional()
+            .describe("Specific task type within the domain"),
+          min_score: z
+            .number()
+            .optional()
+            .describe("Minimum score filter. If no models above threshold, includes closest below."),
+        }),
+      },
+      async (args) => this.handleScores(args),
+    );
+
     this.mcpServer.registerTool(
       "pyreez_deliberate",
       {
@@ -102,6 +113,14 @@ export class PyreezMcpServer {
           "Run multi-model deliberation on a task. Workers respond independently; host synthesizes. Submit task and instructions in English.",
         inputSchema: z.object({
           task: z.string().max(100_000).describe("Task to deliberate on"),
+          models: z
+            .array(z.string())
+            .min(1)
+            .describe("Model IDs to use as workers (priority order). Use pyreez_scores to choose."),
+          count: z
+            .number()
+            .optional()
+            .describe("Number of workers (default: models.length, max: 7). If count > models.length, models are duplicated round-robin."),
           domain: z
             .enum([
               "IDEATION", "PLANNING", "REQUIREMENTS", "ARCHITECTURE",
@@ -109,36 +128,11 @@ export class PyreezMcpServer {
               "DEBUGGING", "OPERATIONS", "RESEARCH", "COMMUNICATION",
             ])
             .optional()
-            .describe("Task domain (required when auto_route=true)"),
+            .describe("Task domain for evaluation"),
           task_type: z
-            .enum([
-              "BRAINSTORM", "ANALOGY", "CONSTRAINT_DISCOVERY", "OPTION_GENERATION", "FEASIBILITY_QUICK",
-              "GOAL_DEFINITION", "SCOPE_DEFINITION", "PRIORITIZATION", "MILESTONE_PLANNING", "RISK_ASSESSMENT", "RESOURCE_ESTIMATION", "TRADEOFF_ANALYSIS",
-              "REQUIREMENT_EXTRACTION", "REQUIREMENT_STRUCTURING", "AMBIGUITY_DETECTION", "COMPLETENESS_CHECK", "CONFLICT_DETECTION", "ACCEPTANCE_CRITERIA",
-              "SYSTEM_DESIGN", "MODULE_DESIGN", "INTERFACE_DESIGN", "DATA_MODELING", "PATTERN_SELECTION", "DEPENDENCY_ANALYSIS", "MIGRATION_STRATEGY", "PERFORMANCE_DESIGN",
-              "CODE_PLAN", "SCAFFOLD", "IMPLEMENT_FEATURE", "IMPLEMENT_ALGORITHM", "REFACTOR", "OPTIMIZE", "TYPE_DEFINITION", "ERROR_HANDLING", "INTEGRATION", "CONFIGURATION",
-              "TEST_STRATEGY", "TEST_CASE_DESIGN", "UNIT_TEST_WRITE", "INTEGRATION_TEST_WRITE", "EDGE_CASE_DISCOVERY", "TEST_DATA_GENERATION", "COVERAGE_ANALYSIS",
-              "CODE_REVIEW", "DESIGN_REVIEW", "SECURITY_REVIEW", "PERFORMANCE_REVIEW", "CRITIQUE", "COMPARISON", "STANDARDS_COMPLIANCE",
-              "API_DOC", "TUTORIAL", "COMMENT_WRITE", "CHANGELOG", "DECISION_RECORD", "DIAGRAM",
-              "ERROR_DIAGNOSIS", "LOG_ANALYSIS", "REPRODUCTION", "ROOT_CAUSE", "FIX_PROPOSAL", "FIX_IMPLEMENT", "REGRESSION_CHECK",
-              "DEPLOY_PLAN", "CI_CD_CONFIG", "ENVIRONMENT_SETUP", "MONITORING_SETUP", "INCIDENT_RESPONSE",
-              "TECH_RESEARCH", "BENCHMARK", "COMPATIBILITY_CHECK", "BEST_PRACTICE", "TREND_ANALYSIS",
-              "SUMMARIZE", "EXPLAIN", "REPORT", "TRANSLATE", "QUESTION_ANSWER",
-            ])
+            .string()
             .optional()
-            .describe("Specific task type within the domain (required when auto_route=true)."),
-          complexity: z
-            .enum(["simple", "moderate", "complex"])
-            .optional()
-            .describe("Task complexity (required when auto_route=true)"),
-          budget: z
-            .number()
-            .optional()
-            .describe("Max cost per request in USD (default: 1.0). Only used with auto_route."),
-          auto_route: z
-            .boolean()
-            .optional()
-            .describe("When true, use the pipeline (auto-selects models). Requires domain, task_type, complexity."),
+            .describe("Specific task type within the domain"),
           worker_instructions: z
             .string()
             .max(10_000)
@@ -148,22 +142,10 @@ export class PyreezMcpServer {
             .number()
             .optional()
             .describe("Maximum deliberation rounds (default: 1)"),
-          models: z
-            .array(z.string())
-            .optional()
-            .describe("Explicit model IDs to use as workers. Bypasses auto team composition."),
           protocol: z
             .enum(["diverge-synth", "debate"])
             .optional()
             .describe("Deliberation protocol. 'debate' enables multi-round debate where workers see each other's responses."),
-          quality_weight: z
-            .number()
-            .optional()
-            .describe("Override quality weight for model selection (default: from config)"),
-          cost_weight: z
-            .number()
-            .optional()
-            .describe("Override cost weight for model selection (default: from config)"),
         }),
       },
       async (args) => this.handleDeliberate(args),
@@ -271,114 +253,175 @@ export class PyreezMcpServer {
 
   // --- Tool Handlers ---
 
+  async handleScores(args: {
+    domain: string;
+    task_type?: string;
+    min_score?: number;
+  }): Promise<CallToolResult> {
+    return this.logRun("scores", async () => {
+      const reg = this.filteredRegistry;
+      if (!reg) {
+        return this.errorResult("Error: registry not available");
+      }
+
+      const available = reg.getAvailable();
+      const weights = getDomainWeights(args.domain);
+      const taskType = args.task_type;
+
+      type ScoredModel = {
+        id: string;
+        provider: string;
+        cost: { inputPer1M: number; outputPer1M: number };
+        score: number;
+        observations: number;
+        dimensions: Record<string, number>;
+      };
+
+      type UnscoredModel = {
+        id: string;
+        provider: string;
+        cost: { inputPer1M: number; outputPer1M: number };
+      };
+
+      const scored: ScoredModel[] = [];
+      const unscored: UnscoredModel[] = [];
+
+      for (const model of available) {
+        const cell = this.skillCellStore && taskType
+          ? this.skillCellStore.get(model.id, args.domain, taskType)
+          : undefined;
+
+        // Also check domain-level cells (any taskType) if no specific cell
+        const domainCells = !cell && this.skillCellStore
+          ? this.skillCellStore.getForDomain(model.id, args.domain)
+          : [];
+
+        if (cell) {
+          // Exact cell: use directly
+          let score = 0;
+          const dimensions: Record<string, number> = {};
+          for (const dim of BINARY_DIMENSIONS) {
+            const params = cell.dimensions[dim];
+            const mean = params ? params.alpha / (params.alpha + params.beta) : 0.5;
+            const w = weights[dim] ?? 0.20;
+            score += w * mean;
+            dimensions[dim] = Number(mean.toFixed(2));
+          }
+          scored.push({
+            id: model.id,
+            provider: model.provider,
+            cost: model.cost,
+            score: Number(score.toFixed(2)),
+            observations: cell.total,
+            dimensions,
+          });
+        } else if (domainCells.length > 0) {
+          // Aggregate across all domain cells: pool alpha/beta
+          let score = 0;
+          let totalObs = 0;
+          const dimensions: Record<string, number> = {};
+          for (const dim of BINARY_DIMENSIONS) {
+            let alpha = 1, beta = 1;
+            for (const dc of domainCells) {
+              const p = dc.dimensions[dim];
+              if (p) { alpha += p.alpha - 1; beta += p.beta - 1; }
+            }
+            const mean = alpha / (alpha + beta);
+            const w = weights[dim] ?? 0.20;
+            score += w * mean;
+            dimensions[dim] = Number(mean.toFixed(2));
+          }
+          for (const dc of domainCells) totalObs += dc.total;
+          scored.push({
+            id: model.id,
+            provider: model.provider,
+            cost: model.cost,
+            score: Number(score.toFixed(2)),
+            observations: totalObs,
+            dimensions,
+          });
+        } else {
+          unscored.push({
+            id: model.id,
+            provider: model.provider,
+            cost: model.cost,
+          });
+        }
+      }
+
+      // Sort scored by score descending
+      scored.sort((a, b) => b.score - a.score);
+
+      // Sort unscored by cost descending (cheapest last)
+      unscored.sort((a, b) => b.cost.outputPer1M - a.cost.outputPer1M);
+
+      // Apply min_score filter: keep only models above threshold.
+      // If none above, include the single closest model below.
+      let filteredScored = scored;
+      let note: string | undefined;
+      if (args.min_score !== undefined && scored.length > 0) {
+        const above = scored.filter((m) => m.score >= args.min_score!);
+        if (above.length > 0) {
+          filteredScored = above;
+        } else {
+          // scored is already sorted descending — first element is closest to threshold
+          filteredScored = [scored[0]!];
+          note = `no models above ${args.min_score}, showing closest`;
+        }
+      }
+
+      // trial_recommended: unscored, cost descending, max 3
+      const trialRecommended = unscored.slice(0, 3).map((m) => m.id);
+
+      return this.textResult(JSON.stringify({
+        scored: filteredScored,
+        unscored,
+        trial_recommended: trialRecommended,
+        ...(note ? { note } : {}),
+      }, null, 2));
+    });
+  }
+
   async handleDeliberate(args: {
     task: string;
+    models: string[];
+    count?: number;
     domain?: string;
     task_type?: string;
-    complexity?: string;
-    budget?: number;
-    auto_route?: boolean;
     worker_instructions?: string;
     max_rounds?: number;
-    models?: string[];
     protocol?: string;
-    quality_weight?: number;
-    cost_weight?: number;
   }): Promise<CallToolResult> {
     return this.logRun("deliberate", async () => {
     if (!args.task) {
       return this.errorResult("Error: task is required");
     }
-
-    // auto_route: resolve classification, then route through deliberateFn (Thompson Sampling)
-    if (args.auto_route && !args.models?.length) {
-      if (!args.domain) {
-        return this.errorResult(
-          "Error: domain is required when auto_route=true",
-        );
-      }
-      if (!this.deliberateFn) {
-        return this.errorResult("Error: deliberation not available");
-      }
-
-      try {
-        const taskType = args.task_type ?? DOMAIN_DEFAULTS[args.domain] ?? "QUESTION_ANSWER";
-        const userProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
-        const taskNature = resolveTaskNature(args.domain, taskType);
-        const complexity = (args.complexity ?? inferComplexity(args.task)) as string;
-        const autoDebate = !userProtocol && shouldAutoDebate(args.domain, taskType, complexity);
-        const effectiveProtocol = userProtocol ?? (autoDebate ? "debate" as const : undefined);
-
-        const input: DeliberateInput = {
-          task: args.task,
-          workerInstructions: args.worker_instructions,
-          maxRounds: args.max_rounds,
-          protocol: effectiveProtocol,
-          qualityWeight: args.quality_weight,
-          costWeight: args.cost_weight,
-          taskNature: taskNature ?? undefined,
-          domain: args.domain,
-          taskType,
-        };
-
-        const result = await this.deliberateFn(input);
-        const response = {
-          ...result,
-          next_required_action: { tool: "pyreez_acceptance", reason: "After synthesizing, verify synthesis represents worker positions before presenting to user" },
-          synthesis_checklist: {
-            comprehend: "Fill unique_contribution, most_unexpected_claim, loss_if_removed for each worker",
-            evaluate: "Label every factual claim with [x] fact / [ ] unverified. Amplify creative proposals.",
-            reflect: "Fill Uncertainty, Dismissed, Counterargument — each with a concrete change to the synthesis",
-          },
-        };
-        return this.textResult(JSON.stringify(response, null, 2));
-      } catch (error) {
-        if (error instanceof NoModelsAvailableError) {
-          return this.errorResult(JSON.stringify({
-            error: error.message,
-            code: error.code,
-            remediation: error.remediation,
-          }));
-        }
-        if (error instanceof TeamDegradedError) {
-          return this.errorResult(JSON.stringify({
-            error: error.message,
-            lostSlots: error.lostSlots,
-            modelSwaps: error.modelSwaps,
-            tokensConsumed: error.tokensConsumed,
-          }));
-        }
-        return this.errorResult(
-          `Error: ${sanitizeError(error)}`,
-        );
-      }
+    if (!args.models?.length) {
+      return this.errorResult("Error: models is required (min 1). Use pyreez_scores to choose models.");
     }
 
-    // Manual deliberation with deliberateFn
     if (!this.deliberateFn) {
       return this.errorResult("Error: deliberation not available");
     }
 
     try {
-      const manualUserProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
-      const manualTaskNature = args.domain ? resolveTaskNature(args.domain, args.task_type) : undefined;
-      const manualComplexity = (args.complexity ?? inferComplexity(args.task)) as string;
-      const manualAutoDebate = !manualUserProtocol && args.domain && shouldAutoDebate(args.domain, args.task_type, manualComplexity);
-      const manualEffectiveProtocol = manualUserProtocol ?? (manualAutoDebate ? "debate" as const : undefined);
+      const userProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
+      const taskNature = args.domain ? resolveTaskNature(args.domain, args.task_type) : undefined;
+
       const input: DeliberateInput = {
         task: args.task,
+        models: args.models,
+        count: args.count,
         workerInstructions: args.worker_instructions,
         maxRounds: args.max_rounds,
-        protocol: manualEffectiveProtocol,
-        qualityWeight: args.quality_weight,
-        costWeight: args.cost_weight,
-        ...(args.models?.length ? { models: args.models } : {}),
-        ...(manualTaskNature ? { taskNature: manualTaskNature } : {}),
+        protocol: userProtocol,
+        ...(taskNature ? { taskNature } : {}),
         ...(args.domain ? { domain: args.domain } : {}),
         ...(args.task_type ? { taskType: args.task_type } : {}),
       };
+
       const result = await this.deliberateFn(input);
-      const manualResponse = {
+      const response = {
         ...result,
         next_required_action: { tool: "pyreez_acceptance", reason: "After synthesizing, verify synthesis represents worker positions before presenting to user" },
         synthesis_checklist: {
@@ -387,7 +430,7 @@ export class PyreezMcpServer {
           reflect: "Fill Uncertainty, Dismissed, Counterargument — each with a concrete change to the synthesis",
         },
       };
-      return this.textResult(JSON.stringify(manualResponse, null, 2));
+      return this.textResult(JSON.stringify(response, null, 2));
     } catch (error) {
       if (error instanceof NoModelsAvailableError) {
         return this.errorResult(JSON.stringify({

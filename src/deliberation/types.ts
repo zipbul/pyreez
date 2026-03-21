@@ -142,19 +142,17 @@ export interface DeliberateInput {
   readonly task: string;
   readonly workerInstructions?: string;
   readonly maxRounds?: number;
-  /** Per-request quality weight override. */
-  readonly qualityWeight?: number;
-  /** Per-request cost weight override. */
-  readonly costWeight?: number;
   /** Deliberation protocol. Default: "diverge-synth". */
   readonly protocol?: "diverge-synth" | "debate";
-  /** Explicit model IDs to use as workers. Bypasses auto team composition. */
-  readonly models?: readonly string[];
+  /** Model IDs to use as workers. Required (min 1). */
+  readonly models: readonly string[];
+  /** Number of workers. Default = models.length. Upper bound 7, lower bound 1. */
+  readonly count?: number;
   /** Task nature for prompt selection. Artifact = deliverable output, Critique = analysis. */
   readonly taskNature?: TaskNature;
-  /** Domain for Thompson Sampling model selection. */
+  /** Domain for SkillCell evaluator. */
   readonly domain?: string;
-  /** Task type for Thompson Sampling model selection. */
+  /** Task type for SkillCell evaluator. */
   readonly taskType?: string;
 }
 

@@ -60,9 +60,6 @@ function createMockRegistry(models: ModelInfo[] = MODELS) {
   };
 }
 
-// -- Test helpers --
-
-
 // -- Long enough response to pass MIN_WORKER_RESPONSE_LENGTH (200 chars) --
 
 function longResponse(model: string): string {
@@ -80,7 +77,6 @@ interface TestHarness {
 async function createHarness(opts: {
   chatFn: (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
   models?: ModelInfo[];
-  filteredModels?: ModelInfo[];
 }): Promise<TestHarness> {
   const models = opts.models ?? MODELS;
   const registry = createMockRegistry(models);
@@ -154,7 +150,7 @@ describe("MCP Server Integration", () => {
       name: "pyreez_deliberate",
       arguments: {
         task: "Analyze the tradeoffs between microservices and monolith architecture for a startup with 5 engineers",
-        auto_route: false,
+        models: ["openai/gpt-4.1", "anthropic/claude-sonnet-4-20250514", "google/gemini-2.5-pro"],
       },
     });
 
@@ -195,7 +191,7 @@ describe("MCP Server Integration", () => {
       name: "pyreez_deliberate",
       arguments: {
         task: "Design a caching strategy for a high-traffic API with mixed read-write workloads",
-        auto_route: false,
+        models: ["openai/gpt-4.1", "anthropic/claude-sonnet-4-20250514", "google/gemini-2.5-pro"],
       },
     });
 

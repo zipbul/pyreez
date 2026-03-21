@@ -172,6 +172,7 @@ async function main(): Promise<void> {
     runLogger,
     chatFn: (model, messages, params) => chatAdapter(model, messages, params),
     skillCellStore,
+    filteredRegistry,
   });
 
   const transport = new StdioServerTransport();
