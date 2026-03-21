@@ -2,30 +2,13 @@
 
 ## 1. 프롬프팅 개선
 
-### 1-1. Critic 프롬프트 비대칭성
+### 1-1. Acceptance Cross-worker 검증
 
-Critic이 비판만 하고 대안을 제시하지 않음. R1에서 회의론만 나오고 구체적 대안은 R2 debate 규칙에 의해서야 등장.
+현재 acceptance는 각 worker가 자기 입장만 검증. A가 B의 입장 왜곡을 지적하는 cross-worker 검증이 없음.
 
-- Critic 프롬프트에 대안 의무 추가 (`<critique>` + `<alternative>` 구조)
-- R1부터 "position + evidence + alternative" 구조 강제
-
-**파일**: `src/deliberation/prompts.ts`
-
-### 1-2. Acceptance 프롬프트 accept 편향
-
-프롬프트가 "Accept if fairly represented" + "Reject ONLY if misrepresents"로 reject 임계치가 높아 거의 항상 accept 반환. `misrepresented`/`unresolved` 파싱 구조가 사실상 사장됨.
-
-- "Find at least one way the synthesis misrepresents or weakens your position" adversarial 프레이밍
-- `"partial"` verdict 추가
 - Cross-worker 검증 (A가 B의 입장 왜곡 지적)
 
-**파일**: `src/mcp/server.ts` (acceptance 프롬프트)
-
-### 1-3. External evaluator에 도메인 컨텍스트 주입
-
-evaluator 프롬프트에 domain/taskType 정보 없음. IDEATION 평가 시 "novel_perspective를 엄격하게, factually_correct는 관대하게" 같은 도메인별 가이드라인 필요.
-
-**파일**: `src/deliberation/external-evaluator.ts` — `buildEvalPrompt()`에 domain 파라미터 추가
+**파일**: `src/mcp/server.ts`, `src/deliberation/prompts.ts`
 
 ---
 
