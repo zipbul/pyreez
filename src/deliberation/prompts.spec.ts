@@ -215,8 +215,8 @@ describe("buildDebateWorkerMessages", () => {
 
   it("should include compressed anti-sycophancy rules", () => {
     const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[0]!.content!;
-    expect(sys).toContain("change position");
-    expect(sys).toContain("maintain your position");
+    expect(sys).toContain("Respond to each analyst");
+    expect(sys).toContain("position changed");
     expect(sys).not.toContain("Do NOT agree merely to be polite");
   });
 
@@ -293,11 +293,11 @@ describe("buildDebateFollowUp", () => {
     expect(msg.content).toContain("Redis");
   });
 
-  it("should include anti-sycophancy reminder", () => {
+  it("should include engagement + position change instruction", () => {
     const ctx = makeCtx([makeRound(1)]);
     const msg = buildDebateFollowUp(ctx, [makeResponse("w/b", "position", 1)]);
-    expect(msg.content).toContain("change position");
-    expect(msg.content).toContain("maintain");
+    expect(msg.content).toContain("Respond to each analyst");
+    expect(msg.content).toContain("position changed");
   });
 
   it("should include final round commitment", () => {

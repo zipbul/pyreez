@@ -223,8 +223,8 @@ export function buildDebateWorkerMessages(
 
   systemParts.push(
     `<rules>\n` +
-    `- If you change position, state exactly what changed your mind.\n` +
-    `- If you maintain your position, state why the challenge does not apply.\n` +
+    `- Respond to each analyst's key argument specifically.\n` +
+    `- Then state whether and how your position changed.\n` +
     `</rules>`,
   );
 
@@ -307,8 +307,8 @@ export function buildDebateFollowUp(
     parts.push(`## Other Positions\n${others}`);
   }
 
-  // Anti-sycophancy reminder
-  parts.push("If you change position, state exactly what changed your mind. If you maintain, state why the challenge does not apply.");
+  // Engagement + anti-sycophancy
+  parts.push("Respond to each analyst's key argument specifically. Then state whether and how your position changed.");
 
   // Round strategy
   if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
