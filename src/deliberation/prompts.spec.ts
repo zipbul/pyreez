@@ -121,14 +121,9 @@ describe("buildWorkerMessages", () => {
     expect(buildWorkerMessages(makeCtx())[0]!.content).not.toContain("<domain>");
   });
 
-  it("should include one-line summary for critique", () => {
+  it("should include multi-perspective instruction", () => {
     const sys = buildWorkerMessages(makeCtx([], "critique"))[0]!.content;
-    expect(sys).toContain("one-line summary");
-  });
-
-  it("should NOT include summary for artifact", () => {
-    const sys = buildWorkerMessages(makeCtx([], "artifact"))[0]!.content;
-    expect(sys).not.toContain("one-line summary");
+    expect(sys).toContain("identify the different perspectives");
   });
 
   it("should produce identical prompts for different workerIndex values", () => {
@@ -437,27 +432,28 @@ describe("cross-function", () => {
 // ================================================================
 
 describe("artifact prompts", () => {
-  it("should use artifact role for artifact taskNature", () => {
+  it("should use artifact depth for artifact taskNature", () => {
     const sys = buildWorkerMessages(makeCtx([], "artifact"))[0]!.content;
-    expect(sys).toContain("Think thoroughly");
-    expect(sys).not.toContain("one-line summary");
+    expect(sys).toContain("identify the different perspectives");
+    expect(sys).toContain("task can be approached");
   });
 
   it("should use critique depth for critique taskNature", () => {
     const sys = buildWorkerMessages(makeCtx([], "critique"))[0]!.content;
-    expect(sys).toContain("one-line summary");
+    expect(sys).toContain("identify the different perspectives");
+    expect(sys).toContain("problem can be analyzed");
   });
 });
 
 // ================================================================
-// Digest sharing in debate
+// Full response sharing in debate (not digest)
 // ================================================================
 
-describe("debate digest sharing", () => {
-  it("should share digest in 3rd person format", () => {
+describe("debate full response sharing", () => {
+  it("should share full response content in 3rd person format", () => {
     const responses = [
-      { model: "a/m1", content: "<position>Use A</position>\n<evidence>Fast</evidence>\n<concerns>Cost</concerns>", workerIndex: 0 },
-      { model: "b/m2", content: "<position>Use B</position>\n<evidence>Cheap</evidence>\n<concerns>Slow</concerns>", workerIndex: 1 },
+      { model: "a/m1", content: "Use A because it's fast and scalable. Cost is a concern.", workerIndex: 0 },
+      { model: "b/m2", content: "Use B because it's cheap and reliable. Slow under load.", workerIndex: 1 },
     ];
     const ctx: SharedContext = {
       task: "Pick DB", team: { workers: [makeWorker("a/m1"), makeWorker("b/m2")] },
@@ -466,8 +462,8 @@ describe("debate digest sharing", () => {
     const user = buildDebateWorkerMessages(ctx, undefined, { current: 2, max: 3 }, 0)[1]!.content!;
 
     expect(user).toContain("One analyst argues");
-    expect(user).toContain("Position: Use B");
-    expect(user).toContain("Evidence: Cheap");
-    expect(user).not.toContain("Slow");
+    // Full content, not just digest
+    expect(user).toContain("cheap and reliable");
+    expect(user).toContain("Slow under load");
   });
 });

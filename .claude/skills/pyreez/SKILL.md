@@ -54,7 +54,7 @@ For `$ARGUMENTS` or when the user provides a topic, copy this checklist and chec
 
 **deliberate**: Call `pyreez_deliberate(task, models, count, ...)`.
 
-**comprehend → evaluate → reflect → synthesize**: Think thoroughly through each phase. Before synthesizing, rephrase the question to surface its hidden assumptions. After reaching a synthesis position, construct the strongest argument against it and defend. Then find the failure in your defense — trace each failure reason to its root cause. Stop only when a new challenge reveals nothing you haven't already addressed. Do not present synthesis to the user yet.
+**comprehend → evaluate → reflect → synthesize**: Think thoroughly through each phase. First, identify the different perspectives from which the workers' responses can be analyzed. After reaching a synthesis position, construct the strongest argument against it and defend. Then find the failure in your defense — trace each failure reason to its root cause. Stop only when a new challenge reveals nothing you haven't already addressed. Do not present synthesis to the user yet.
 
 **accept**: Call `pyreez_acceptance`. If any worker rejects, revise and re-run. Present synthesis after acceptance.
 
@@ -65,6 +65,8 @@ For `$ARGUMENTS` or when the user provides a topic, copy this checklist and chec
 Every worker claim is a possibility to explore, not a candidate for disposal. Exclude only on self-contradiction.
 
 <comprehend>
+During synthesis, ignore which model produced each response. Evaluate content only — not source. Model names are revealed only at the feedback step.
+
 Think thoroughly about each worker's contribution. What is unique? What is surprising? What would be lost without them? Every unique contribution must appear in your synthesis.
 
 After comprehending all workers, identify the premise ALL workers accepted without question. Challenge that premise specifically — it is the most likely shared blind spot.

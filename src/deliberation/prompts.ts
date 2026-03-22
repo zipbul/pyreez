@@ -62,17 +62,15 @@ export function getDomainHint(domain?: string): string {
 
 // -- Core Prompt Fragments --
 
-const DEPTH_INSTRUCTIONS_CRITIQUE = `Before answering, rephrase the question to surface its hidden assumptions.
+const DEPTH_INSTRUCTIONS_CRITIQUE = `First, identify the different perspectives from which this problem can be analyzed. Then think through each perspective thoroughly.
 
 Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
 
 After reaching your position, construct the strongest possible argument against it and defend against that argument. Then find the failure in your defense. For each failure reason, ask why it would happen — trace to the root cause. Stop only when a new challenge reveals nothing you haven't already addressed.
 
-Before finishing, verify your key claims.
+Before finishing, verify your key claims.`;
 
-End with a one-line summary of your position.`;
-
-const DEPTH_INSTRUCTIONS_ARTIFACT = `Before starting, rephrase the task to surface its hidden assumptions and constraints.
+const DEPTH_INSTRUCTIONS_ARTIFACT = `First, identify the different perspectives from which this task can be approached. Then think through each perspective thoroughly.
 
 Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
 
@@ -123,8 +121,11 @@ function escapeXmlContent(text: string): string {
  *
  * Extraction priority:
  * 1. <position> and <evidence> tags (backward compat with old structured output)
- * 2. Last non-empty line (workers prompted to end with one-line summary)
+ * 2. Last non-empty line as summary heuristic
  * 3. First 3 lines as fallback
+ *
+ * Note: debate builders now share full responses. This function is retained
+ * for potential external use (e.g., acceptance round digest, host-side extraction).
  */
 export function extractDebateDigest(content: string): string {
   // Try structured tags first (backward compat)
@@ -240,11 +241,11 @@ export function buildDebateWorkerMessages(
     : undefined;
 
   if (ownPrevious) {
-    // Normal debate: show last round digests (others) + own previous
+    // Normal debate: show other workers' full responses + own previous
     if (lastRound && lastRound.responses.length > 0) {
       const others = lastRound.responses
         .filter((r) => workerIndex == null || r.workerIndex !== workerIndex)
-        .map((r) => `One analyst argues: ${escapeXmlContent(extractDebateDigest(r.content))}`)
+        .map((r) => `One analyst argues:\n${escapeXmlContent(r.content)}`)
         .join("\n\n");
       if (others) {
         userParts.push(`## Other Positions\n${others}`);
@@ -258,7 +259,7 @@ export function buildDebateWorkerMessages(
       for (const round of ctx.rounds) {
         const header = `### Round ${round.number}`;
         const workers = round.responses
-          .map((r) => `One analyst argues: ${escapeXmlContent(extractDebateDigest(r.content))}`)
+          .map((r) => `One analyst argues:\n${escapeXmlContent(r.content)}`)
           .join("\n\n");
         transcriptParts.push(`${header}\n${workers}`);
       }
@@ -298,10 +299,10 @@ export function buildDebateFollowUp(
 ): ChatMessage {
   const parts: string[] = [];
 
-  // Other workers' positions in 3rd person (sycophancy reduction)
+  // Other workers' full responses in 3rd person (sycophancy reduction + full context)
   if (otherResponses.length > 0) {
     const others = otherResponses
-      .map((r) => `One analyst argues: ${escapeXmlContent(extractDebateDigest(r.content))}`)
+      .map((r) => `One analyst argues:\n${escapeXmlContent(r.content)}`)
       .join("\n\n");
     parts.push(`## Other Positions\n${others}`);
   }
