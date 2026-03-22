@@ -282,19 +282,21 @@ async function callWithFallback(
   const swaps: ModelSwap[] = [];
   let totalInput = 0;
   let totalOutput = 0;
+  // Session history — invalidated when model changes (replacement can't continue another model's session)
+  let activeHistory = previousHistory;
 
-  // Build messages — session continuation if history exists, full rebuild otherwise
+  // Build messages — session continuation if history exists and model unchanged, full rebuild otherwise
   const buildMessages = (): ChatMessage[] => {
-    // Session continuation: append follow-up to existing history
-    if (isDebateR2 && previousHistory && deps.buildDebateFollowUp) {
+    // Session continuation: append follow-up to existing history (only if same model)
+    if (isDebateR2 && activeHistory && deps.buildDebateFollowUp) {
       const lastRound = ctx.rounds[ctx.rounds.length - 1];
       const otherResponses = lastRound
         ? lastRound.responses.filter((r) => r.workerIndex !== workerIndex)
         : [];
       const followUp = deps.buildDebateFollowUp(ctx, otherResponses, roundInfo);
-      return [...previousHistory, followUp];
+      return [...activeHistory, followUp];
     }
-    // Full rebuild: cold join or no history available
+    // Full rebuild: cold join, model swapped, or no history available
     if (isDebateR2 && deps.buildDebateWorkerMessages) {
       return deps.buildDebateWorkerMessages(ctx, input.workerInstructions, roundInfo, workerIndex);
     }
@@ -328,6 +330,7 @@ async function callWithFallback(
     }
 
     currentModel = next.id;
+    activeHistory = undefined; // Model changed — can't continue another model's session
   }
 
   while (true) {
@@ -367,6 +370,7 @@ async function callWithFallback(
         }
 
         currentModel = next.id;
+        activeHistory = undefined; // Model changed — cold join via debate builder
         continue; // retry with fallback model
       }
 
@@ -425,8 +429,9 @@ async function callWithFallback(
         return { failed: true, swaps, tokens: { input: totalInput, output: totalOutput } };
       }
 
-      // Swap to next model — debate builder auto-detects cold join
+      // Swap to next model — invalidate session, cold join via debate builder
       currentModel = next.id;
+      activeHistory = undefined;
     }
   }
 }
@@ -473,8 +478,8 @@ export async function executeRound(
       totalInput += wr.tokens.input;
       totalOutput += wr.tokens.output;
       allSwaps.push(...wr.swaps);
-      // Store history for session continuation
-      if (wr.history) histories.set(idx, wr.history);
+      // Store history for session continuation (skip degenerate — broken context)
+      if (wr.history && !wr.degenerate) histories.set(idx, wr.history);
       if (wr.response && !wr.degenerate) {
         responses.push(wr.response);
       } else if (wr.response && wr.degenerate) {
@@ -600,6 +605,10 @@ export async function deliberate(
               output: accTokens.output + repResult.value.tokens.output,
             };
             allModelSwaps.push(...repResult.value.swaps);
+            // Store replenishment history for session continuation in R2+
+            if (repResult.value.history && workerHistories) {
+              workerHistories.set(repResult.value.response.workerIndex, repResult.value.history);
+            }
           }
         }
       }

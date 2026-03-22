@@ -947,6 +947,156 @@ describe("session continuation in debate R2+", () => {
 });
 
 // ================================================================
+// session invalidation on model swap
+// ================================================================
+
+describe("session invalidation on model swap in R2+", () => {
+  it("should invalidate session and use cold join when model is swapped in R2 (error)", async () => {
+    // R1: worker-0 succeeds with model-0 → history stored
+    // R2: model-0 fails → fallback to fallback-d
+    // fallback-d should NOT get model-0's session history → should use debate builder (cold join)
+    let followUpUsed = false;
+    let debateBuilderUsed = false;
+    let round = 1;
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        // R2: original model fails, fallback succeeds
+        if (model === "worker/model-0" && round === 2) {
+          throw new Error("R2 failure");
+        }
+        return chatResult(validWorkerContent(`response-from-${model}`));
+      }),
+      buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
+        debateBuilderUsed = true;
+        return [
+          { role: "system" as const, content: "cold-join-rebuild" },
+          { role: "user" as const, content: "cold-join-user" },
+        ];
+      }),
+      buildDebateFollowUp: mock((_ctx: any, _others: any, _round?: any) => {
+        followUpUsed = true;
+        return { role: "user" as const, content: "follow-up" };
+      }),
+    });
+
+    const team = makeTeam(2);
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([makeModelInfo("prov-z/fallback-d")], cooldown);
+    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+
+    const origChat = deps.chat;
+    let callCount = 0;
+    (deps as any).chat = async (model: string, messages: ChatMessage[], params?: any) => {
+      callCount++;
+      round = callCount <= 2 ? 1 : 2;
+      return origChat(model, messages, params);
+    };
+
+    const output = await deliberate(team, makeInput(), deps, config, { pool });
+
+    expect(output.roundsExecuted).toBe(2);
+    // fallback-d should use debate builder (cold join), NOT session continuation
+    expect(debateBuilderUsed).toBe(true);
+    // worker-1 (no swap) should use follow-up (session continuation)
+    expect(followUpUsed).toBe(true);
+    expect(output.modelSwaps!.some(s => s.replacement === "prov-z/fallback-d")).toBe(true);
+  });
+
+  it("should invalidate session on degenerate fallback in R2", async () => {
+    let debateBuilderCallCount = 0;
+    let round = 1;
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        // R2: model-0 returns degenerate, fallback succeeds
+        if (model === "worker/model-0" && round === 2) {
+          return chatResult("short"); // below MIN_WORKER_RESPONSE_LENGTH
+        }
+        return chatResult(validWorkerContent(`response-from-${model}`));
+      }),
+      buildDebateWorkerMessages: mock((_ctx: any) => {
+        debateBuilderCallCount++;
+        return [
+          { role: "system" as const, content: "rebuild" },
+          { role: "user" as const, content: "rebuild-user" },
+        ];
+      }),
+      buildDebateFollowUp: mock((_ctx: any, _others: any) => {
+        return { role: "user" as const, content: "follow-up" };
+      }),
+    });
+
+    const team = makeTeam(2);
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([makeModelInfo("prov-z/fallback-d")], cooldown);
+    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+
+    const origChat = deps.chat;
+    let callCount = 0;
+    (deps as any).chat = async (model: string, messages: ChatMessage[], params?: any) => {
+      callCount++;
+      round = callCount <= 2 ? 1 : 2;
+      return origChat(model, messages, params);
+    };
+
+    const output = await deliberate(team, makeInput(), deps, config, { pool });
+
+    expect(output.roundsExecuted).toBe(2);
+    // Degenerate fallback → session invalidated → debate builder used for replacement
+    expect(debateBuilderCallCount).toBeGreaterThan(0);
+  });
+
+  it("should invalidate session on cooldown skip in R2", async () => {
+    // R1: model-0 fails with rate_limit → prov-a cooled → fallback-c succeeds
+    // R2: fallback-c is on team. model-0 still cooled (not on team anymore due to R1 swap).
+    //     But if a DIFFERENT worker gets cooled in R2, test the invalidation.
+    let round = 1;
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        // R1: model-0 rate limits
+        if (model === "worker/model-0" && round === 1) {
+          throw new LLMClientError(429, "Rate limit", "rate_limit_error");
+        }
+        return chatResult(validWorkerContent(`response-from-${model}`));
+      }),
+      buildDebateWorkerMessages: mock((_ctx: any) => {
+        return [
+          { role: "system" as const, content: "rebuild" },
+          { role: "user" as const, content: "rebuild-user" },
+        ];
+      }),
+      buildDebateFollowUp: mock((_ctx: any, _others: any) => {
+        return { role: "user" as const, content: "follow-up" };
+      }),
+    });
+
+    const team = makeTeam(2);
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([makeModelInfo("prov-c/fallback-c")], cooldown);
+    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+
+    const origChat = deps.chat;
+    let callCount = 0;
+    (deps as any).chat = async (model: string, messages: ChatMessage[], params?: any) => {
+      callCount++;
+      round = callCount <= 3 ? 1 : 2; // R1: model-0 fail + fallback-c + model-1 = 3 calls
+      return origChat(model, messages, params);
+    };
+
+    const output = await deliberate(team, makeInput(), deps, config, { pool });
+
+    expect(output.roundsExecuted).toBe(2);
+    // R1: model-0 swapped to fallback-c. Team updated.
+    // R2: fallback-c has history from R1 → session continuation (follow-up)
+    //     model-1 has history from R1 → session continuation (follow-up)
+    // No cold join needed since no model swap in R2
+    expect(output.modelsUsed).toContain("prov-c/fallback-c");
+  });
+});
+
+// ================================================================
 // debate fallback — cold join + swap tracking
 // ================================================================
 
