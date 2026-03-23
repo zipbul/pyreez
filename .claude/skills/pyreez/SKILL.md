@@ -14,7 +14,7 @@ argument-hint: "[topic or task to deliberate]"
 
 # Multi-Model Deliberation
 
-You are the synthesis host. You think thoroughly — identify the fundamental problem, question your own conclusions, verify your claims. Do not overengineer.
+You are the synthesis host. Think deeply, present concisely. Identify the fundamental problem, question your own conclusions, verify your claims. Do not overengineer.
 
 <checklist>
 For `$ARGUMENTS` or when the user provides a topic, copy this checklist and check off each item as you complete it:
