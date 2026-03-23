@@ -7,8 +7,8 @@
  *   - Over-prompting hurts on latest models (Anthropic/OpenAI/Google consensus)
  *   - "Think thoroughly" > prescriptive steps (Anthropic official)
  *   - Depth techniques as general instructions:
- *     · Step-Back: identify underlying principles (ICLR 2024, +7-27%)
- *     · Recursive self-questioning until stable (Socratic recursive, EMNLP; AB-MCTS, NeurIPS 2025)
+ *     · Fundamental problem + multi-perspective identification (Five Whys + Multi-Perspective Probing, arXiv 2025)
+ *     · Steelman solitaire with root-cause tracing (Steelman + Five Whys + Knowledge Boundary Probing, NeurIPS 2025)
  *     · Self-verification before finishing (Anthropic official; OPENDEV self-critique)
  *     · Ground facts in evidence, speculative ideas need reasoning chain (CoVe principle)
  *   - Structured output forced on reasoning hurts 10-15% (cross-verified)
@@ -31,38 +31,9 @@ export interface RoundInfo {
   readonly max: number;
 }
 
-// -- Domain Hints --
-
-/**
- * Domain-specific hints injected into worker prompts.
- * Aligns worker "evidence" interpretation with evaluator expectations.
- */
-const DOMAIN_WORKER_HINTS: Record<string, string> = {
-  IDEATION: "In this domain, evidence means analogous cases, market data, and user behavior patterns.",
-  CODING: "In this domain, evidence means execution paths, boundary conditions, and type safety.",
-  DEBUGGING: "In this domain, evidence means reproduction steps and root cause vs symptom distinction.",
-  REVIEW: "In this domain, evidence means specific code references and concrete impact of issues.",
-  ARCHITECTURE: "In this domain, evidence means scalability analysis, failure scenarios, and dependency impact.",
-  RESEARCH: "In this domain, evidence means source citations and methodology evaluation.",
-  PLANNING: "In this domain, evidence means resource constraints, dependency ordering, and risk scenarios.",
-  REQUIREMENTS: "In this domain, evidence means stakeholder needs, acceptance criteria, and edge cases.",
-  TESTING: "In this domain, evidence means coverage gaps, edge cases, and failure reproduction.",
-  DOCUMENTATION: "In this domain, evidence means accuracy of descriptions, completeness, and audience fit.",
-  OPERATIONS: "In this domain, evidence means uptime data, incident patterns, and capacity metrics.",
-  COMMUNICATION: "In this domain, evidence means audience context, clarity of message, and actionability.",
-};
-
-/**
- * Get domain hint for worker prompts. Returns empty string if domain unknown.
- */
-export function getDomainHint(domain?: string): string {
-  if (!domain) return "";
-  return DOMAIN_WORKER_HINTS[domain] ?? "";
-}
-
 // -- Core Prompt Fragments --
 
-const DEPTH_INSTRUCTIONS_CRITIQUE = `First, identify the different perspectives from which this problem can be analyzed. Then think through each perspective thoroughly.
+const DEPTH_INSTRUCTIONS_CRITIQUE = `First, identify the fundamental problem and its root cause. Then identify the different perspectives from which it can be analyzed. Think through each perspective thoroughly.
 
 Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
 
@@ -70,7 +41,7 @@ After reaching your position, construct the strongest possible argument against 
 
 Before finishing, verify your key claims.`;
 
-const DEPTH_INSTRUCTIONS_ARTIFACT = `First, identify the different perspectives from which this task can be approached. Then think through each perspective thoroughly.
+const DEPTH_INSTRUCTIONS_ARTIFACT = `First, identify the fundamental problem and its constraints. Then identify the different perspectives from which it can be approached. Think through each perspective thoroughly.
 
 Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
 
@@ -83,7 +54,6 @@ Before finishing, verify your key claims.`;
 function buildSystemPrompt(
   roleDescription: string,
   nature: "artifact" | "critique",
-  domain?: string,
   instructions?: string,
 ): string {
   const parts: string[] = [];
@@ -93,11 +63,6 @@ function buildSystemPrompt(
   }
 
   parts.push(`<role>${roleDescription}</role>`);
-
-  const hint = getDomainHint(domain);
-  if (hint) {
-    parts.push(`<domain>${hint}</domain>`);
-  }
 
   parts.push(nature === "artifact" ? DEPTH_INSTRUCTIONS_ARTIFACT : DEPTH_INSTRUCTIONS_CRITIQUE);
 
@@ -159,7 +124,7 @@ export function extractDebateDigest(content: string): string {
  * Build messages for a worker LLM (R1 or diverge-synth).
  *
  * All workers receive identical prompts — diversity comes from heterogeneous models.
- * No role differentiation. Depth via general instructions (Step-Back, recursive self-questioning).
+ * No role differentiation. Depth via general instructions (fundamental problem, multi-perspective, steelman solitaire).
  */
 export function buildWorkerMessages(
   ctx: SharedContext,
@@ -169,8 +134,8 @@ export function buildWorkerMessages(
 ): ChatMessage[] {
   const nature = ctx.taskNature ?? "critique";
   const systemContent = buildSystemPrompt(
-    "Think thoroughly. Identify the underlying principles before answering.",
-    nature, ctx.domain, instructions,
+    "Think thoroughly. Identify the fundamental problem before answering.",
+    nature, instructions,
   );
 
   const userParts: string[] = [];
@@ -215,11 +180,6 @@ export function buildDebateWorkerMessages(
   }
 
   systemParts.push(`<role>Think thoroughly. You are seeing other analysts' positions.</role>`);
-
-  const hint = getDomainHint(ctx.domain);
-  if (hint) {
-    systemParts.push(`<domain>${hint}</domain>`);
-  }
 
   systemParts.push(
     `<rules>\n` +

@@ -9,7 +9,6 @@ import {
   buildDebateFollowUp,
   buildAcceptanceMessages,
   extractDebateDigest,
-  getDomainHint,
 } from "./prompts";
 import type {
   SharedContext,
@@ -58,26 +57,6 @@ function makeRound(number: number, options?: { responses?: WorkerResponse[] }): 
 }
 
 // ================================================================
-// getDomainHint
-// ================================================================
-
-describe("getDomainHint", () => {
-  it("should return hint for known domains", () => {
-    expect(getDomainHint("CODING")).toContain("execution paths");
-    expect(getDomainHint("IDEATION")).toContain("analogous cases");
-    expect(getDomainHint("ARCHITECTURE")).toContain("scalability");
-  });
-
-  it("should return empty string for unknown domain", () => {
-    expect(getDomainHint("UNKNOWN")).toBe("");
-  });
-
-  it("should return empty string when undefined", () => {
-    expect(getDomainHint(undefined)).toBe("");
-  });
-});
-
-// ================================================================
 // buildWorkerMessages — all workers get identical prompts
 // ================================================================
 
@@ -87,7 +66,7 @@ describe("buildWorkerMessages", () => {
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe("system");
     expect(messages[0]!.content).toContain("Think thoroughly");
-    expect(messages[0]!.content).toContain("underlying principles");
+    expect(messages[0]!.content).toContain("fundamental problem");
     expect(messages[1]!.role).toBe("user");
     expect(messages[1]!.content).toContain("Write a sorting function");
   });
@@ -111,14 +90,9 @@ describe("buildWorkerMessages", () => {
     expect(sys).toContain("speculative ideas, state the reasoning");
   });
 
-  it("should include domain hint when domain is set", () => {
+  it("should NOT include domain hints (removed — models interpret evidence naturally)", () => {
     const messages = buildWorkerMessages(makeCtx([], undefined, "CODING"));
-    expect(messages[0]!.content).toContain("<domain>");
-    expect(messages[0]!.content).toContain("execution paths");
-  });
-
-  it("should NOT include domain tag when domain is absent", () => {
-    expect(buildWorkerMessages(makeCtx())[0]!.content).not.toContain("<domain>");
+    expect(messages[0]!.content).not.toContain("<domain>");
   });
 
   it("should include multi-perspective instruction", () => {
@@ -220,9 +194,9 @@ describe("buildDebateWorkerMessages", () => {
     expect(sys).not.toContain("Do NOT agree merely to be polite");
   });
 
-  it("should include domain hint", () => {
+  it("should NOT include domain hints in debate", () => {
     const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)], undefined, "ARCHITECTURE"))[0]!.content!;
-    expect(sys).toContain("scalability");
+    expect(sys).not.toContain("<domain>");
   });
 
   it("should include host instructions", () => {
@@ -435,13 +409,13 @@ describe("artifact prompts", () => {
   it("should use artifact depth for artifact taskNature", () => {
     const sys = buildWorkerMessages(makeCtx([], "artifact"))[0]!.content;
     expect(sys).toContain("identify the different perspectives");
-    expect(sys).toContain("task can be approached");
+    expect(sys).toContain("it can be approached");
   });
 
   it("should use critique depth for critique taskNature", () => {
     const sys = buildWorkerMessages(makeCtx([], "critique"))[0]!.content;
     expect(sys).toContain("identify the different perspectives");
-    expect(sys).toContain("problem can be analyzed");
+    expect(sys).toContain("it can be analyzed");
   });
 });
 
