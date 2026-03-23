@@ -169,7 +169,9 @@ export function createDeliberateFn(
     const effectiveMaxRounds = input.maxRounds ?? (isDebate ? 3 : 1);
     const workerGenParams: GenerationParams = {
       temperature: 1.0,
-      max_tokens: 4096,
+      // No max_tokens — let models self-regulate output length.
+      // Research: "remove artificial constraints" (3-provider consensus).
+      // Models naturally produce ~2,000-3,000 tokens and stop.
     };
     const config: EngineConfig = {
       maxRounds: effectiveMaxRounds,

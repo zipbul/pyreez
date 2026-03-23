@@ -367,7 +367,7 @@ describe("createDeliberateFn", () => {
     expect(savedRecord.timestamp).toBeGreaterThan(0);
   });
 
-  it("should set worker max_tokens to 4096", async () => {
+  it("should not set max_tokens (let models self-regulate)", async () => {
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
     const deps = makeWireDeps();
@@ -376,7 +376,7 @@ describe("createDeliberateFn", () => {
     await deliberateFn({ task: "Analyze this code", models: ["openai/gpt-4.1"] });
 
     const [, , , config] = mockDeliberate.mock.calls[0]!;
-    expect(config.workerGenParams.max_tokens).toBe(4096);
+    expect(config.workerGenParams.max_tokens).toBeUndefined();
   });
 
   it("should duplicate models round-robin when count > models.length", async () => {

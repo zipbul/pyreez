@@ -307,8 +307,8 @@ export function buildDebateFollowUp(
     parts.push(`## Other Positions\n${others}`);
   }
 
-  // Engagement + anti-sycophancy
-  parts.push("Respond to each analyst's key argument specifically. Then state whether and how your position changed.");
+  // Engagement + steelman + position update
+  parts.push("Respond to each analyst's key argument specifically. Then construct the strongest argument against your own position and address it. State whether and how your position changed.");
 
   // Round strategy
   if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
