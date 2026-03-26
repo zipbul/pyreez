@@ -22,7 +22,7 @@
  */
 
 import type { ChatMessage } from "../llm/types";
-import type { SharedContext, WorkerResponse } from "./types";
+import type { InteractionTechnique, SharedContext, WorkerResponse } from "./types";
 
 // -- Types --
 
@@ -49,18 +49,43 @@ After your implementation, construct the strongest possible argument against you
 
 Before finishing, verify your key claims.`;
 
+// -- Interaction Technique Instructions --
+
+export const TECHNIQUE_INSTRUCTIONS: Record<InteractionTechnique, string> = {
+  challenge: "Focus on identifying weaknesses, counter-examples, and errors in these positions. Present specific evidence for each flaw. Include other relevant observations as they arise.",
+  defend: "Focus on defending your position against challenges raised. Strengthen your argument with additional evidence and address objections. Note where challenges have merit.",
+  accept: "Focus on identifying valid points from other positions. Modify your position where others present stronger evidence. State what changed and why.",
+  probe: "Focus on identifying unexamined assumptions, blind spots, and open questions. What hasn't been considered? What conditions haven't been tested? Note strong points as well.",
+  propose: "Focus on offering a new approach that differs from existing positions. Ground your proposal in specific evidence or reasoning. Acknowledge what existing approaches get right.",
+  extend: "Focus on building on the strongest ideas presented. Add depth, detail, or specificity. What concrete next steps or implications follow? Note limitations or risks as they arise.",
+  transform: "Focus on reshaping or combining existing ideas into a different framing, within the scope of the original question. What happens if we change the constraints, combine approaches, or shift the perspective? Note what works well in existing approaches.",
+};
+
+// -- Anti-Conformity --
+
+export const ANTI_CONFORMITY = `Carefully assess the discrepancies between your analysis and others'.
+Change your position only if there is clear evidence that your own analysis is incorrect,
+not to reach consensus. You may not rely on the principle of conformity.`;
+
+export const ANTI_CONFORMITY_ACCEPT = `Seek valid points to incorporate. Confirm agreement with independent reasoning —
+state what specific evidence or logic led you to the same conclusion.
+Change your position where evidence is stronger. Maintain where yours holds.`;
+
+// -- Confidence & Uncertainty --
+
+export const CONFIDENCE_AND_UNCERTAINTY = `For each major claim, indicate your confidence:
+- HIGH: strong evidence or direct expertise
+- MEDIUM: reasonable inference but limited evidence
+- LOW: speculative or uncertain
+Do not force confidence — if genuinely uncertain, say so.`;
+
 // -- Helpers --
 
 function buildSystemPrompt(
   roleDescription: string,
   nature: "artifact" | "critique",
-  instructions?: string,
 ): string {
   const parts: string[] = [];
-
-  if (instructions) {
-    parts.push(`<host-instructions>${instructions}</host-instructions>`);
-  }
 
   parts.push(`<role>${roleDescription}</role>`);
 
@@ -131,14 +156,28 @@ export function buildWorkerMessages(
   instructions?: string,
   roundInfo?: RoundInfo,
   _workerIndex?: number,
+  technique?: InteractionTechnique,
 ): ChatMessage[] {
   const nature = ctx.taskNature ?? "critique";
   const systemContent = buildSystemPrompt(
     "Think thoroughly. Identify the fundamental problem before answering.",
-    nature, instructions,
+    nature,
   );
 
   const userParts: string[] = [];
+
+  // Host instructions (in user message for prompt caching — system prefix stays constant)
+  if (instructions) {
+    userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  }
+
+  // Technique emphasis (user message)
+  if (technique) {
+    userParts.push(TECHNIQUE_INSTRUCTIONS[technique]);
+  }
+
+  // Confidence & uncertainty (always)
+  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
 
   // Round strategy (CreativeDC: diverge R1, converge final)
   if (roundInfo && roundInfo.current === 1 && roundInfo.max > 1) {
@@ -169,29 +208,37 @@ export function buildDebateWorkerMessages(
   instructions?: string,
   roundInfo?: RoundInfo,
   workerIndex?: number,
+  technique?: InteractionTechnique,
 ): ChatMessage[] {
   const nature = ctx.taskNature ?? "critique";
 
-  // System: same depth instructions + debate-specific rules
-  const systemParts: string[] = [];
-
-  if (instructions) {
-    systemParts.push(`<host-instructions>${instructions}</host-instructions>`);
-  }
-
-  systemParts.push(`<role>Think thoroughly. You are seeing other analysts' positions.</role>`);
-
-  systemParts.push(
-    `<rules>\n` +
-    `- Respond to each analyst's key argument specifically.\n` +
-    `- Then state whether and how your position changed.\n` +
-    `</rules>`,
+  // System: depth instructions only (constant for prompt caching)
+  const systemContent = buildSystemPrompt(
+    "Think thoroughly. You are seeing other analysts' positions.",
+    nature,
   );
 
-  systemParts.push(nature === "artifact" ? DEPTH_INSTRUCTIONS_ARTIFACT : DEPTH_INSTRUCTIONS_CRITIQUE);
-
-  // User: context + task at end
+  // User: instructions + technique + anti-conformity + context + task at end
   const userParts: string[] = [];
+
+  // Host instructions (in user message for prompt caching)
+  if (instructions) {
+    userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  }
+
+  // Technique emphasis (user message)
+  if (technique) {
+    userParts.push(TECHNIQUE_INSTRUCTIONS[technique]);
+  }
+
+  // Anti-conformity (when other responses are shared)
+  const hasOtherResponses = ctx.rounds.length > 0;
+  if (hasOtherResponses) {
+    userParts.push(technique === "accept" ? ANTI_CONFORMITY_ACCEPT : ANTI_CONFORMITY);
+  }
+
+  // Confidence & uncertainty (always)
+  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
 
   const lastRound = ctx.rounds[ctx.rounds.length - 1];
 
@@ -236,7 +283,7 @@ export function buildDebateWorkerMessages(
   userParts.push(`## Task\n${ctx.task}`);
 
   return [
-    { role: "system", content: systemParts.join("\n\n") },
+    { role: "system", content: systemContent },
     { role: "user", content: userParts.join("\n\n") },
   ];
 }
@@ -256,8 +303,26 @@ export function buildDebateFollowUp(
   ctx: SharedContext,
   otherResponses: readonly WorkerResponse[],
   roundInfo?: RoundInfo,
+  instructions?: string,
+  technique?: InteractionTechnique,
 ): ChatMessage {
   const parts: string[] = [];
+
+  // Host instructions
+  if (instructions) {
+    parts.push(`<host-instructions>${instructions}</host-instructions>`);
+  }
+
+  // Technique emphasis
+  if (technique) {
+    parts.push(TECHNIQUE_INSTRUCTIONS[technique]);
+  }
+
+  // Anti-conformity (follow-up always has other responses context)
+  parts.push(technique === "accept" ? ANTI_CONFORMITY_ACCEPT : ANTI_CONFORMITY);
+
+  // Confidence & uncertainty
+  parts.push(CONFIDENCE_AND_UNCERTAINTY);
 
   // Other workers' full responses in 3rd person (sycophancy reduction + full context)
   if (otherResponses.length > 0) {
@@ -266,9 +331,6 @@ export function buildDebateFollowUp(
       .join("\n\n");
     parts.push(`## Other Positions\n${others}`);
   }
-
-  // Engagement + steelman + position update
-  parts.push("Respond to each analyst's key argument specifically. Then construct the strongest argument against your own position and address it. State whether and how your position changed.");
 
   // Round strategy
   if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {

@@ -11,6 +11,8 @@ import {
   TeamDegradedError,
   MIN_WORKER_RESPONSE_LENGTH,
   minViableTeamSize,
+  parseConfidence,
+  levenshteinDistance,
   type EngineDeps,
   type EngineConfig,
   type ChatResult,
@@ -267,9 +269,11 @@ describe("deliberate", () => {
     const input = makeInput();
     const config = makeConfig({ maxRounds: 3 });
 
+    let callCount = 0;
     const deps = makeDeps({
       chat: mock(async (_model: string) => {
-        return chatResult(validWorkerContent("worker"), 5, 10);
+        // Content must differ substantially between rounds to avoid convergence detection
+        return chatResult(`Round ${++callCount} unique content: ${"x".repeat(callCount * 50)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."), 5, 10);
       }),
     });
 
@@ -284,9 +288,10 @@ describe("deliberate", () => {
     const input = makeInput();
     const config = makeConfig({ maxRounds: 3 });
 
+    let callCount = 0;
     const deps = makeDeps({
       chat: mock(async (_model: string) => {
-        return chatResult(validWorkerContent("w"), 100, 200);
+        return chatResult(`Call ${++callCount} unique content: ${"y".repeat(callCount * 50)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."), 100, 200);
       }),
     });
 
@@ -731,9 +736,10 @@ describe("debate protocol", () => {
 
     const debateContexts: string[] = [];
 
+    let callCount = 0;
     const deps = makeDeps({
       chat: mock(async (_model: string) => {
-        return chatResult(validWorkerContent(`response`), 10, 20);
+        return chatResult(`Response ${++callCount} unique: ${"z".repeat(callCount * 50)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."), 10, 20);
       }),
       buildDebateWorkerMessages: mock((ctx: any, _instructions?: any, _roundInfo?: any, _idx?: any) => {
         // Capture the number of previous rounds visible to debate builder
@@ -883,7 +889,7 @@ describe("session continuation in debate R2+", () => {
     let followUpCallCount = 0;
     const allMessages: ChatMessage[][] = [];
 
-    const followUpMock = mock((_ctx: any, _others: any, _round?: any) => {
+    const followUpMock = mock((_ctx: any, _others: any, _round?: any, _instructions?: any) => {
       followUpCallCount++;
       return { role: "user" as const, content: "follow-up-other-positions" };
     });
@@ -974,7 +980,7 @@ describe("session invalidation on model swap in R2+", () => {
           { role: "user" as const, content: "cold-join-user" },
         ];
       }),
-      buildDebateFollowUp: mock((_ctx: any, _others: any, _round?: any) => {
+      buildDebateFollowUp: mock((_ctx: any, _others: any, _round?: any, _instructions?: any) => {
         followUpUsed = true;
         return { role: "user" as const, content: "follow-up" };
       }),
@@ -1022,7 +1028,7 @@ describe("session invalidation on model swap in R2+", () => {
           { role: "user" as const, content: "rebuild-user" },
         ];
       }),
-      buildDebateFollowUp: mock((_ctx: any, _others: any) => {
+      buildDebateFollowUp: mock((_ctx: any, _others: any, _round?: any, _instructions?: any) => {
         return { role: "user" as const, content: "follow-up" };
       }),
     });
@@ -1067,7 +1073,7 @@ describe("session invalidation on model swap in R2+", () => {
           { role: "user" as const, content: "rebuild-user" },
         ];
       }),
-      buildDebateFollowUp: mock((_ctx: any, _others: any) => {
+      buildDebateFollowUp: mock((_ctx: any, _others: any, _round?: any, _instructions?: any) => {
         return { role: "user" as const, content: "follow-up" };
       }),
     });
@@ -1358,7 +1364,7 @@ describe("multi-round multi-swap context integrity", () => {
         if (model === "worker/model-1" && round === 1) {
           throw new Error("R1 failure");
         }
-        return chatResult(validWorkerContent(`response-from-${model}-r${round}`));
+        return chatResult(`Response from ${model} round ${round}: ${"r".repeat(round * 80)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."));
       }),
       buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
         return [{ role: "user" as const, content: "debate" }];
@@ -2285,5 +2291,210 @@ describe("replenishment after R1 failures", () => {
     expect(output.roundsExecuted).toBe(1);
     expect(output.rounds![0]!.responses!.length).toBe(5);
     expect(output.rounds![0]!.responses!.every(r => r.model === "prov-0/model-0")).toBe(true);
+  });
+});
+
+// =============================================================================
+// Confidence Parsing
+// =============================================================================
+
+describe("parseConfidence", () => {
+  it("should parse 'HIGH confidence'", () => {
+    expect(parseConfidence("This is HIGH confidence claim")).toBe("high");
+  });
+
+  it("should parse 'confidence: MEDIUM'", () => {
+    expect(parseConfidence("My assessment (confidence: MEDIUM) is that")).toBe("medium");
+  });
+
+  it("should parse 'LOW:'", () => {
+    expect(parseConfidence("LOW: this is speculative")).toBe("low");
+  });
+
+  it("should return undefined when no markers", () => {
+    expect(parseConfidence("I think this is probably correct")).toBeUndefined();
+  });
+
+  it("should return most frequent when mixed", () => {
+    expect(parseConfidence("HIGH confidence here. MEDIUM confidence there. HIGH confidence again.")).toBe("high");
+  });
+
+  it("should be case insensitive", () => {
+    expect(parseConfidence("high confidence in this claim")).toBe("high");
+  });
+});
+
+// =============================================================================
+// Levenshtein Distance
+// =============================================================================
+
+describe("levenshteinDistance", () => {
+  it("should return 0 for identical strings", () => {
+    expect(levenshteinDistance("abc", "abc")).toBe(0);
+  });
+
+  it("should handle empty strings", () => {
+    expect(levenshteinDistance("", "abc")).toBe(3);
+    expect(levenshteinDistance("abc", "")).toBe(3);
+  });
+
+  it("should compute correct distance", () => {
+    expect(levenshteinDistance("kitten", "sitting")).toBe(3);
+  });
+});
+
+// =============================================================================
+// Per-Round Technique
+// =============================================================================
+
+describe("per-round technique", () => {
+  it("should pass single technique to all rounds", async () => {
+    const team = makeTeam(1);
+    const input = makeInput({ technique: "challenge" });
+    const config = makeConfig({ maxRounds: 2 });
+
+    const techniques: (string | undefined)[] = [];
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(validWorkerContent("resp" + Math.random()))),
+      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any, technique?: any) => {
+        techniques.push(technique);
+        return [{ role: "user" as const, content: "work" }];
+      }),
+    });
+
+    await deliberate(team, input, deps, config);
+    expect(techniques.every(t => t === "challenge")).toBe(true);
+  });
+
+  it("should pass per-round techniques from array", async () => {
+    const team = makeTeam(1);
+    const input = makeInput({ technique: ["propose", "challenge", "defend"] as any });
+    const config = makeConfig({ maxRounds: 3 });
+
+    const techniques: (string | undefined)[] = [];
+    let callCount = 0;
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(`resp ${++callCount} ${"x".repeat(callCount * 50)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."))),
+      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any, technique?: any) => {
+        techniques.push(technique);
+        return [{ role: "user" as const, content: "work" }];
+      }),
+    });
+
+    await deliberate(team, input, deps, config);
+    expect(techniques).toEqual(["propose", "challenge", "defend"]);
+  });
+
+  it("should repeat last technique when array exhausted", async () => {
+    const team = makeTeam(1);
+    const input = makeInput({ technique: ["propose", "challenge"] as any });
+    const config = makeConfig({ maxRounds: 3 });
+
+    const techniques: (string | undefined)[] = [];
+    let callCount = 0;
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(`resp ${++callCount} ${"x".repeat(callCount * 50)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."))),
+      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any, technique?: any) => {
+        techniques.push(technique);
+        return [{ role: "user" as const, content: "work" }];
+      }),
+    });
+
+    await deliberate(team, input, deps, config);
+    expect(techniques).toEqual(["propose", "challenge", "challenge"]);
+  });
+
+  it("should pass undefined technique for empty array", async () => {
+    const team = makeTeam(1);
+    const input = makeInput({ technique: [] as any });
+    const config = makeConfig({ maxRounds: 1 });
+
+    const techniques: (string | undefined)[] = [];
+    const deps = makeDeps({
+      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any, technique?: any) => {
+        techniques.push(technique);
+        return [{ role: "user" as const, content: "work" }];
+      }),
+    });
+
+    await deliberate(team, input, deps, config);
+    expect(techniques).toEqual([undefined]);
+  });
+});
+
+// =============================================================================
+// Convergence Detection
+// =============================================================================
+
+describe("convergence detection", () => {
+  it("should terminate early when workers converge", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({ maxRounds: 5 });
+
+    // Same content every round → convergence after round 2
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(validWorkerContent("identical response every time"))),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+    // Should stop before maxRounds due to convergence
+    expect(output.roundsExecuted).toBeLessThan(5);
+  });
+
+  it("should NOT terminate early when responses differ", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const config = makeConfig({ maxRounds: 3 });
+
+    let callCount = 0;
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(`Unique response ${++callCount} ${"x".repeat(callCount * 80)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."))),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+    expect(output.roundsExecuted).toBe(3);
+  });
+
+  it("should NOT apply convergence when per-round technique array is specified", async () => {
+    const team = makeTeam(1);
+    const input = makeInput({ technique: ["propose", "accept", "challenge"] as any });
+    const config = makeConfig({ maxRounds: 3 });
+
+    // Same content → would normally converge, but per-round array disables convergence
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(validWorkerContent("same content every time"))),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+    expect(output.roundsExecuted).toBe(3);
+  });
+});
+
+// =============================================================================
+// Confidence in Output
+// =============================================================================
+
+describe("confidence in output", () => {
+  it("should include parsed confidence in round responses", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(validWorkerContent("HIGH confidence: this is correct"))),
+    });
+
+    const output = await deliberate(team, input, deps, makeConfig());
+    expect(output.rounds![0]!.responses![0]!.confidence).toBe("high");
+  });
+
+  it("should omit confidence when no markers", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(validWorkerContent("no markers here at all"))),
+    });
+
+    const output = await deliberate(team, input, deps, makeConfig());
+    expect(output.rounds![0]!.responses![0]!.confidence).toBeUndefined();
   });
 });

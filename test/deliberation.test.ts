@@ -147,8 +147,9 @@ describe("Deliberation E2E", () => {
   // ----------------------------------------------------------
   it("should complete multi-round deliberation", async () => {
     // Arrange
+    let callNum = 0;
     const chatFn = mock(async (_model: string, _messages: ChatMessage[]) => {
-      return chatResult(validWorker("Worker response"));
+      return chatResult(validWorker(`Worker response ${++callNum} ${"x".repeat(callNum * 40)}`));
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
@@ -169,8 +170,9 @@ describe("Deliberation E2E", () => {
   // ----------------------------------------------------------
   it("should run all rounds when maxRounds is specified", async () => {
     // Arrange
+    let callNum = 0;
     const chatFn = mock(async (_model: string, _messages: ChatMessage[]) => {
-      return chatResult(validWorker("Worker attempt"));
+      return chatResult(validWorker(`Worker attempt ${++callNum} ${"y".repeat(callNum * 40)}`));
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
@@ -191,10 +193,10 @@ describe("Deliberation E2E", () => {
   // ----------------------------------------------------------
   it("should pass workerInstructions to prompts", async () => {
     // Arrange
-    const capturedSystemMessages: string[] = [];
+    const capturedUserMessages: string[] = [];
     const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
-      const systemMsg = messages.find((m) => m.role === "system")?.content ?? "";
-      capturedSystemMessages.push(systemMsg);
+      const userMsg = messages.find((m) => m.role === "user")?.content ?? "";
+      capturedUserMessages.push(userMsg);
       return chatResult(validWorker("Worker output"));
     });
 
@@ -207,9 +209,9 @@ describe("Deliberation E2E", () => {
       workerInstructions: "Use TypeScript strictly",
     });
 
-    // Assert — worker instructions appear in worker calls (with role prompt).
-    const workerMsgs = capturedSystemMessages.filter(
-      (msg) => msg.includes("Use TypeScript strictly") && msg.includes("<role>"),
+    // Assert — worker instructions appear in user message (moved from system for caching).
+    const workerMsgs = capturedUserMessages.filter(
+      (msg) => msg.includes("Use TypeScript strictly"),
     );
     expect(workerMsgs.length).toBeGreaterThanOrEqual(1);
   });
@@ -313,8 +315,9 @@ describe("Deliberation E2E", () => {
   // ----------------------------------------------------------
   it("should accumulate tokens across multiple rounds", async () => {
     // Arrange
+    let callNum = 0;
     const chatFn = mock(async (_model: string, _messages: ChatMessage[]) => {
-      return chatResult(validWorker("Worker response"), 30, 60);
+      return chatResult(validWorker(`Worker response ${++callNum} ${"t".repeat(callNum * 40)}`), 30, 60);
     });
 
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });

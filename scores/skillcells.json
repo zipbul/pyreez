@@ -483,23 +483,23 @@
       "task_type": "SYSTEM_DESIGN",
       "dimensions": {
         "factually_correct": {
-          "alpha": 2,
+          "alpha": 6,
           "beta": 2
         },
         "addresses_task": {
-          "alpha": 2,
+          "alpha": 6,
           "beta": 2
         },
         "provides_evidence": {
-          "alpha": 3,
+          "alpha": 7,
           "beta": 1
         },
         "novel_perspective": {
-          "alpha": 3,
-          "beta": 1
+          "alpha": 6,
+          "beta": 2
         },
         "internally_consistent": {
-          "alpha": 3,
+          "alpha": 7,
           "beta": 1
         }
       },
@@ -509,7 +509,7 @@
         "off_topic": 0,
         "degenerate": 0
       },
-      "total": 2
+      "total": 6
     },
     "local/ai/deepseek-r1-distill-llama:ARCHITECTURE:SYSTEM_DESIGN": {
       "model_id": "local/ai/deepseek-r1-distill-llama",
@@ -782,6 +782,142 @@
         "degenerate": 0
       },
       "total": 1
+    },
+    "anthropic/claude-opus-4.6:ARCHITECTURE:QUESTION_ANSWER": {
+      "model_id": "anthropic/claude-opus-4.6",
+      "domain": "ARCHITECTURE",
+      "task_type": "QUESTION_ANSWER",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 19,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 19,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 19,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 19,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 19,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 18
+    },
+    "anthropic/claude-opus-4.6:IDEATION:QUESTION_ANSWER": {
+      "model_id": "anthropic/claude-opus-4.6",
+      "domain": "IDEATION",
+      "task_type": "QUESTION_ANSWER",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 4,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 4,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 4,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 4,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 4,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 3
+    },
+    "anthropic/claude-opus-4.6:IDEATION:BUSINESS_IDEATION": {
+      "model_id": "anthropic/claude-opus-4.6",
+      "domain": "IDEATION",
+      "task_type": "BUSINESS_IDEATION",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "addresses_task": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "provides_evidence": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "novel_perspective": {
+          "alpha": 2,
+          "beta": 1
+        },
+        "internally_consistent": {
+          "alpha": 2,
+          "beta": 1
+        }
+      },
+      "failure_counts": {
+        "hallucination": 0,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 1
+    },
+    "anthropic/claude-opus-4.6:REVIEW:final_design_review": {
+      "model_id": "anthropic/claude-opus-4.6",
+      "domain": "REVIEW",
+      "task_type": "final_design_review",
+      "dimensions": {
+        "factually_correct": {
+          "alpha": 4,
+          "beta": 2
+        },
+        "addresses_task": {
+          "alpha": 4,
+          "beta": 2
+        },
+        "provides_evidence": {
+          "alpha": 4,
+          "beta": 2
+        },
+        "novel_perspective": {
+          "alpha": 4,
+          "beta": 2
+        },
+        "internally_consistent": {
+          "alpha": 4,
+          "beta": 2
+        }
+      },
+      "failure_counts": {
+        "hallucination": 1,
+        "refusal": 0,
+        "off_topic": 0,
+        "degenerate": 0
+      },
+      "total": 4
     }
   }
 }

@@ -367,11 +367,13 @@ describe("PyreezMcpServer", () => {
       expect(result.isError).toBeUndefined();
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed.scored).toHaveLength(1);
-      expect(parsed.scored[0].id).toBe("a/m1");
+      // Model IDs are anonymized — real IDs must not appear
+      expect(parsed.scored[0].id).toBe("A");
+      expect(parsed.scored[0].provider).toMatch(/^P\d+$/);
       expect(parsed.scored[0].score).toBeGreaterThan(0);
       expect(parsed.unscored).toHaveLength(1);
-      expect(parsed.unscored[0].id).toBe("b/m2");
-      expect(parsed.trial_recommended).toContain("b/m2");
+      expect(parsed.unscored[0].id).toBe("B");
+      expect(parsed.trial_recommended).toContain("B");
     });
 
     it("should filter scored by min_score and show closest when none above", async () => {
@@ -411,7 +413,7 @@ describe("PyreezMcpServer", () => {
       const result = await server.handleScores({ domain: "CODING", task_type: "T", min_score: 0.95 });
       const parsed = JSON.parse((result.content[0] as { text: string }).text);
       expect(parsed.scored).toHaveLength(1); // only the closest
-      expect(parsed.scored[0].id).toBe("a/m1"); // highest score
+      expect(parsed.scored[0].id).toBe("A"); // highest score, anonymized
       expect(parsed.note).toContain("no models above");
 
       // min_score=0.5 — a/m1 above → only a/m1 returned
@@ -656,6 +658,114 @@ describe("PyreezMcpServer", () => {
     });
   });
 
+  // === Model Anonymization ===
+
+  describe("model anonymization", () => {
+    function makeFilteredRegistry() {
+      const models = [
+        { id: "openai/gpt-4.1", provider: "openai", cost: { inputPer1M: 2, outputPer1M: 8 }, contextWindow: 128000, capabilities: {}, supportsToolCalling: true, available: true },
+        { id: "anthropic/claude-opus-4.6", provider: "anthropic", cost: { inputPer1M: 5, outputPer1M: 25 }, contextWindow: 128000, capabilities: {}, supportsToolCalling: true, available: true },
+      ];
+      return {
+        getAll: () => models as any,
+        getAvailable: () => models as any,
+        getById: (id: string) => models.find(m => m.id === id) as any,
+      };
+    }
+
+    it("should never expose real model IDs in scores response", async () => {
+      const server = new PyreezMcpServer(validConfig({ filteredRegistry: makeFilteredRegistry() }));
+      const result = await server.handleScores({ domain: "CODING" });
+      const text = (result.content[0] as { text: string }).text;
+
+      expect(text).not.toContain("openai/gpt-4.1");
+      expect(text).not.toContain("anthropic/claude-opus-4.6");
+      expect(text).not.toContain('"openai"');
+      expect(text).not.toContain('"anthropic"');
+    });
+
+    it("should resolve anonymous IDs in deliberate input", async () => {
+      const deliberateFn = mock(() => Promise.resolve({
+        roundsExecuted: 1, totalTokens: { input: 0, output: 0 }, totalLLMCalls: 1, modelsUsed: ["openai/gpt-4.1"],
+      }));
+      const server = new PyreezMcpServer(validConfig({ filteredRegistry: makeFilteredRegistry(), deliberateFn }));
+
+      // First call scores to create mapping
+      await server.handleScores({ domain: "CODING" });
+
+      // Then call deliberate with anonymous IDs
+      await server.handleDeliberate({ task: "test", models: ["A", "B"] });
+
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
+      // Unscored sorted by cost desc: anthropic (25)=A, openai (8)=B
+      expect(callArg.models).toEqual(["anthropic/claude-opus-4.6", "openai/gpt-4.1"]);
+    });
+
+    it("should anonymize model IDs in deliberate output", async () => {
+      const deliberateFn = mock(() => Promise.resolve({
+        roundsExecuted: 1, totalTokens: { input: 100, output: 200 }, totalLLMCalls: 2,
+        modelsUsed: ["openai/gpt-4.1", "anthropic/claude-opus-4.6"],
+        rounds: [{ number: 1, responses: [
+          { model: "openai/gpt-4.1", content: "response 1" },
+          { model: "anthropic/claude-opus-4.6", content: "response 2" },
+        ]}],
+      }));
+      const server = new PyreezMcpServer(validConfig({ filteredRegistry: makeFilteredRegistry(), deliberateFn }));
+
+      await server.handleScores({ domain: "CODING" });
+      const result = await server.handleDeliberate({ task: "test", models: ["A"] });
+      const text = (result.content[0] as { text: string }).text;
+
+      expect(text).not.toContain("openai/gpt-4.1");
+      expect(text).not.toContain("anthropic/claude-opus-4.6");
+
+      const parsed = JSON.parse(text);
+      // openai→B, anthropic→A (cost desc sort in scores)
+      expect(parsed.modelsUsed).toEqual(["B", "A"]);
+      expect(parsed.rounds[0].responses[0].model).toBe("B");
+      expect(parsed.rounds[0].responses[1].model).toBe("A");
+    });
+
+    it("should resolve anonymous IDs in feedback and update real model", async () => {
+      const mockStore = {
+        update: mock(() => {}), save: mock(async () => {}),
+        get: mock(() => undefined), getForDomain: mock(() => []),
+        getAll: mock(() => []), getAllForModel: mock(() => []), getAllForFamily: mock(() => []),
+        load: mock(async () => {}), setFamilyLookup: mock(() => {}),
+      };
+      const server = new PyreezMcpServer(validConfig({ filteredRegistry: makeFilteredRegistry(), skillCellStore: mockStore as any }));
+
+      // Create mapping via scores
+      await server.handleScores({ domain: "CODING" });
+
+      // Submit feedback with anonymous ID
+      await server.handleFeedback({
+        evaluations: [{
+          model_id: "A", domain: "CODING", task_type: "IMPL",
+          dimensions: { factually_correct: true, addresses_task: true, provides_evidence: true, novel_perspective: true, internally_consistent: true },
+          failures: { hallucination: false, refusal: false, off_topic: false, degenerate: false },
+        }],
+      });
+
+      // SkillCell should be updated with REAL model ID (A→anthropic)
+      const updateArg = (mockStore.update as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(updateArg.model_id).toBe("anthropic/claude-opus-4.6");
+    });
+
+    it("should reset anonymization on new scores call", async () => {
+      const server = new PyreezMcpServer(validConfig({ filteredRegistry: makeFilteredRegistry() }));
+
+      const result1 = await server.handleScores({ domain: "CODING" });
+      const parsed1 = JSON.parse((result1.content[0] as { text: string }).text);
+
+      // Second call resets mapping — IDs should be the same (A, B again)
+      const result2 = await server.handleScores({ domain: "CODING" });
+      const parsed2 = JSON.parse((result2.content[0] as { text: string }).text);
+
+      expect(parsed1.scored[0]?.id ?? parsed1.unscored[0]?.id).toBe(parsed2.scored[0]?.id ?? parsed2.unscored[0]?.id);
+    });
+  });
+
   // === Run Logging ===
 
   describe("run logging", () => {
@@ -689,6 +799,76 @@ describe("PyreezMcpServer", () => {
 
       const result = await server.handleDeliberate({ task: "test task", models: ["m1"] });
       expect(result.isError).toBeUndefined();
+    });
+  });
+
+  // === technique parameter ===
+
+  describe("technique parameter", () => {
+    const DELIBERATE_OUTPUT: DeliberateOutput = {
+      roundsExecuted: 1,
+      totalTokens: { input: 10, output: 20 },
+      totalLLMCalls: 2,
+      modelsUsed: ["worker/a"],
+      rounds: [{ number: 1, responses: [{ model: "worker/a", content: "resp", confidence: "high" }] }],
+    };
+
+    function stubDeliberateFn(): (input: DeliberateInput) => Promise<DeliberateOutput> {
+      return mock(() => Promise.resolve(DELIBERATE_OUTPUT)) as any;
+    }
+
+    it("should forward single technique to deliberateFn", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      await server.handleDeliberate({
+        task: "task",
+        models: ["openai/gpt-4.1"],
+        technique: "challenge",
+      });
+
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(callArg.technique).toBe("challenge");
+    });
+
+    it("should forward array technique to deliberateFn", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      await server.handleDeliberate({
+        task: "task",
+        models: ["openai/gpt-4.1"],
+        technique: ["propose", "challenge", "defend"],
+      });
+
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(callArg.technique).toEqual(["propose", "challenge", "defend"]);
+    });
+
+    it("should include confidence in output responses", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      const result = await server.handleDeliberate({
+        task: "task",
+        models: ["openai/gpt-4.1"],
+      });
+
+      const parsed = JSON.parse((result.content[0] as { text: string }).text);
+      expect(parsed.rounds[0].responses[0].confidence).toBe("high");
+    });
+
+    it("should not include technique in input when omitted", async () => {
+      const deliberateFn = stubDeliberateFn();
+      const server = new PyreezMcpServer(validConfig({ deliberateFn }));
+
+      await server.handleDeliberate({
+        task: "task",
+        models: ["openai/gpt-4.1"],
+      });
+
+      const callArg = (deliberateFn as ReturnType<typeof mock>).mock.calls[0]![0];
+      expect(callArg.technique).toBeUndefined();
     });
   });
 

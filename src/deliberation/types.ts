@@ -9,6 +9,16 @@
 
 import type { TaskNature } from "./task-nature";
 
+// -- Interaction Technique --
+
+/**
+ * Interaction techniques for multi-round deliberation.
+ * Emphasis, not constraint — workers may include other observations.
+ */
+export type InteractionTechnique =
+  | "challenge" | "defend" | "accept" | "probe"
+  | "propose" | "extend" | "transform";
+
 // -- Generation Parameters --
 
 /**
@@ -55,6 +65,8 @@ export interface WorkerResponse {
   readonly content: string;
   /** Positional index in the diverge phase. */
   readonly workerIndex: number;
+  /** Self-reported confidence from explicit markers. undefined = no marker found. */
+  readonly confidence?: "high" | "medium" | "low";
 }
 
 /**
@@ -146,6 +158,12 @@ export interface DeliberateInput {
   readonly domain?: string;
   /** Task type for SkillCell evaluator. */
   readonly taskType?: string;
+  /**
+   * Interaction technique. Emphasis, not constraint.
+   * Single value: all rounds. Array: per-round (last repeats on exhaustion).
+   * Empty array or undefined: no technique (existing behavior).
+   */
+  readonly technique?: InteractionTechnique | readonly InteractionTechnique[];
 }
 
 /**
@@ -166,7 +184,7 @@ export interface DeliberateOutput {
   /** Per-round details for diagnostics. */
   readonly rounds?: readonly {
     number: number;
-    responses?: readonly { model: string; content: string }[];
+    responses?: readonly { model: string; content: string; confidence?: "high" | "medium" | "low" }[];
     failedWorkers?: readonly FailedWorker[];
   }[];
   /** Warnings about deliberation quality (e.g., low provider diversity). */

@@ -60,7 +60,14 @@ export class AnthropicProvider implements LLMProvider {
         max_tokens: request.max_tokens ?? 4096,
       };
       if (systemParts.length > 0) {
-        params.system = systemParts.join("\n\n");
+        // Use TextBlockParam with cache_control for prompt caching.
+        // Multi-turn: cache point moves forward automatically as conversation grows.
+        // Cache read = 10% of base input cost (90% savings on R2+).
+        params.system = [{
+          type: "text" as const,
+          text: systemParts.join("\n\n"),
+          cache_control: { type: "ephemeral" as const },
+        }];
       }
       if (request.temperature != null) {
         params.temperature = request.temperature;

@@ -9,7 +9,12 @@ import {
   buildDebateFollowUp,
   buildAcceptanceMessages,
   extractDebateDigest,
+  TECHNIQUE_INSTRUCTIONS,
+  ANTI_CONFORMITY,
+  ANTI_CONFORMITY_ACCEPT,
+  CONFIDENCE_AND_UNCERTAINTY,
 } from "./prompts";
+import type { InteractionTechnique } from "./types";
 import type {
   SharedContext,
   Round,
@@ -109,9 +114,14 @@ describe("buildWorkerMessages", () => {
     expect(m1).toEqual(m2);
   });
 
-  it("should include host instructions", () => {
+  it("should include host instructions in user message", () => {
+    const user = buildWorkerMessages(makeCtx(), "Use TypeScript strict mode")[1]!.content;
+    expect(user).toContain("<host-instructions>Use TypeScript strict mode</host-instructions>");
+  });
+
+  it("should NOT include host instructions in system message", () => {
     const sys = buildWorkerMessages(makeCtx(), "Use TypeScript strict mode")[0]!.content;
-    expect(sys).toContain("Use TypeScript strict mode");
+    expect(sys).not.toContain("host-instructions");
   });
 
   it("should include diverge strategy on R1 of multi-round", () => {
@@ -187,11 +197,21 @@ describe("buildDebateWorkerMessages", () => {
     expect(sys).toContain("verify your key claims");
   });
 
-  it("should include compressed anti-sycophancy rules", () => {
+  it("should NOT include hardcoded rules — interaction style is host-controlled via worker_instructions", () => {
     const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[0]!.content!;
-    expect(sys).toContain("Respond to each analyst");
-    expect(sys).toContain("position changed");
-    expect(sys).not.toContain("Do NOT agree merely to be polite");
+    expect(sys).not.toContain("<rules>");
+    expect(sys).not.toContain("Respond to each analyst");
+    expect(sys).not.toContain("position changed");
+  });
+
+  it("should include worker_instructions as host-instructions in user message", () => {
+    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), "Build on strongest elements")[1]!.content!;
+    expect(user).toContain("<host-instructions>Build on strongest elements</host-instructions>");
+  });
+
+  it("should NOT include host-instructions in system message", () => {
+    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]), "Build on strongest elements")[0]!.content!;
+    expect(sys).not.toContain("host-instructions");
   });
 
   it("should NOT include domain hints in debate", () => {
@@ -199,9 +219,9 @@ describe("buildDebateWorkerMessages", () => {
     expect(sys).not.toContain("<domain>");
   });
 
-  it("should include host instructions", () => {
-    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]), "Focus on performance")[0]!.content!;
-    expect(sys).toContain("Focus on performance");
+  it("should include host instructions in user message", () => {
+    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), "Focus on performance")[1]!.content!;
+    expect(user).toContain("Focus on performance");
   });
 
   it("should include final round commitment", () => {
@@ -267,11 +287,17 @@ describe("buildDebateFollowUp", () => {
     expect(msg.content).toContain("Redis");
   });
 
-  it("should include engagement + position change instruction", () => {
+  it("should NOT include hardcoded engagement — interaction is host-controlled", () => {
     const ctx = makeCtx([makeRound(1)]);
     const msg = buildDebateFollowUp(ctx, [makeResponse("w/b", "position", 1)]);
-    expect(msg.content).toContain("Respond to each analyst");
-    expect(msg.content).toContain("position changed");
+    expect(msg.content).not.toContain("Respond to each analyst");
+    expect(msg.content).not.toContain("position changed");
+  });
+
+  it("should include instructions when provided", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const msg = buildDebateFollowUp(ctx, [makeResponse("w/b", "position", 1)], undefined, "Build on strongest elements");
+    expect(msg.content).toContain("Build on strongest elements");
   });
 
   it("should include final round commitment", () => {
@@ -439,5 +465,129 @@ describe("debate full response sharing", () => {
     // Full content, not just digest
     expect(user).toContain("cheap and reliable");
     expect(user).toContain("Slow under load");
+  });
+});
+
+// ================================================================
+// Interaction Technique Tests
+// ================================================================
+
+describe("technique instructions", () => {
+  const ALL_TECHNIQUES: InteractionTechnique[] = [
+    "challenge", "defend", "accept", "probe", "propose", "extend", "transform",
+  ];
+
+  describe("buildWorkerMessages", () => {
+    for (const t of ALL_TECHNIQUES) {
+      it(`should include ${t} instruction in user message`, () => {
+        const user = buildWorkerMessages(makeCtx(), undefined, undefined, undefined, t)[1]!.content!;
+        expect(user).toContain(TECHNIQUE_INSTRUCTIONS[t]);
+      });
+    }
+
+    it("should NOT include technique in system message", () => {
+      const sys = buildWorkerMessages(makeCtx(), undefined, undefined, undefined, "challenge")[0]!.content!;
+      expect(sys).not.toContain("Focus on identifying weaknesses");
+    });
+
+    it("should NOT include technique when undefined", () => {
+      const user = buildWorkerMessages(makeCtx())[1]!.content!;
+      expect(user).not.toContain("Focus on identifying");
+      expect(user).not.toContain("Focus on defending");
+      expect(user).not.toContain("Focus on offering");
+    });
+
+    it("should combine technique + workerInstructions", () => {
+      const user = buildWorkerMessages(makeCtx(), "Custom instructions", undefined, undefined, "probe")[1]!.content!;
+      expect(user).toContain("Custom instructions");
+      expect(user).toContain(TECHNIQUE_INSTRUCTIONS.probe);
+    });
+  });
+
+  describe("buildDebateWorkerMessages", () => {
+    for (const t of ALL_TECHNIQUES) {
+      it(`should include ${t} instruction in user message`, () => {
+        const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, undefined, 0, t)[1]!.content!;
+        expect(user).toContain(TECHNIQUE_INSTRUCTIONS[t]);
+      });
+    }
+
+    it("should NOT include technique in system message", () => {
+      const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, undefined, 0, "propose")[0]!.content!;
+      expect(sys).not.toContain("Focus on offering");
+    });
+  });
+
+  describe("buildDebateFollowUp", () => {
+    for (const t of ALL_TECHNIQUES) {
+      it(`should include ${t} instruction`, () => {
+        const msg = buildDebateFollowUp(makeCtx([makeRound(1)]), [], undefined, undefined, t);
+        expect(msg.content).toContain(TECHNIQUE_INSTRUCTIONS[t]);
+      });
+    }
+  });
+
+  it("transform should include scope restriction", () => {
+    expect(TECHNIQUE_INSTRUCTIONS.transform).toContain("within the scope of the original question");
+  });
+});
+
+// ================================================================
+// Anti-Conformity Tests
+// ================================================================
+
+describe("anti-conformity", () => {
+  it("should include basic anti-conformity in debate when not accept", () => {
+    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, undefined, 0, "challenge")[1]!.content!;
+    expect(user).toContain(ANTI_CONFORMITY);
+    expect(user).not.toContain(ANTI_CONFORMITY_ACCEPT);
+  });
+
+  it("should include accept variant when technique=accept", () => {
+    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, undefined, 0, "accept")[1]!.content!;
+    expect(user).toContain(ANTI_CONFORMITY_ACCEPT);
+    expect(user).not.toContain("You may not rely on the principle of conformity");
+  });
+
+  it("should include anti-conformity in follow-up (default)", () => {
+    const msg = buildDebateFollowUp(makeCtx([makeRound(1)]), []);
+    expect(msg.content).toContain(ANTI_CONFORMITY);
+  });
+
+  it("should include accept variant in follow-up when technique=accept", () => {
+    const msg = buildDebateFollowUp(makeCtx([makeRound(1)]), [], undefined, undefined, "accept");
+    expect(msg.content).toContain(ANTI_CONFORMITY_ACCEPT);
+  });
+
+  it("should NOT include anti-conformity in R1 (no other responses shared)", () => {
+    const user = buildWorkerMessages(makeCtx(), undefined, undefined, undefined, "challenge")[1]!.content!;
+    expect(user).not.toContain("conformity");
+    expect(user).not.toContain("discrepancies");
+  });
+});
+
+// ================================================================
+// Confidence & Uncertainty Tests
+// ================================================================
+
+describe("confidence and uncertainty", () => {
+  it("should include confidence instruction in buildWorkerMessages", () => {
+    const user = buildWorkerMessages(makeCtx())[1]!.content!;
+    expect(user).toContain(CONFIDENCE_AND_UNCERTAINTY);
+  });
+
+  it("should include confidence instruction in buildDebateWorkerMessages", () => {
+    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[1]!.content!;
+    expect(user).toContain(CONFIDENCE_AND_UNCERTAINTY);
+  });
+
+  it("should include confidence instruction in buildDebateFollowUp", () => {
+    const msg = buildDebateFollowUp(makeCtx([makeRound(1)]), []);
+    expect(msg.content).toContain(CONFIDENCE_AND_UNCERTAINTY);
+  });
+
+  it("should NOT include confidence in system message", () => {
+    const sys = buildWorkerMessages(makeCtx())[0]!.content!;
+    expect(sys).not.toContain("confidence");
   });
 });

@@ -18,6 +18,7 @@ import type {
   DeliberateOutput,
   FailedWorker,
   GenerationParams,
+  InteractionTechnique,
   ModelSwap,
   Round,
   SharedContext,
@@ -137,6 +138,7 @@ export interface EngineDeps {
     instructions?: string,
     roundInfo?: RoundInfo,
     workerIndex?: number,
+    technique?: InteractionTechnique,
   ) => ChatMessage[];
   /** Debate protocol: full rebuild for cold join or first debate round. */
   readonly buildDebateWorkerMessages?: (
@@ -144,12 +146,15 @@ export interface EngineDeps {
     instructions?: string,
     roundInfo?: RoundInfo,
     workerIndex?: number,
+    technique?: InteractionTechnique,
   ) => ChatMessage[];
   /** Debate follow-up: append-only user message for session continuation in R2+. */
   readonly buildDebateFollowUp?: (
     ctx: SharedContext,
     otherResponses: readonly WorkerResponse[],
     roundInfo?: RoundInfo,
+    instructions?: string,
+    technique?: InteractionTechnique,
   ) => ChatMessage;
 }
 
@@ -163,9 +168,111 @@ export interface EngineConfig {
   readonly workerGenParams?: GenerationParams;
 }
 
+/** Default convergence threshold for early termination. */
+const CONVERGENCE_THRESHOLD = 0.15;
+
 const DEFAULT_CONFIG: EngineConfig = {
   maxRounds: 1,
 };
+
+// -- Confidence Parsing --
+
+/**
+ * Parse explicit confidence markers from worker response text.
+ * Only matches explicit markers — does not infer from hedging language.
+ */
+export function parseConfidence(text: string): "high" | "medium" | "low" | undefined {
+  const normalized = text.toLowerCase();
+  // Match patterns: "HIGH confidence", "confidence: HIGH", "HIGH:", "[HIGH]"
+  const pattern = /\b(high|medium|low)\s*(?:confidence|:)|\bconfidence\s*:\s*(high|medium|low)\b|\[(high|medium|low)\]/gi;
+  const counts = { high: 0, medium: 0, low: 0 };
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(normalized)) !== null) {
+    const level = (match[1] ?? match[2] ?? match[3])!.toLowerCase() as "high" | "medium" | "low";
+    counts[level]++;
+  }
+  const total = counts.high + counts.medium + counts.low;
+  if (total === 0) return undefined;
+  // Return the most frequent confidence level
+  if (counts.low >= counts.high && counts.low >= counts.medium) return "low";
+  if (counts.medium >= counts.high) return "medium";
+  return "high";
+}
+
+// -- Convergence Detection --
+
+/**
+ * Levenshtein distance between two strings.
+ * Direct implementation — no external packages (Bun-first).
+ */
+export function levenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+
+  // Use single-row optimization: O(n) space instead of O(m*n)
+  let prev = new Array<number>(n + 1);
+  let curr = new Array<number>(n + 1);
+
+  for (let j = 0; j <= n; j++) prev[j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(
+        prev[j]! + 1,      // deletion
+        curr[j - 1]! + 1,  // insertion
+        prev[j - 1]! + cost, // substitution
+      );
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n]!;
+}
+
+/**
+ * Check if all workers have converged (change rate below threshold).
+ * Returns true if convergence detected.
+ */
+function checkConvergence(
+  currentRound: Round,
+  previousRound: Round,
+  threshold: number,
+): boolean {
+  for (const current of currentRound.responses) {
+    const previous = previousRound.responses.find(
+      (r) => r.workerIndex === current.workerIndex,
+    );
+    if (!previous) return false; // New worker — not converged
+    const maxLen = Math.max(current.content.length, previous.content.length);
+    if (maxLen === 0) continue;
+    const distance = levenshteinDistance(current.content, previous.content);
+    const changeRate = distance / maxLen;
+    if (changeRate >= threshold) return false;
+  }
+  return currentRound.responses.length > 0;
+}
+
+// -- Per-Round Technique Resolution --
+
+/**
+ * Resolve technique for a given round index.
+ * Single value: same for all rounds. Array: per-round, last repeats on exhaustion.
+ * Empty array or undefined: no technique.
+ */
+function resolveTechnique(
+  technique: InteractionTechnique | readonly InteractionTechnique[] | undefined,
+  roundIndex: number,
+): InteractionTechnique | undefined {
+  if (!technique) return undefined;
+  if (typeof technique === "string") return technique;
+  if (technique.length === 0) return undefined;
+  return roundIndex < technique.length
+    ? technique[roundIndex]
+    : technique[technique.length - 1];
+}
 
 // -- FallbackPool Implementation --
 
@@ -276,6 +383,8 @@ async function callWithFallback(
   pool: FallbackPool | undefined,
   /** Previous message history for session continuation in R2+. */
   previousHistory?: ChatMessage[],
+  /** Technique for this round (resolved by caller). */
+  technique?: InteractionTechnique,
 ): Promise<WorkerCallResult> {
   const roundInfo: RoundInfo = { current: roundNumber, max: config.maxRounds };
   const isDebateR2 = config.protocol === "debate" && roundNumber > 1;
@@ -293,14 +402,14 @@ async function callWithFallback(
       const otherResponses = lastRound
         ? lastRound.responses.filter((r) => r.workerIndex !== workerIndex)
         : [];
-      const followUp = deps.buildDebateFollowUp(ctx, otherResponses, roundInfo);
+      const followUp = deps.buildDebateFollowUp(ctx, otherResponses, roundInfo, input.workerInstructions, technique);
       return [...activeHistory, followUp];
     }
     // Full rebuild: cold join, model swapped, or no history available
     if (isDebateR2 && deps.buildDebateWorkerMessages) {
-      return deps.buildDebateWorkerMessages(ctx, input.workerInstructions, roundInfo, workerIndex);
+      return deps.buildDebateWorkerMessages(ctx, input.workerInstructions, roundInfo, workerIndex, technique);
     }
-    return deps.buildWorkerMessages(ctx, input.workerInstructions, roundInfo, workerIndex);
+    return deps.buildWorkerMessages(ctx, input.workerInstructions, roundInfo, workerIndex, technique);
   };
 
   // Try original model
@@ -452,6 +561,8 @@ export async function executeRound(
   pool?: FallbackPool,
   /** Per-worker message histories from previous rounds for session continuation. */
   workerHistories?: ReadonlyMap<number, ChatMessage[]>,
+  /** Technique for this round (resolved by caller). */
+  technique?: InteractionTechnique,
 ): Promise<{ round: Round; tokens: TokenUsage; modelSwaps: ModelSwap[]; histories: Map<number, ChatMessage[]> }> {
   const divergeParticipants = [...ctx.team.workers];
 
@@ -459,7 +570,7 @@ export async function executeRound(
   const results = await Promise.allSettled(
     divergeParticipants.map((participant, index) =>
       callWithFallback(participant, index, ctx, roundNumber, deps, config, input, pool,
-        workerHistories?.get(index)),
+        workerHistories?.get(index), technique),
     ),
   );
 
@@ -562,10 +673,17 @@ export async function deliberate(
   const minViable = minViableTeamSize(originalTeamSize);
   let workerHistories: Map<number, ChatMessage[]> | undefined;
 
+  // Determine if convergence detection should be active
+  // Disabled when per-round technique array is specified (host's sequence is intentional)
+  const isPerRoundTechniqueArray = Array.isArray(input.technique) && input.technique.length > 0;
+  const convergenceEnabled = !isPerRoundTechniqueArray;
+
   for (let i = 1; i <= cfg.maxRounds; i++) {
+    const roundTechnique = resolveTechnique(input.technique, i - 1);
+
     let roundResult = await executeRound(
       ctx, ctx.rounds.length + 1, deps, cfg, input, fallbackDeps?.pool,
-      workerHistories,
+      workerHistories, roundTechnique,
     );
     // Update worker histories for session continuation in next round
     workerHistories = roundResult.histories;
@@ -670,18 +788,40 @@ export async function deliberate(
       }
     }
 
-    ctx = addRound(ctx, roundResult.round);
+    // Parse confidence from worker responses
+    const responsesWithConfidence = roundResult.round.responses.map((resp) => ({
+      ...resp,
+      confidence: parseConfidence(resp.content),
+    }));
+    const roundWithConfidence: Round = {
+      ...roundResult.round,
+      responses: responsesWithConfidence,
+    };
+
+    ctx = addRound(ctx, roundWithConfidence);
 
     // Accumulate metadata
-    allRounds.push(roundResult.round);
-    allLLMCalls += roundResult.round.responses.length + (roundResult.round.failedWorkers?.length ?? 0);
-    for (const resp of roundResult.round.responses) allModels.add(resp.model);
+    allRounds.push(roundWithConfidence);
+    allLLMCalls += roundWithConfidence.responses.length + (roundWithConfidence.failedWorkers?.length ?? 0);
+    for (const resp of roundWithConfidence.responses) allModels.add(resp.model);
+
+    // Convergence detection (early termination)
+    if (convergenceEnabled && i > 1 && i < cfg.maxRounds) {
+      const previousRound = allRounds[allRounds.length - 2];
+      if (previousRound && checkConvergence(roundWithConfidence, previousRound, CONVERGENCE_THRESHOLD)) {
+        break;
+      }
+    }
   }
 
   // -- Assemble output --
   const roundsSummary = allRounds.map((r, idx) => ({
     number: idx + 1,
-    responses: r.responses.map((resp) => ({ model: resp.model, content: resp.content })),
+    responses: r.responses.map((resp) => ({
+      model: resp.model,
+      content: resp.content,
+      ...(resp.confidence ? { confidence: resp.confidence } : {}),
+    })),
     ...(r.failedWorkers?.length ? { failedWorkers: r.failedWorkers } : {}),
   }));
 

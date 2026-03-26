@@ -60,6 +60,64 @@ export class PyreezMcpServer {
   private readonly skillCellStore?: import("../model/skillcell-store").SkillCellStore;
   private readonly filteredRegistry?: PyreezMcpServerConfig["filteredRegistry"];
 
+  // -- Model anonymization --
+  private anonToReal = new Map<string, string>();
+  private realToAnon = new Map<string, string>();
+  private providerRealToAnon = new Map<string, string>();
+  private nextAnonIndex = 0;
+  private nextProviderIndex = 0;
+
+  /** Get or create anonymous ID for a model. */
+  private anonymizeModel(realId: string): string {
+    let anon = this.realToAnon.get(realId);
+    if (!anon) {
+      const i = this.nextAnonIndex++;
+      // A-Z, then AA, AB, ...
+      anon = i < 26
+        ? String.fromCharCode(65 + i)
+        : String.fromCharCode(65 + Math.floor(i / 26) - 1) + String.fromCharCode(65 + (i % 26));
+      this.anonToReal.set(anon, realId);
+      this.realToAnon.set(realId, anon);
+    }
+    return anon;
+  }
+
+  /** Resolve anonymous ID to real model ID. Returns undefined if not found. */
+  private resolveModel(anonId: string): string | undefined {
+    return this.anonToReal.get(anonId);
+  }
+
+  /** Get or create anonymous provider label. */
+  private anonymizeProvider(realProvider: string): string {
+    let anon = this.providerRealToAnon.get(realProvider);
+    if (!anon) {
+      anon = `P${++this.nextProviderIndex}`;
+      this.providerRealToAnon.set(realProvider, anon);
+    }
+    return anon;
+  }
+
+  /** Replace all known real model IDs and provider names in text with anonymous equivalents. */
+  private anonymizeText(text: string): string {
+    let result = text;
+    for (const [real, anon] of this.realToAnon) {
+      result = result.replaceAll(real, anon);
+    }
+    for (const [real, anon] of this.providerRealToAnon) {
+      result = result.replaceAll(real, anon);
+    }
+    return result;
+  }
+
+  /** Reset all anonymization state (called on new scores request). */
+  private resetAnonymization(): void {
+    this.anonToReal.clear();
+    this.realToAnon.clear();
+    this.providerRealToAnon.clear();
+    this.nextAnonIndex = 0;
+    this.nextProviderIndex = 0;
+  }
+
   constructor(config: PyreezMcpServerConfig) {
     if (!config.mcpServer) {
       throw new Error("mcpServer is required");
@@ -146,6 +204,13 @@ export class PyreezMcpServer {
             .enum(["diverge-synth", "debate"])
             .optional()
             .describe("Deliberation protocol. 'debate' enables multi-round debate where workers see each other's responses."),
+          technique: z
+            .union([
+              z.enum(["challenge", "defend", "accept", "probe", "propose", "extend", "transform"]),
+              z.array(z.enum(["challenge", "defend", "accept", "probe", "propose", "extend", "transform"])),
+            ])
+            .optional()
+            .describe("Interaction technique. Single value for all rounds, or array for per-round. Emphasis, not constraint."),
         }),
       },
       async (args) => this.handleDeliberate(args),
@@ -264,6 +329,9 @@ export class PyreezMcpServer {
         return this.errorResult("Error: registry not available");
       }
 
+      // New scores request = new deliberation session
+      this.resetAnonymization();
+
       const available = reg.getAvailable();
       const weights = getDomainWeights(args.domain);
       const taskType = args.task_type;
@@ -373,10 +441,23 @@ export class PyreezMcpServer {
       // trial_recommended: unscored, cost descending, max 3
       const trialRecommended = unscored.slice(0, 3).map((m) => m.id);
 
+      // Anonymize all model IDs and providers
+      const anonScored = filteredScored.map((m) => ({
+        ...m,
+        id: this.anonymizeModel(m.id),
+        provider: this.anonymizeProvider(m.provider),
+      }));
+      const anonUnscored = unscored.map((m) => ({
+        ...m,
+        id: this.anonymizeModel(m.id),
+        provider: this.anonymizeProvider(m.provider),
+      }));
+      const anonTrial = trialRecommended.map((id) => this.anonymizeModel(id));
+
       return this.textResult(JSON.stringify({
-        scored: filteredScored,
-        unscored,
-        trial_recommended: trialRecommended,
+        scored: anonScored,
+        unscored: anonUnscored,
+        trial_recommended: anonTrial,
         ...(note ? { note } : {}),
       }, null, 2));
     });
@@ -391,6 +472,7 @@ export class PyreezMcpServer {
     worker_instructions?: string;
     max_rounds?: number;
     protocol?: string;
+    technique?: string | string[];
   }): Promise<CallToolResult> {
     return this.logRun("deliberate", async () => {
     if (!args.task) {
@@ -405,12 +487,15 @@ export class PyreezMcpServer {
     }
 
     try {
+      // Resolve anonymous model IDs to real ones
+      const resolvedModels = args.models.map((id) => this.resolveModel(id) ?? id);
+
       const userProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
       const taskNature = args.domain ? resolveTaskNature(args.domain, args.task_type) : undefined;
 
       const input: DeliberateInput = {
         task: args.task,
-        models: args.models,
+        models: resolvedModels,
         count: args.count,
         workerInstructions: args.worker_instructions,
         maxRounds: args.max_rounds,
@@ -418,11 +503,51 @@ export class PyreezMcpServer {
         ...(taskNature ? { taskNature } : {}),
         ...(args.domain ? { domain: args.domain } : {}),
         ...(args.task_type ? { taskType: args.task_type } : {}),
+        ...(args.technique ? { technique: args.technique as DeliberateInput["technique"] } : {}),
       };
 
       const result = await this.deliberateFn(input);
-      const response = {
+
+      // Anonymize all model IDs in output
+      const anonResult = {
         ...result,
+        modelsUsed: result.modelsUsed.map((id) => this.anonymizeModel(id)),
+        ...(result.rounds ? {
+          rounds: result.rounds.map((r) => ({
+            ...r,
+            ...(r.responses ? {
+              responses: r.responses.map((resp) => ({
+                ...resp,
+                model: this.anonymizeModel(resp.model),
+              })),
+            } : {}),
+            ...(r.failedWorkers ? {
+              failedWorkers: r.failedWorkers.map((fw) => ({
+                ...fw,
+                model: this.anonymizeModel(fw.model),
+              })),
+            } : {}),
+          })),
+        } : {}),
+        ...(result.modelSwaps ? {
+          modelSwaps: result.modelSwaps.map((s) => ({
+            original: this.anonymizeModel(s.original),
+            swapped: !!s.replacement,
+            round: s.round,
+            error: s.error,
+            ...(s.errorCode ? { errorCode: s.errorCode } : {}),
+            ...(s.retryable !== undefined ? { retryable: s.retryable } : {}),
+          })),
+        } : {}),
+        ...(result.degradation ? {
+          degradation: {
+            ...result.degradation,
+            lostSlots: result.degradation.lostSlots.map((ls) => ({
+              ...ls,
+              model: this.anonymizeModel(ls.model),
+            })),
+          },
+        } : {}),
         next_required_action: { tool: "pyreez_acceptance", reason: "After synthesizing, verify synthesis represents worker positions before presenting to user" },
         synthesis_checklist: {
           comprehend: "Fill unique_contribution, most_unexpected_claim, loss_if_removed for each worker",
@@ -430,25 +555,37 @@ export class PyreezMcpServer {
           reflect: "Fill Uncertainty, Dismissed, Counterargument — each with a concrete change to the synthesis",
         },
       };
-      return this.textResult(JSON.stringify(response, null, 2));
+      return this.textResult(JSON.stringify(anonResult, null, 2));
     } catch (error) {
       if (error instanceof NoModelsAvailableError) {
         return this.errorResult(JSON.stringify({
-          error: error.message,
+          error: this.anonymizeText(error.message),
           code: error.code,
-          remediation: error.remediation,
+          remediation: error.remediation?.map((r: string) => this.anonymizeText(r)),
         }));
       }
       if (error instanceof TeamDegradedError) {
         return this.errorResult(JSON.stringify({
-          error: error.message,
-          lostSlots: error.lostSlots,
-          modelSwaps: error.modelSwaps,
+          error: this.anonymizeText(error.message),
+          lostSlots: error.lostSlots.map((ls) => ({
+            ...ls,
+            model: this.anonymizeModel(ls.model),
+          })),
+          ...(error.modelSwaps ? {
+            modelSwaps: error.modelSwaps.map((s) => ({
+              original: this.anonymizeModel(s.original),
+              swapped: !!s.replacement,
+              round: s.round,
+              error: s.error,
+              ...(s.errorCode ? { errorCode: s.errorCode } : {}),
+              ...(s.retryable !== undefined ? { retryable: s.retryable } : {}),
+            })),
+          } : {}),
           tokensConsumed: error.tokensConsumed,
         }));
       }
       return this.errorResult(
-        `Error: ${sanitizeError(error)}`,
+        `Error: ${this.anonymizeText(sanitizeError(error))}`,
       );
     }
     });
@@ -478,8 +615,10 @@ export class PyreezMcpServer {
       let totalOutput = 0;
 
       const workerPromises = args.workers.map(async (w) => {
+        // Resolve anonymous model ID to real one for API routing
+        const realModel = this.resolveModel(w.model) ?? w.model;
         const messages = buildAcceptanceMessages(args.synthesis, w.original_position, args.task);
-        const result = await this.chatFn!(w.model, messages, { temperature: 0, max_tokens: 512 });
+        const result = await this.chatFn!(realModel, messages, { temperature: 0, max_tokens: 512 });
         totalInput += result.inputTokens;
         totalOutput += result.outputTokens;
 
@@ -493,7 +632,7 @@ export class PyreezMcpServer {
           : "accept" as const;
 
         return {
-          model: w.model,
+          model: this.anonymizeModel(realModel),
           verdict: parsedVerdict,
           ...(misrepresented && misrepresented !== "None." ? { misrepresented } : {}),
           ...(unresolved && unresolved !== "None." ? { unresolved } : {}),
@@ -509,7 +648,7 @@ export class PyreezMcpServer {
       if (workers.length === 0 && failed.length > 0) {
         return this.errorResult(JSON.stringify({
           error: `All ${failed.length} acceptance check(s) failed`,
-          failedModels: args.workers.map((w) => w.model),
+          failedModels: args.workers.map((w) => this.anonymizeModel(this.resolveModel(w.model) ?? w.model)),
         }));
       }
 
@@ -549,10 +688,13 @@ export class PyreezMcpServer {
 
     try {
       let updated = 0;
+      const anonModels = new Set<string>();
       for (const ev of args.evaluations) {
+        // Resolve anonymous model ID to real one for SkillCell update
+        const realModelId = this.resolveModel(ev.model_id) ?? ev.model_id;
         this.skillCellStore.update({
           deliberation_id: crypto.randomUUID(),
-          model_id: ev.model_id,
+          model_id: realModelId,
           domain: ev.domain,
           task_type: ev.task_type,
           evaluator_id: "host",
@@ -560,18 +702,14 @@ export class PyreezMcpServer {
           failures: ev.failures,
           timestamp: Date.now(),
         });
+        anonModels.add(this.anonymizeModel(realModelId));
         updated++;
       }
       await this.skillCellStore.save();
 
-      const models = new Set<string>();
-      for (const ev of args.evaluations) {
-        models.add(ev.model_id);
-      }
-
       return this.textResult(JSON.stringify({
         updated,
-        models: [...models],
+        models: [...anonModels],
       }, null, 2));
     } catch (error) {
       return this.errorResult(`Error: ${sanitizeError(error)}`);

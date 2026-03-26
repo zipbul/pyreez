@@ -1,0 +1,9 @@
+[test]
+onlyFailures = true
+coverage = true
+coverageReporter = ["text", "lcov"]
+coverageThreshold = 0.95
+coverageSkipTestFiles = true
+
+[test.reporter]
+dots = true
