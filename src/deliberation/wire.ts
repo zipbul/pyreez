@@ -17,8 +17,6 @@ import type { ChatResult, EngineDeps, EngineConfig, FallbackDeps } from "./engin
 import { createFallbackPool } from "./engine";
 import type { DeliberationStore } from "./store-types";
 import { composeTeam } from "./team-composer";
-import type { SkillCellStore } from "../model/skillcell-store";
-import type { ExternalEvaluator } from "./external-evaluator";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
 import {
@@ -42,10 +40,6 @@ export interface WireDeps {
   readonly store?: DeliberationStore;
   /** Shared CooldownManager (process-scoped). When omitted, a per-call instance is created. */
   readonly cooldown?: import("./cooldown").CooldownManager;
-  /** SkillCell store for evaluator SkillCell updates. */
-  readonly skillCellStore?: SkillCellStore;
-  /** External evaluator for binary dimension feedback. */
-  readonly externalEvaluator?: ExternalEvaluator;
 }
 
 // -- Think Tag Stripping --
@@ -205,35 +199,7 @@ export function createDeliberateFn(
     // 9. Run deliberation
     let result = await deliberate(team, input, engineDeps, config, fallbackDeps);
 
-    // 10. External evaluator → SkillCell update (best-effort)
-    if (deps.externalEvaluator && deps.skillCellStore && result.rounds) {
-      try {
-        const lastRound = result.rounds[result.rounds.length - 1];
-        if (lastRound?.responses) {
-          const teamProviders = new Set(
-            result.modelsUsed.map((id) => deps.registry.getById(id)?.provider).filter(Boolean) as string[],
-          );
-          const deliberationId = crypto.randomUUID();
-          const taskType = input.taskType ?? "QUESTION_ANSWER";
-          for (const response of lastRound.responses) {
-            try {
-              const feedback = await deps.externalEvaluator.evaluate(
-                input.task, response.model, response.content ?? "",
-                taskType, deliberationId, teamProviders,
-              );
-              deps.skillCellStore.update(feedback);
-            } catch {
-              // Per-worker evaluation failure — skip this worker, continue others
-            }
-          }
-          await deps.skillCellStore.save();
-        }
-      } catch {
-        // best-effort — do not fail deliberation
-      }
-    }
-
-    // 11. Auto-save to store (best-effort)
+    // 10. Auto-save to store (best-effort)
     if (deps.store) {
       try {
         await deps.store.save({

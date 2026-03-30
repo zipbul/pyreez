@@ -2,19 +2,16 @@
  * Shared handler logic for pyreez tools.
  * Extracted from MCP server for reuse in CLI.
  *
- * Tools: scores, deliberate, acceptance, feedback
+ * Tools: deliberate, acceptance
  */
 
 import type { RunLogger } from "./report/run-logger";
 import type { DeliberateInput, DeliberateOutput } from "./deliberation/types";
-import { resolveTaskNature } from "./deliberation/task-nature";
 import { NoModelsAvailableError } from "./deliberation/team-composer";
 import { TeamDegradedError } from "./deliberation/engine";
 import { buildAcceptanceMessages } from "./deliberation/prompts";
 import type { GenerationParams } from "./deliberation/types";
-import { BINARY_DIMENSIONS, DIMENSION_WEIGHTS } from "./axis/types";
 import type { ModelInfo } from "./model/types";
-import type { SkillCellStore } from "./model/skillcell-store";
 
 // -- Result types --
 
@@ -133,7 +130,6 @@ export interface HandlersConfig {
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
   runLogger?: RunLogger;
   chatFn?: (model: string, messages: import("./llm/types").ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
-  skillCellStore?: SkillCellStore;
   anonymizer: Anonymizer;
 }
 
@@ -192,149 +188,12 @@ async function logRun(
 
 // -- Handlers --
 
-export async function handleScores(
-  config: HandlersConfig,
-  args: { task_type?: string; min_score?: number },
-): Promise<HandlerResult> {
-  return logRun(config, "scores", async () => {
-    const reg = config.filteredRegistry;
-    if (!reg) {
-      return { error: "Error: registry not available" };
-    }
-
-    // New scores request = new deliberation session
-    config.anonymizer.reset();
-
-    const available = reg.getAvailable();
-    const taskType = args.task_type;
-
-    type ScoredModel = {
-      id: string;
-      provider: string;
-      cost: { inputPer1M: number; outputPer1M: number };
-      score: number;
-      observations: number;
-      dimensions: Record<string, number>;
-    };
-
-    type UnscoredModel = {
-      id: string;
-      provider: string;
-      cost: { inputPer1M: number; outputPer1M: number };
-    };
-
-    const scored: ScoredModel[] = [];
-    const unscored: UnscoredModel[] = [];
-
-    for (const model of available) {
-      // Try exact taskType match first, then aggregate all cells for this model
-      const cell = config.skillCellStore && taskType
-        ? config.skillCellStore.get(model.id, taskType)
-        : undefined;
-
-      const allCells = !cell && config.skillCellStore
-        ? config.skillCellStore.getAllForModel(model.id)
-        : [];
-
-      if (cell) {
-        let score = 0;
-        const dimensions: Record<string, number> = {};
-        for (const dim of BINARY_DIMENSIONS) {
-          const params = cell.dimensions[dim];
-          const mean = params ? params.alpha / (params.alpha + params.beta) : 0.5;
-          const w = DIMENSION_WEIGHTS[dim] ?? 0.20;
-          score += w * mean;
-          dimensions[dim] = Number(mean.toFixed(2));
-        }
-        scored.push({
-          id: model.id,
-          provider: model.provider,
-          cost: model.cost,
-          score: Number(score.toFixed(2)),
-          observations: cell.total,
-          dimensions,
-        });
-      } else if (allCells.length > 0) {
-        let score = 0;
-        let totalObs = 0;
-        const dimensions: Record<string, number> = {};
-        for (const dim of BINARY_DIMENSIONS) {
-          let alpha = 1, beta = 1;
-          for (const dc of allCells) {
-            const p = dc.dimensions[dim];
-            if (p) { alpha += p.alpha - 1; beta += p.beta - 1; }
-          }
-          const mean = alpha / (alpha + beta);
-          const w = DIMENSION_WEIGHTS[dim] ?? 0.20;
-          score += w * mean;
-          dimensions[dim] = Number(mean.toFixed(2));
-        }
-        for (const dc of allCells) totalObs += dc.total;
-        scored.push({
-          id: model.id,
-          provider: model.provider,
-          cost: model.cost,
-          score: Number(score.toFixed(2)),
-          observations: totalObs,
-          dimensions,
-        });
-      } else {
-        unscored.push({
-          id: model.id,
-          provider: model.provider,
-          cost: model.cost,
-        });
-      }
-    }
-
-    scored.sort((a, b) => b.score - a.score);
-    unscored.sort((a, b) => b.cost.outputPer1M - a.cost.outputPer1M);
-
-    let filteredScored = scored;
-    let note: string | undefined;
-    if (args.min_score !== undefined && scored.length > 0) {
-      const above = scored.filter((m) => m.score >= args.min_score!);
-      if (above.length > 0) {
-        filteredScored = above;
-      } else {
-        filteredScored = [scored[0]!];
-        note = `no models above ${args.min_score}, showing closest`;
-      }
-    }
-
-    const trialRecommended = unscored.slice(0, 3).map((m) => m.id);
-
-    const anon = config.anonymizer;
-    const anonScored = filteredScored.map((m) => ({
-      ...m,
-      id: anon.anonymizeModel(m.id),
-      provider: anon.anonymizeProvider(m.provider),
-    }));
-    const anonUnscored = unscored.map((m) => ({
-      ...m,
-      id: anon.anonymizeModel(m.id),
-      provider: anon.anonymizeProvider(m.provider),
-    }));
-    const anonTrial = trialRecommended.map((id) => anon.anonymizeModel(id));
-
-    return {
-      data: {
-        scored: anonScored,
-        unscored: anonUnscored,
-        trial_recommended: anonTrial,
-        ...(note ? { note } : {}),
-      },
-    };
-  });
-}
-
 export async function handleDeliberate(
   config: HandlersConfig,
   args: {
     task: string;
     models: string[];
     count?: number;
-    task_type?: string;
     worker_instructions?: string;
     max_rounds?: number;
     protocol?: string;
@@ -358,7 +217,6 @@ export async function handleDeliberate(
       const resolvedModels = args.models.map((id) => anon.resolveModel(id) ?? id);
 
       const userProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
-      const taskNature = resolveTaskNature(args.task_type);
 
       const input: DeliberateInput = {
         task: args.task,
@@ -367,8 +225,6 @@ export async function handleDeliberate(
         workerInstructions: args.worker_instructions,
         maxRounds: args.max_rounds,
         protocol: userProtocol,
-        ...(taskNature ? { taskNature } : {}),
-        ...(args.task_type ? { taskType: args.task_type } : {}),
         ...(args.technique ? { technique: args.technique as DeliberateInput["technique"] } : {}),
         ...(args.onRound ? { onRound: args.onRound } : {}),
       };
@@ -548,52 +404,3 @@ export async function handleAcceptance(
   });
 }
 
-export async function handleFeedback(
-  config: HandlersConfig,
-  args: {
-    evaluations?: {
-      model_id: string; task_type: string;
-      dimensions: { factually_correct: boolean; addresses_task: boolean; provides_evidence: boolean; novel_perspective: boolean; internally_consistent: boolean };
-      failures: { hallucination: boolean; refusal: boolean; off_topic: boolean; degenerate: boolean };
-    }[];
-  },
-): Promise<HandlerResult> {
-  return logRun(config, "feedback", async () => {
-    if (!config.skillCellStore) {
-      return { error: "Error: feedback not available (no skillCellStore configured)" };
-    }
-    if (!args.evaluations?.length) {
-      return { error: "Error: at least one evaluation is required" };
-    }
-
-    try {
-      const anon = config.anonymizer;
-      let updated = 0;
-      const anonModels = new Set<string>();
-      for (const ev of args.evaluations) {
-        const realModelId = anon.resolveModel(ev.model_id) ?? ev.model_id;
-        config.skillCellStore.update({
-          deliberation_id: crypto.randomUUID(),
-          model_id: realModelId,
-          task_type: ev.task_type,
-          evaluator_id: "host",
-          dimensions: ev.dimensions,
-          failures: ev.failures,
-          timestamp: Date.now(),
-        });
-        anonModels.add(anon.anonymizeModel(realModelId));
-        updated++;
-      }
-      await config.skillCellStore.save();
-
-      return {
-        data: {
-          updated,
-          models: [...anonModels],
-        },
-      };
-    } catch (error) {
-      return { error: `Error: ${sanitizeError(error)}` };
-    }
-  });
-}

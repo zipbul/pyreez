@@ -12,12 +12,11 @@
 import { Anonymizer, emptyAnonymizationState } from "./handlers";
 import type { AnonymizationState } from "./handlers";
 import type { HandlersConfig } from "./handlers";
-import { handleScores, handleDeliberate, handleAcceptance, handleFeedback } from "./handlers";
+import { handleDeliberate, handleAcceptance } from "./handlers";
 import {
   AnonymizationStateSchema,
   CooldownStateSchema,
   AcceptanceWorkersArraySchema,
-  EvaluationsArraySchema,
   parseWithSchema,
 } from "./validation/schemas";
 
@@ -169,27 +168,11 @@ async function buildConfig(anonymizer: Anonymizer): Promise<HandlersConfig> {
     getById: (id: string) => configuredModelIds.has(id) ? registry.getById(id) : undefined,
   };
 
-  const { FileSkillCellStore } = await import("./model/skillcell-store");
-  const skillCellStore = new FileSkillCellStore({
-    io: fileIO,
-    path: "scores/skillcells.json",
-    familyLookup: new Map(registry.getAll().map((m) => [m.id, m.family ?? m.provider])),
-  });
-  await skillCellStore.load();
-
-  const { LLMExternalEvaluator } = await import("./deliberation/external-evaluator");
-  const externalEvaluator = new LLMExternalEvaluator({
-    chat: (model, messages, params) => chatAdapter(model, messages, params),
-    getAvailableModels: () => filteredRegistry.getAvailable(),
-  });
-
   const deliberateFn = createDeliberateFn({
     registry: filteredRegistry,
     chat: (model, messages, params) => chatAdapter(model, messages, params),
     store: deliberationStore,
     cooldown: sharedCooldown,
-    skillCellStore,
-    externalEvaluator,
   });
 
   return {
@@ -197,7 +180,6 @@ async function buildConfig(anonymizer: Anonymizer): Promise<HandlersConfig> {
     deliberateFn,
     runLogger,
     chatFn: (model, messages, params) => chatAdapter(model, messages, params),
-    skillCellStore,
     anonymizer,
   };
 }
@@ -211,24 +193,14 @@ async function main(): Promise<void> {
     printUsage();
   }
 
-  // For scores, we reset session (new deliberation session)
-  const isScores = command === "scores";
-  const sessionState = isScores ? emptyAnonymizationState() : await loadSession();
-  const anonymizer = new Anonymizer(isScores ? undefined : sessionState);
+  const sessionState = await loadSession();
+  const anonymizer = new Anonymizer(sessionState);
 
   const config = await buildConfig(anonymizer);
 
   let result: import("./handlers").HandlerResult;
 
   switch (command) {
-    case "scores": {
-      result = await handleScores(config, {
-        task_type: flags["task-type"],
-        min_score: flags["min-score"] !== undefined ? Number(flags["min-score"]) : undefined,
-      });
-      break;
-    }
-
     case "deliberate": {
       const task = await resolveValue(flags["task"]);
       if (!task) die("--task is required for deliberate");
@@ -241,7 +213,6 @@ async function main(): Promise<void> {
         task: task!,
         models,
         count: flags["count"] !== undefined ? Number(flags["count"]) : undefined,
-        task_type: flags["task-type"],
         worker_instructions: workerInstructions,
         max_rounds: flags["max-rounds"] !== undefined ? Number(flags["max-rounds"]) : undefined,
         protocol: flags["protocol"],
@@ -272,16 +243,6 @@ async function main(): Promise<void> {
         synthesis: synthesis!,
         workers: workersResult.data!,
       });
-      break;
-    }
-
-    case "feedback": {
-      const evaluationsRaw = flags["evaluations"];
-      if (!evaluationsRaw) die("--evaluations is required for feedback (JSON array)");
-      const evalsResult = parseWithSchema(evaluationsRaw!, EvaluationsArraySchema, "--evaluations");
-      if (!evalsResult.success) die(evalsResult.error);
-
-      result = await handleFeedback(config, { evaluations: evalsResult.data! });
       break;
     }
 

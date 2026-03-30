@@ -9,32 +9,6 @@
 
 import { z } from "zod/v4";
 
-// -- Feedback Evaluation (CLI --evaluations) --
-
-export const BinaryDimensionsSchema = z.object({
-  factually_correct: z.boolean(),
-  addresses_task: z.boolean(),
-  provides_evidence: z.boolean(),
-  novel_perspective: z.boolean(),
-  internally_consistent: z.boolean(),
-});
-
-export const FailureFlagsSchema = z.object({
-  hallucination: z.boolean(),
-  refusal: z.boolean(),
-  off_topic: z.boolean(),
-  degenerate: z.boolean(),
-});
-
-export const EvaluationInputSchema = z.object({
-  model_id: z.string().min(1),
-  task_type: z.string().min(1),
-  dimensions: BinaryDimensionsSchema,
-  failures: FailureFlagsSchema,
-});
-
-export const EvaluationsArraySchema = z.array(EvaluationInputSchema).min(1);
-
 // -- Acceptance Workers (CLI --workers) --
 
 export const AcceptanceWorkerSchema = z.object({
@@ -69,26 +43,6 @@ export const CooldownStateSchema = z.object({
   })),
   providers: z.array(z.string()),
   savedAt: z.number(),
-});
-
-// -- SkillCell Store (skillcells.json) --
-
-const BetaParamsSchema = z.object({
-  alpha: z.number().min(0),
-  beta: z.number().min(0),
-});
-
-const SkillCellSchema = z.object({
-  model_id: z.string(),
-  task_type: z.string(),
-  dimensions: z.record(z.string(), BetaParamsSchema),
-  failure_counts: z.record(z.string(), z.number()),
-  total: z.number().int().min(0),
-});
-
-export const SkillCellStoreFileSchema = z.object({
-  version: z.literal(1),
-  cells: z.record(z.string(), SkillCellSchema),
 });
 
 // -- Utility --

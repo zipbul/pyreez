@@ -152,8 +152,6 @@ export interface DeliberateInput {
   readonly count?: number;
   /** Task nature for prompt selection. Artifact = deliverable output, Critique = analysis. */
   readonly taskNature?: TaskNature;
-  /** Task type for SkillCell evaluator. */
-  readonly taskType?: string;
   /**
    * Interaction technique. Emphasis, not constraint.
    * Single value: all rounds. Array: per-round (last repeats on exhaustion).
