@@ -169,16 +169,14 @@ async function main(): Promise<void> {
       const reg = config.filteredRegistry;
       if (!reg) die("Registry not available");
       const available = reg.getAvailable();
-      const { scoreModel } = await import("./deliberation/team-composer");
-      const models = available
-        .map((m) => ({
-          id: m.id,
-          provider: m.provider,
-          cost: m.cost,
-          benchmark: m.benchmark,
-          score: Math.round(scoreModel(m)),
-        }))
-        .sort((a, b) => b.score - a.score);
+      const models = available.map((m) => ({
+        id: m.id,
+        provider: m.provider,
+        family: m.family,
+        contextWindow: m.contextWindow,
+        cost: m.cost,
+        ...(m.benchmark ? { benchmark: m.benchmark } : {}),
+      }));
       result = { data: { models, total: models.length } };
       break;
     }

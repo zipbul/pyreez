@@ -1,9 +1,11 @@
-// Source: https://benchlm.ai/ (per-category scores, 0-100)
+// Sources:
+//   - https://benchlm.ai/ (category averages: agentic, coding, reasoning, knowledge, multilingual, instruction_following, math)
+//   - https://lmcouncil.ai/benchmarks (individual: swe_bench, gpqa_diamond, aime, frontier_math)
+//   - https://artificialanalysis.ai/leaderboards/models (intelligence_index)
 // Last updated: 2026-03-30
-// Categories: agentic, coding, reasoning, knowledge, multilingual, instruction_following, math
-// Models without sufficient benchmark data use partial scores where available
+// All scores are 0-100 scale. Individual benchmarks are % accuracy.
 {
-  "version": 5,
+  "version": 6,
   "models": {
     "anthropic/claude-opus-4.6": {
       "name": "Claude Opus 4.6",
@@ -12,7 +14,12 @@
       "contextWindow": 1000000,
       "available": true,
       "cost": { "inputPer1M": 5, "outputPer1M": 25 },
-      "benchmark": { "agentic": 80, "coding": 73, "reasoning": 73, "knowledge": 85, "multilingual": 78, "instruction_following": 95, "math": 95 }
+      "benchmark": {
+        "agentic": 80, "coding": 73, "reasoning": 73, "knowledge": 85,
+        "multilingual": 78, "instruction_following": 95, "math": 95,
+        "swe_bench": 78.7, "gpqa_diamond": 90.5, "frontier_math": 40.7, "aime": 94.4,
+        "intelligence_index": 53
+      }
     },
     "anthropic/claude-sonnet-4.6": {
       "name": "Claude Sonnet 4.6",
@@ -21,7 +28,12 @@
       "contextWindow": 1000000,
       "available": true,
       "cost": { "inputPer1M": 3, "outputPer1M": 15 },
-      "benchmark": { "agentic": 76, "coding": 68, "reasoning": 63, "knowledge": 92, "multilingual": 73, "instruction_following": 90, "math": 90 }
+      "benchmark": {
+        "agentic": 76, "coding": 68, "reasoning": 63, "knowledge": 92,
+        "multilingual": 73, "instruction_following": 90, "math": 90,
+        "swe_bench": 75.2, "gpqa_diamond": 87.4,
+        "intelligence_index": 52
+      }
     },
     "anthropic/claude-haiku-4.5": {
       "name": "Claude Haiku 4.5",
@@ -30,7 +42,10 @@
       "contextWindow": 200000,
       "available": true,
       "cost": { "inputPer1M": 1, "outputPer1M": 5 },
-      "benchmark": { "agentic": 52, "coding": 49, "reasoning": 69, "knowledge": 54, "multilingual": 80, "instruction_following": 86, "math": 71 }
+      "benchmark": {
+        "agentic": 52, "coding": 49, "reasoning": 69, "knowledge": 54,
+        "multilingual": 80, "instruction_following": 86, "math": 71
+      }
     },
     "google/gemini-3.1-pro-preview": {
       "name": "Gemini 3.1 Pro (Preview)",
@@ -39,7 +54,12 @@
       "contextWindow": 1048576,
       "available": true,
       "cost": { "inputPer1M": 2, "outputPer1M": 12 },
-      "benchmark": { "agentic": 83, "coding": 76, "reasoning": 69, "knowledge": 95, "multilingual": 81, "instruction_following": 94, "math": 95 }
+      "benchmark": {
+        "agentic": 83, "coding": 76, "reasoning": 69, "knowledge": 95,
+        "multilingual": 81, "instruction_following": 94, "math": 95,
+        "swe_bench": 75.6, "gpqa_diamond": 94.1, "aime": 95.6,
+        "intelligence_index": 57
+      }
     },
     "google/gemini-3-flash-preview": {
       "name": "Gemini 3 Flash (Preview)",
@@ -48,7 +68,10 @@
       "contextWindow": 1048576,
       "available": true,
       "cost": { "inputPer1M": 0.5, "outputPer1M": 3 },
-      "benchmark": { "agentic": 64, "coding": 58, "reasoning": 45, "knowledge": 80, "multilingual": 54, "instruction_following": 81, "math": 85 }
+      "benchmark": {
+        "agentic": 64, "coding": 58, "reasoning": 45, "knowledge": 80,
+        "multilingual": 54, "instruction_following": 81, "math": 85
+      }
     },
     "google/gemini-3.1-flash-lite-preview": {
       "name": "Gemini 3.1 Flash-Lite (Preview)",
@@ -65,7 +88,12 @@
       "contextWindow": 1100000,
       "available": true,
       "cost": { "inputPer1M": 2.5, "outputPer1M": 15 },
-      "benchmark": { "agentic": 84, "coding": 77, "reasoning": 74, "knowledge": 88, "multilingual": 83, "instruction_following": 95, "math": 96 }
+      "benchmark": {
+        "agentic": 84, "coding": 77, "reasoning": 74, "knowledge": 88,
+        "multilingual": 83, "instruction_following": 95, "math": 96,
+        "swe_bench": 76.9, "frontier_math": 47.6,
+        "intelligence_index": 57
+      }
     },
     "openai/gpt-5.4-mini": {
       "name": "GPT-5.4 Mini",
@@ -74,7 +102,9 @@
       "contextWindow": 400000,
       "available": true,
       "cost": { "inputPer1M": 0.75, "outputPer1M": 4.5 },
-      "benchmark": { "agentic": 66, "coding": 54, "reasoning": 41, "knowledge": 57 }
+      "benchmark": {
+        "agentic": 66, "coding": 54, "reasoning": 41, "knowledge": 57
+      }
     },
     "openai/gpt-5.4-nano": {
       "name": "GPT-5.4 Nano",
@@ -83,7 +113,9 @@
       "contextWindow": 400000,
       "available": true,
       "cost": { "inputPer1M": 0.2, "outputPer1M": 1.25 },
-      "benchmark": { "agentic": 43, "coding": 52, "reasoning": 39, "knowledge": 53 }
+      "benchmark": {
+        "agentic": 43, "coding": 52, "reasoning": 39, "knowledge": 53
+      }
     },
     "openai/gpt-5.3-codex": {
       "name": "GPT-5.3 Codex",
@@ -92,7 +124,11 @@
       "contextWindow": 400000,
       "available": true,
       "cost": { "inputPer1M": 1.75, "outputPer1M": 14 },
-      "benchmark": { "agentic": 80, "coding": 76, "reasoning": 69, "knowledge": 91, "multilingual": 82, "instruction_following": 93, "math": 93 }
+      "benchmark": {
+        "agentic": 80, "coding": 76, "reasoning": 69, "knowledge": 91,
+        "multilingual": 82, "instruction_following": 93, "math": 93,
+        "intelligence_index": 54
+      }
     },
     "xai/grok-4": {
       "name": "Grok 4",
@@ -101,7 +137,11 @@
       "contextWindow": 256000,
       "available": true,
       "cost": { "inputPer1M": 3, "outputPer1M": 15 },
-      "benchmark": { "agentic": 67, "coding": 58, "reasoning": 66, "knowledge": 78, "multilingual": 65, "instruction_following": 81, "math": 82 }
+      "benchmark": {
+        "agentic": 67, "coding": 58, "reasoning": 66, "knowledge": 78,
+        "multilingual": 65, "instruction_following": 81, "math": 82,
+        "gpqa_diamond": 87.0, "aime": 84.0
+      }
     },
     "xai/grok-4.1-fast": {
       "name": "Grok 4.1 Fast",
