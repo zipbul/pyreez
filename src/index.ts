@@ -12,10 +12,9 @@ import { loadConfigFromEnv, loadRoutingConfig } from "./config";
 import { createChatAdapter, createDeliberateFn } from "./deliberation/wire";
 import { FileDeliberationStore } from "./deliberation/file-store";
 import { ProviderRegistry } from "./llm/registry";
-import { AnthropicProvider } from "./llm/providers/anthropic";
 import { ClaudeCliProvider } from "./llm/providers/claude-cli";
-import { GoogleProvider } from "./llm/providers/google";
-// import { OpenAIProvider } from "./llm/providers/openai";
+import { GeminiCliProvider } from "./llm/providers/gemini-cli";
+import { CodexCliProvider } from "./llm/providers/codex-cli";
 import { LocalProvider } from "./llm/providers/local";
 import { OpenAICompatibleProvider } from "./llm/providers/openai-compatible";
 import { XaiProvider } from "./llm/providers/xai";
@@ -55,19 +54,11 @@ async function main(): Promise<void> {
   const runLogger = new FileRunLogger(".pyreez/runs", fileIO);
 
   // Build providers from config
+  // CLI providers (subscription-based) take priority over API key providers
   const providers: LLMProvider[] = [];
-  if (config.providers.claudeCli) {
-    providers.push(new ClaudeCliProvider());
-  } else if (config.providers.anthropic) {
-    providers.push(new AnthropicProvider(config.providers.anthropic));
-  }
-  if (config.providers.google) {
-    providers.push(new GoogleProvider(config.providers.google));
-  }
-  // OpenAI provider disabled — routing through other providers only
-  // if (config.providers.openai) {
-  //   providers.push(new OpenAIProvider(config.providers.openai));
-  // }
+  providers.push(new ClaudeCliProvider());
+  providers.push(new GeminiCliProvider());
+  providers.push(new CodexCliProvider());
   if (config.providers.local) {
     providers.push(new LocalProvider(config.providers.local));
   }

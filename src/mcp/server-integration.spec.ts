@@ -60,11 +60,9 @@ function createMockRegistry(models: ModelInfo[] = MODELS) {
   };
 }
 
-// -- Long enough response to pass MIN_WORKER_RESPONSE_LENGTH (200 chars) --
-
 function longResponse(model: string): string {
   const base = `This is a detailed response from ${model} providing analysis and recommendations. `;
-  return base.repeat(5); // ~400 chars
+  return base.repeat(5);
 }
 
 // -- Test Harness --
@@ -242,7 +240,7 @@ describe("MCP Server Integration", () => {
       chatFn: async (model, messages) => {
         capturedMessages.push({ model, messages });
         return {
-          content: `Response ${++callCount} with analysis: ${"x".repeat(callCount * 80)}`.padEnd(200, "."),
+          content: `Response ${++callCount} with analysis: ${"x".repeat(callCount * 80)}`,
           inputTokens: 100,
           outputTokens: 200,
         };
@@ -291,7 +289,7 @@ describe("MCP Server Integration", () => {
       chatFn: async (model, messages) => {
         capturedMessages.push({ model, messages });
         return {
-          content: `Accept response ${++callCount}: ${"a".repeat(callCount * 80)}`.padEnd(200, "."),
+          content: `Accept response ${++callCount}: ${"a".repeat(callCount * 80)}`,
           inputTokens: 100,
           outputTokens: 200,
         };
@@ -331,7 +329,7 @@ describe("MCP Server Integration", () => {
       chatFn: async (_model, messages) => {
         capturedMessages.push([...messages]);
         return {
-          content: `Per-round response ${++callCount}: ${"p".repeat(callCount * 80)}`.padEnd(200, "."),
+          content: `Per-round response ${++callCount}: ${"p".repeat(callCount * 80)}`,
           inputTokens: 100,
           outputTokens: 200,
         };

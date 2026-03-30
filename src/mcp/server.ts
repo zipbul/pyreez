@@ -618,7 +618,7 @@ export class PyreezMcpServer {
         // Resolve anonymous model ID to real one for API routing
         const realModel = this.resolveModel(w.model) ?? w.model;
         const messages = buildAcceptanceMessages(args.synthesis, w.original_position, args.task);
-        const result = await this.chatFn!(realModel, messages, { temperature: 0, max_tokens: 512 });
+        const result = await this.chatFn!(realModel, messages, { temperature: 0 });
         totalInput += result.inputTokens;
         totalOutput += result.outputTokens;
 

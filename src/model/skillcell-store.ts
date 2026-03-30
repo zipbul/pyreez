@@ -9,6 +9,7 @@
 
 import type { SkillCell, FeedbackRecord, BetaParams } from "../axis/types";
 import { BINARY_DIMENSIONS, FAILURE_FLAGS, applyFailureSeverity } from "../axis/types";
+import { SkillCellStoreFileSchema } from "../validation/schemas";
 
 // -- Public Interface --
 
@@ -162,14 +163,14 @@ export class FileSkillCellStore implements SkillCellStore {
   async load(): Promise<void> {
     try {
       const raw = await this.io.readFile(this.path);
-      const parsed = JSON.parse(raw);
-      this.cells.clear(); // Always clear before loading — consistent fresh start
-      if (parsed.version === 1 && parsed.cells) {
-        for (const [key, cell] of Object.entries(parsed.cells)) {
+      const result = SkillCellStoreFileSchema.safeParse(JSON.parse(raw));
+      this.cells.clear();
+      if (result.success) {
+        for (const [key, cell] of Object.entries(result.data.cells)) {
           this.cells.set(key, cell as SkillCell);
         }
       }
-      // Unsupported version or missing cells → empty store (cells already cleared)
+      // Validation failure or unsupported → empty store (cells already cleared)
     } catch {
       // File doesn't exist or corrupted → start fresh
       this.cells.clear();

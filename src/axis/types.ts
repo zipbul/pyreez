@@ -11,7 +11,7 @@ export interface ChatResult {
   readonly content: string;
   readonly inputTokens: number;
   readonly outputTokens: number;
-  /** True when the response was cut off by max_tokens (finish_reason === "length"). */
+  /** True when the response was cut off (finish_reason === "length"). */
   readonly truncated?: boolean;
 }
 

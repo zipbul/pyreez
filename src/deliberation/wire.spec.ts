@@ -193,13 +193,12 @@ describe("createChatAdapter", () => {
     await adapter(
       "openai/gpt-4.1",
       [{ role: "user", content: "test" }],
-      { temperature: 0.5, max_tokens: 1024, top_p: 0.9 },
+      { temperature: 0.5, top_p: 0.9 },
     );
 
     expect(rawChat).toHaveBeenCalledTimes(1);
     const req = rawChat.mock.calls[0]![0] as any;
     expect(req.temperature).toBe(0.5);
-    expect(req.max_tokens).toBe(1024);
     expect(req.top_p).toBe(0.9);
   });
 
@@ -249,7 +248,6 @@ describe("createChatAdapter", () => {
 
     const req = rawChat.mock.calls[0]![0] as any;
     expect(req.temperature).toBeUndefined();
-    expect(req.max_tokens).toBeUndefined();
     expect(req.top_p).toBeUndefined();
   });
 });
@@ -365,18 +363,6 @@ describe("createDeliberateFn", () => {
     expect(savedRecord.workerInstructions).toBe("worker instructions");
     expect(savedRecord.id).toBeDefined();
     expect(savedRecord.timestamp).toBeGreaterThan(0);
-  });
-
-  it("should not set max_tokens (let models self-regulate)", async () => {
-    mockComposeTeam.mockImplementation(() => STUB_TEAM);
-    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
-    const deps = makeWireDeps();
-    const deliberateFn = createDeliberateFn(deps);
-
-    await deliberateFn({ task: "Analyze this code", models: ["openai/gpt-4.1"] });
-
-    const [, , , config] = mockDeliberate.mock.calls[0]!;
-    expect(config.workerGenParams.max_tokens).toBeUndefined();
   });
 
   it("should duplicate models round-robin when count > models.length", async () => {

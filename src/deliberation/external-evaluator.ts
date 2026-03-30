@@ -31,7 +31,7 @@ export interface ExternalEvaluator {
 
 export interface EvaluatorDeps {
   /** Chat function for calling the evaluator model. */
-  readonly chat: (model: string, messages: ChatMessage[], params?: { temperature?: number; max_tokens?: number }) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
+  readonly chat: (model: string, messages: ChatMessage[], params?: { temperature?: number }) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
   /** Available models to use as evaluators. */
   readonly getAvailableModels: () => ModelInfo[];
 }
@@ -160,7 +160,7 @@ export class LLMExternalEvaluator implements ExternalEvaluator {
         const result = await this.deps.chat(
           evaluatorModel.id,
           messages,
-          { temperature: 0, max_tokens: 512 },
+          { temperature: 0 },
         );
 
         const parsed = parseEvalResponse(result.content);

@@ -69,7 +69,7 @@ export function stripThinkTags(text: string): string {
 // -- Chat Adapter --
 
 type RawChatFn = (
-  request: { model: string; messages: ChatMessage[]; temperature?: number; max_tokens?: number; top_p?: number },
+  request: { model: string; messages: ChatMessage[]; temperature?: number; top_p?: number },
 ) => Promise<ChatCompletionResponse>;
 
 /**
@@ -87,7 +87,6 @@ export function createChatAdapter(
       model,
       messages,
       ...(params?.temperature != null ? { temperature: params.temperature } : {}),
-      ...(params?.max_tokens != null ? { max_tokens: params.max_tokens } : {}),
       ...(params?.top_p != null ? { top_p: params.top_p } : {}),
     });
     const choice = response.choices[0];
@@ -169,9 +168,6 @@ export function createDeliberateFn(
     const effectiveMaxRounds = input.maxRounds ?? (isDebate ? 3 : 1);
     const workerGenParams: GenerationParams = {
       temperature: 1.0,
-      // No max_tokens — let models self-regulate output length.
-      // Research: "remove artificial constraints" (3-provider consensus).
-      // Models naturally produce ~2,000-3,000 tokens and stop.
     };
     const config: EngineConfig = {
       maxRounds: effectiveMaxRounds,

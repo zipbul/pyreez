@@ -9,7 +9,6 @@ import {
   createFallbackPool,
   RoundExecutionError,
   TeamDegradedError,
-  MIN_WORKER_RESPONSE_LENGTH,
   minViableTeamSize,
   parseConfidence,
   levenshteinDistance,
@@ -42,9 +41,8 @@ function makeInput(overrides?: Partial<DeliberateInput>): DeliberateInput {
   };
 }
 
-/** Pad content to satisfy MIN_WORKER_RESPONSE_LENGTH for worker responses. */
 function validWorkerContent(label: string): string {
-  return label.padEnd(MIN_WORKER_RESPONSE_LENGTH, ".");
+  return label;
 }
 
 function chatResult(content: string, inputTokens = 10, outputTokens = 20): ChatResult {
@@ -273,7 +271,7 @@ describe("deliberate", () => {
     const deps = makeDeps({
       chat: mock(async (_model: string) => {
         // Content must differ substantially between rounds to avoid convergence detection
-        return chatResult(`Round ${++callCount} unique content: ${"x".repeat(callCount * 50)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."), 5, 10);
+        return chatResult(`Round ${++callCount} unique content: ${"x".repeat(callCount * 50)}`, 5, 10);
       }),
     });
 
@@ -291,7 +289,7 @@ describe("deliberate", () => {
     let callCount = 0;
     const deps = makeDeps({
       chat: mock(async (_model: string) => {
-        return chatResult(`Call ${++callCount} unique content: ${"y".repeat(callCount * 50)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."), 100, 200);
+        return chatResult(`Call ${++callCount} unique content: ${"y".repeat(callCount * 50)}`, 100, 200);
       }),
     });
 
@@ -622,82 +620,6 @@ describe("failedWorkers propagation in deliberate output", () => {
 });
 
 // =============================================================================
-// MIN_WORKER_RESPONSE_LENGTH boundary tests
-// =============================================================================
-
-describe("degenerate response filtering", () => {
-  it("should filter response of 199 chars as degenerate", async () => {
-    const team = makeTeam(2);
-    const input = makeInput();
-    const config = makeConfig();
-
-    const shortContent = "x".repeat(MIN_WORKER_RESPONSE_LENGTH - 1); // 199 chars
-    const deps = makeDeps({
-      chat: mock(async (model: string) => {
-        if (model === "worker/model-0") return chatResult(shortContent, 10, 20);
-        return chatResult(validWorkerContent("ok"), 10, 20);
-      }),
-    });
-
-    const output = await deliberate(team, input, deps, config);
-
-    expect(output.rounds![0]!.failedWorkers).toHaveLength(1);
-    expect(output.rounds![0]!.failedWorkers![0]!.model).toBe("worker/model-0");
-    expect(output.rounds![0]!.failedWorkers![0]!.error).toContain("degenerate");
-  });
-
-  it("should accept response of exactly 200 chars", async () => {
-    const team = makeTeam(2);
-    const input = makeInput();
-    const config = makeConfig();
-
-    const exactContent = "x".repeat(MIN_WORKER_RESPONSE_LENGTH); // 200 chars
-    const deps = makeDeps({
-      chat: mock(async (_model: string) => chatResult(exactContent, 10, 20)),
-    });
-
-    const output = await deliberate(team, input, deps, config);
-
-    expect(output.rounds![0]!.failedWorkers).toBeUndefined();
-    expect(output.rounds![0]!.responses).toHaveLength(2);
-  });
-
-  it("should filter whitespace-padded response that trims below minimum", async () => {
-    const team = makeTeam(2);
-    const input = makeInput();
-    const config = makeConfig();
-
-    // 250 chars total, but only 150 non-whitespace after trim
-    const paddedContent = " ".repeat(50) + "x".repeat(150) + " ".repeat(50);
-    const deps = makeDeps({
-      chat: mock(async (model: string) => {
-        if (model === "worker/model-0") return chatResult(paddedContent, 10, 20);
-        return chatResult(validWorkerContent("ok"), 10, 20);
-      }),
-    });
-
-    const output = await deliberate(team, input, deps, config);
-
-    expect(output.rounds![0]!.failedWorkers).toHaveLength(1);
-    expect(output.rounds![0]!.failedWorkers![0]!.model).toBe("worker/model-0");
-  });
-
-  it("should throw RoundExecutionError when ALL workers produce degenerate responses", async () => {
-    const team = makeTeam(2);
-    const input = makeInput();
-    const config = makeConfig();
-
-    const deps = makeDeps({
-      chat: mock(async (_model: string) => chatResult("too short", 10, 20)),
-    });
-
-    await expect(deliberate(team, input, deps, config)).rejects.toThrow(
-      /failed after fallback exhaustion/,
-    );
-  });
-});
-
-// =============================================================================
 // Debate Protocol Convergence
 // =============================================================================
 
@@ -739,7 +661,7 @@ describe("debate protocol", () => {
     let callCount = 0;
     const deps = makeDeps({
       chat: mock(async (_model: string) => {
-        return chatResult(`Response ${++callCount} unique: ${"z".repeat(callCount * 50)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."), 10, 20);
+        return chatResult(`Response ${++callCount} unique: ${"z".repeat(callCount * 50)}`, 10, 20);
       }),
       buildDebateWorkerMessages: mock((ctx: any, _instructions?: any, _roundInfo?: any, _idx?: any) => {
         // Capture the number of previous rounds visible to debate builder
@@ -813,7 +735,7 @@ describe("GenerationParams forwarding", () => {
     const team = makeTeam(1);
     const input = makeInput();
     const config = makeConfig({
-      workerGenParams: { temperature: 1.0, max_tokens: 2048, top_p: 0.9 },
+      workerGenParams: { temperature: 1.0, top_p: 0.9 },
     });
 
     const chatCalls: { model: string; params: any }[] = [];
@@ -832,7 +754,7 @@ describe("GenerationParams forwarding", () => {
     // Worker call should have workerGenParams
     const workerCall = chatCalls.find((c) => c.model.startsWith("worker/"));
     expect(workerCall).toBeDefined();
-    expect(workerCall!.params).toEqual({ temperature: 1.0, max_tokens: 2048, top_p: 0.9 });
+    expect(workerCall!.params).toEqual({ temperature: 1.0, top_p: 0.9 });
   });
 
   it("should pass undefined params when genParams are not configured", async () => {
@@ -1007,50 +929,6 @@ describe("session invalidation on model swap in R2+", () => {
     // worker-1 (no swap) should use follow-up (session continuation)
     expect(followUpUsed).toBe(true);
     expect(output.modelSwaps!.some(s => s.replacement === "prov-z/fallback-d")).toBe(true);
-  });
-
-  it("should invalidate session on degenerate fallback in R2", async () => {
-    let debateBuilderCallCount = 0;
-    let round = 1;
-
-    const deps = makeDeps({
-      chat: mock(async (model: string) => {
-        // R2: model-0 returns degenerate, fallback succeeds
-        if (model === "worker/model-0" && round === 2) {
-          return chatResult("short"); // below MIN_WORKER_RESPONSE_LENGTH
-        }
-        return chatResult(validWorkerContent(`response-from-${model}`));
-      }),
-      buildDebateWorkerMessages: mock((_ctx: any) => {
-        debateBuilderCallCount++;
-        return [
-          { role: "system" as const, content: "rebuild" },
-          { role: "user" as const, content: "rebuild-user" },
-        ];
-      }),
-      buildDebateFollowUp: mock((_ctx: any, _others: any, _round?: any, _instructions?: any) => {
-        return { role: "user" as const, content: "follow-up" };
-      }),
-    });
-
-    const team = makeTeam(2);
-    const cooldown = createCooldownManager();
-    const pool = createFallbackPool([makeModelInfo("prov-z/fallback-d")], cooldown);
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
-
-    const origChat = deps.chat;
-    let callCount = 0;
-    (deps as any).chat = async (model: string, messages: ChatMessage[], params?: any) => {
-      callCount++;
-      round = callCount <= 2 ? 1 : 2;
-      return origChat(model, messages, params);
-    };
-
-    const output = await deliberate(team, makeInput(), deps, config, { pool });
-
-    expect(output.roundsExecuted).toBe(2);
-    // Degenerate fallback → session invalidated → debate builder used for replacement
-    expect(debateBuilderCallCount).toBeGreaterThan(0);
   });
 
   it("should invalidate session on cooldown skip in R2", async () => {
@@ -1364,7 +1242,7 @@ describe("multi-round multi-swap context integrity", () => {
         if (model === "worker/model-1" && round === 1) {
           throw new Error("R1 failure");
         }
-        return chatResult(`Response from ${model} round ${round}: ${"r".repeat(round * 80)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."));
+        return chatResult(`Response from ${model} round ${round}: ${"r".repeat(round * 80)}`);
       }),
       buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
         return [{ role: "user" as const, content: "debate" }];
@@ -1397,71 +1275,6 @@ describe("multi-round multi-swap context integrity", () => {
     for (const r of output.rounds!) {
       expect(r.responses!.length).toBe(2);
     }
-  });
-});
-
-// =============================================================================
-// Degenerate response triggers fallback
-// =============================================================================
-
-describe("degenerate response triggers fallback", () => {
-  it("should trigger fallback for degenerate response and swap to a pool model", async () => {
-    // model-0 returns degenerate → should fallback to fallback-a
-    // model-1 returns valid
-    const team = makeTeam(2);
-    const input = makeInput();
-    const config = makeConfig({ maxRounds: 1 });
-
-    const deps = makeDeps({
-      chat: mock(async (model: string) => {
-        if (model === "worker/model-0") {
-          return chatResult("short", 10, 20); // below MIN_WORKER_RESPONSE_LENGTH
-        }
-        if (model === "prov-x/fallback-a") {
-          return chatResult(validWorkerContent("fallback succeeded"), 15, 25);
-        }
-        return chatResult(validWorkerContent("ok"), 15, 25);
-      }),
-    });
-
-    const cooldown = createCooldownManager();
-    const pool = createFallbackPool([makeModelInfo("prov-x/fallback-a")], cooldown);
-
-    const output = await deliberate(team, input, deps, config, { pool });
-
-    // Both workers should have valid responses (model-1 original + fallback-a replacing model-0)
-    expect(output.rounds![0]!.responses).toHaveLength(2);
-    // fallback-a replaced model-0
-    const models = output.rounds![0]!.responses!.map(r => r.model);
-    expect(models).toContain("prov-x/fallback-a");
-    expect(models).toContain("worker/model-1");
-    // modelSwaps should record the degenerate → fallback swap
-    expect(output.modelSwaps).toBeDefined();
-    expect(output.modelSwaps!.length).toBeGreaterThanOrEqual(1);
-    expect(output.modelSwaps![0]!.original).toBe("worker/model-0");
-    expect(output.modelSwaps![0]!.replacement).toBe("prov-x/fallback-a");
-  });
-
-  it("should track degenerate in failedWorkers when no fallback pool available", async () => {
-    const team = makeTeam(2);
-    const input = makeInput();
-    const config = makeConfig({ maxRounds: 1 });
-
-    const deps = makeDeps({
-      chat: mock(async (model: string) => {
-        if (model === "worker/model-0") {
-          return chatResult("short", 10, 20);
-        }
-        return chatResult(validWorkerContent("ok"), 15, 25);
-      }),
-    });
-
-    // No fallback pool
-    const output = await deliberate(team, input, deps, config);
-
-    expect(output.rounds![0]!.responses).toHaveLength(1);
-    expect(output.rounds![0]!.failedWorkers).toHaveLength(1);
-    expect(output.rounds![0]!.failedWorkers![0]!.error).toContain("degenerate");
   });
 });
 
@@ -2374,7 +2187,7 @@ describe("per-round technique", () => {
     const techniques: (string | undefined)[] = [];
     let callCount = 0;
     const deps = makeDeps({
-      chat: mock(async () => chatResult(`resp ${++callCount} ${"x".repeat(callCount * 50)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."))),
+      chat: mock(async () => chatResult(`resp ${++callCount} ${"x".repeat(callCount * 50)}`)),
       buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any, technique?: any) => {
         techniques.push(technique);
         return [{ role: "user" as const, content: "work" }];
@@ -2393,7 +2206,7 @@ describe("per-round technique", () => {
     const techniques: (string | undefined)[] = [];
     let callCount = 0;
     const deps = makeDeps({
-      chat: mock(async () => chatResult(`resp ${++callCount} ${"x".repeat(callCount * 50)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."))),
+      chat: mock(async () => chatResult(`resp ${++callCount} ${"x".repeat(callCount * 50)}`)),
       buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any, technique?: any) => {
         techniques.push(technique);
         return [{ role: "user" as const, content: "work" }];
@@ -2449,7 +2262,7 @@ describe("convergence detection", () => {
 
     let callCount = 0;
     const deps = makeDeps({
-      chat: mock(async () => chatResult(`Unique response ${++callCount} ${"x".repeat(callCount * 80)}`.padEnd(MIN_WORKER_RESPONSE_LENGTH, "."))),
+      chat: mock(async () => chatResult(`Unique response ${++callCount} ${"x".repeat(callCount * 80)}`)),
     });
 
     const output = await deliberate(team, input, deps, config);

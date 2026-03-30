@@ -6,9 +6,6 @@
 import { loadConfigFromEnv, loadRoutingConfig } from "../src/config";
 import { createChatAdapter, createDeliberateFn } from "../src/deliberation/wire";
 import { ProviderRegistry } from "../src/llm/registry";
-import { AnthropicProvider } from "../src/llm/providers/anthropic";
-import { GoogleProvider } from "../src/llm/providers/google";
-import { OpenAIProvider } from "../src/llm/providers/openai";
 import { OpenAICompatibleProvider } from "../src/llm/providers/openai-compatible";
 import { XaiProvider } from "../src/llm/providers/xai";
 import { LocalProvider } from "../src/llm/providers/local";
@@ -62,17 +59,9 @@ async function main() {
   const registry = new ModelRegistry();
 
   const providers: LLMProvider[] = [];
-  if (config.providers.claudeCli) {
-    providers.push(new ClaudeCliProvider());
-  } else if (config.providers.anthropic) {
-    providers.push(new AnthropicProvider(config.providers.anthropic));
-  }
-  if (config.providers.google) {
-    providers.push(new GoogleProvider(config.providers.google));
-  }
-  if (config.providers.openai) {
-    providers.push(new OpenAIProvider(config.providers.openai));
-  }
+  providers.push(new ClaudeCliProvider());
+  providers.push(new (await import("../src/llm/providers/gemini-cli")).GeminiCliProvider());
+  providers.push(new (await import("../src/llm/providers/codex-cli")).CodexCliProvider());
   if (config.providers.xai) {
     providers.push(new XaiProvider(config.providers.xai));
   }

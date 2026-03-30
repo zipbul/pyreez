@@ -13,7 +13,6 @@ import { createDeliberateFn } from "../src/deliberation/wire";
 import type { DeliberateInput } from "../src/deliberation/types";
 import type { ChatMessage } from "../src/llm/types";
 import type { ChatResult } from "../src/deliberation/engine";
-import { MIN_WORKER_RESPONSE_LENGTH } from "../src/deliberation/engine";
 import type {
   ModelInfo,
   ModelCapabilities,
@@ -109,9 +108,8 @@ function chatResult(content: string, input = 10, output = 20): ChatResult {
   return { content, inputTokens: input, outputTokens: output };
 }
 
-/** Pad worker content above MIN_WORKER_RESPONSE_LENGTH to avoid degenerate-response filtering. */
 function validWorker(label: string): string {
-  return label.padEnd(MIN_WORKER_RESPONSE_LENGTH, ".");
+  return label;
 }
 
 // ============================================================

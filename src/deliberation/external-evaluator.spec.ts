@@ -202,6 +202,6 @@ describe("LLMExternalEvaluator", () => {
 
     const chatMock = deps.chat as ReturnType<typeof mock>;
     const params = chatMock.mock.calls[0]![2];
-    expect(params).toEqual({ temperature: 0, max_tokens: 512 });
+    expect(params).toEqual({ temperature: 0 });
   });
 });

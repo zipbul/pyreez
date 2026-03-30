@@ -83,7 +83,6 @@ export class LocalProvider implements LLMProvider {
       })),
       temperature: request.temperature,
       top_p: request.top_p,
-      max_tokens: request.max_tokens,
       stream: false,
       stop: request.stop,
     };

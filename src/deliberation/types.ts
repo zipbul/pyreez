@@ -27,7 +27,6 @@ export type InteractionTechnique =
  */
 export interface GenerationParams {
   readonly temperature?: number;
-  readonly max_tokens?: number;
   readonly top_p?: number;
 }
 
@@ -164,6 +163,15 @@ export interface DeliberateInput {
    * Empty array or undefined: no technique (existing behavior).
    */
   readonly technique?: InteractionTechnique | readonly InteractionTechnique[];
+  /**
+   * Optional callback invoked after each round completes.
+   * Enables streaming output in CLI mode. Not serializable — runtime only.
+   */
+  readonly onRound?: (round: {
+    number: number;
+    responses: readonly { model: string; content: string; confidence?: "high" | "medium" | "low" }[];
+    failedWorkers?: readonly FailedWorker[];
+  }) => void;
 }
 
 /**

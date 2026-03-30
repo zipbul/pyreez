@@ -43,13 +43,6 @@ import type { ChatResult } from "../axis/types";
 
 // -- Constants --
 
-/**
- * Minimum character length for a valid worker response.
- * Responses shorter than this are treated as degenerate (empty, provider failure, etc.)
- * and trigger fallback to next model. Safety net for truly broken responses,
- * not a quality bar — worker prompts do not specify this limit.
- */
-export const MIN_WORKER_RESPONSE_LENGTH = 200;
 
 /** Minimum viable team size: at least 3, or 60% of requested. */
 export function minViableTeamSize(requested: number): number {
@@ -323,7 +316,6 @@ export function createFallbackPool(
 interface WorkerCallResult {
   response?: WorkerResponse;
   failed: boolean;
-  degenerate?: boolean;
   swaps: ModelSwap[];
   tokens: TokenUsage;
   /** Full message history (sent messages + assistant response) for session continuation. */
@@ -449,47 +441,12 @@ async function callWithFallback(
       totalInput += result.inputTokens;
       totalOutput += result.outputTokens;
 
-      const isDegenerate = result.content.trim().length < MIN_WORKER_RESPONSE_LENGTH;
-
-      if (isDegenerate && pool) {
-        // Degenerate = quality issue. Treat like an error for fallback purposes:
-        // try the next model from the pool instead of returning a useless response.
-        const degenerateMsg = `degenerate response (below ${MIN_WORKER_RESPONSE_LENGTH} chars)`;
-        // Don't propagate to provider level — degenerate is model-specific, not provider-wide.
-        excludeIds.add(currentModel);
-
-        const next = findFallbackModel(pool, excludeIds, ctx);
-
-        swaps.push({
-          original: currentModel,
-          replacement: next?.id,
-          round: roundNumber,
-          error: degenerateMsg,
-        });
-
-        if (!next) {
-          // Pool exhausted — return degenerate as-is
-          return {
-            response: { model: currentModel, content: result.content, workerIndex },
-            failed: false,
-            degenerate: true,
-            swaps,
-            tokens: { input: totalInput, output: totalOutput },
-          };
-        }
-
-        currentModel = next.id;
-        activeHistory = undefined; // Model changed — cold join via debate builder
-        continue; // retry with fallback model
-      }
-
       // Build conversation history for session continuation in next round
       const fullHistory = [...messages, { role: "assistant" as const, content: result.content }];
 
       return {
         response: { model: currentModel, content: result.content, workerIndex },
         failed: false,
-        degenerate: isDegenerate,
         swaps,
         tokens: { input: totalInput, output: totalOutput },
         history: fullHistory,
@@ -516,7 +473,7 @@ async function callWithFallback(
 
       // Scope cooldown by error type.
       // Provider-scoped (429, 401, 5xx) → all models from provider cooled.
-      // Model-scoped (404, timeout, degenerate) → only this model cooled.
+      // Model-scoped (404, timeout) → only this model cooled.
       pool.markFailed(currentModel, errorMsg, errorType);
       excludeIds.add(currentModel);
 
@@ -589,19 +546,9 @@ export async function executeRound(
       totalInput += wr.tokens.input;
       totalOutput += wr.tokens.output;
       allSwaps.push(...wr.swaps);
-      // Store history for session continuation (skip degenerate — broken context)
-      if (wr.history && !wr.degenerate) histories.set(idx, wr.history);
-      if (wr.response && !wr.degenerate) {
+      if (wr.history) histories.set(idx, wr.history);
+      if (wr.response) {
         responses.push(wr.response);
-      } else if (wr.response && wr.degenerate) {
-        // Degenerate = quality issue, not error. Include in failedWorkers for tracking
-        // but don't trigger fallback.
-        failedWorkers.push({
-          model: wr.response.model,
-          error: `degenerate response (below ${MIN_WORKER_RESPONSE_LENGTH} chars)`,
-          errorCode: "degenerate",
-          retryable: false,
-        });
       } else {
         // All fallbacks exhausted → empty slot
         const lastSwap = wr.swaps[wr.swaps.length - 1];
@@ -716,7 +663,7 @@ export async function deliberate(
           ),
         );
         for (const repResult of replenishResults) {
-          if (repResult.status === "fulfilled" && repResult.value.response && !repResult.value.degenerate) {
+          if (repResult.status === "fulfilled" && repResult.value.response) {
             replenishedResponses.push(repResult.value.response);
             accTokens = {
               input: accTokens.input + repResult.value.tokens.input,
@@ -799,6 +746,21 @@ export async function deliberate(
     };
 
     ctx = addRound(ctx, roundWithConfidence);
+
+    // Notify listener if streaming callback provided
+    if (input.onRound) {
+      input.onRound({
+        number: i,
+        responses: roundWithConfidence.responses.map((resp) => ({
+          model: resp.model,
+          content: resp.content,
+          ...(resp.confidence ? { confidence: resp.confidence } : {}),
+        })),
+        ...(roundWithConfidence.failedWorkers?.length
+          ? { failedWorkers: roundWithConfidence.failedWorkers }
+          : {}),
+      });
+    }
 
     // Accumulate metadata
     allRounds.push(roundWithConfidence);

@@ -131,7 +131,6 @@ describe("ProviderRegistry", () => {
       model: "anthropic/claude-sonnet-4.6",
       messages,
       temperature: 0.5,
-      max_tokens: 100,
     });
 
     // Assert
@@ -139,7 +138,6 @@ describe("ProviderRegistry", () => {
     expect(call.model).toBe("anthropic/claude-sonnet-4.6");
     expect(call.messages).toEqual(messages);
     expect(call.temperature).toBe(0.5);
-    expect(call.max_tokens).toBe(100);
   });
 
   it("should handle multiple providers correctly", async () => {
