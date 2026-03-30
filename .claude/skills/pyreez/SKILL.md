@@ -22,7 +22,6 @@ Do not skip any phase — each phase produces a verifiable output below.
 <checklist>
 Copy this checklist and check off each item as you complete it:
 
-- [ ] scores
 - [ ] deliberate (task framing applied)
 - [ ] Phase 1: comprehend (output template filled)
 - [ ] Phase 2: evaluate (verification labels applied)
@@ -30,13 +29,12 @@ Copy this checklist and check off each item as you complete it:
 - [ ] Phase 4: confidence assessment
 - [ ] synthesize (draft ready, not presented)
 - [ ] acceptance
-- [ ] feedback
 </checklist>
 
 <workflow>
 CLI: `bun run src/cli.ts <subcommand> [flags]`.
 
-**scores**: Run `scores`. Models are anonymized (A, B, C...). Prefer provider diversity. Include 1 unscored model from `trial_recommended` for exploration.
+**model selection**: Choose models from `scores/models.json`. Prefer provider diversity (at least 2 providers). Select by cost tier — expensive models are generally more capable.
 
 **task framing**: The user's topic is: `$ARGUMENTS`. Before deliberate, reframe it:
 - Identify the fundamental problem first, not the surface question.
@@ -51,7 +49,7 @@ CLI: `bun run src/cli.ts <subcommand> [flags]`.
 
 **protocol**: `debate` (multi-round, workers see each other) or `diverge-synth` (single-round, default).
 
-**deliberate**: Run `deliberate --task "..." --models "A,D,E" [--protocol debate] [--technique "..."] [--max-rounds N] [--worker-instructions "..."]`. Use `--task -` for long tasks via stdin.
+**deliberate**: Run `deliberate --task "..." --models "model1,model2,model3" [--protocol debate] [--technique "..."] [--max-rounds N] [--worker-instructions "..."]`. Use `--task -` for long tasks via stdin. Model IDs are from scores/models.json.
 </workflow>
 
 <synthesis-phases>
@@ -95,8 +93,6 @@ Rate overall synthesis confidence: HIGH / MEDIUM / LOW with one-sentence justifi
 
 <post-synthesis>
 **acceptance**: Run `acceptance` with original task, synthesis, and worker positions. If any worker rejects, revise the synthesis addressing misrepresented/unresolved issues, then re-run acceptance.
-
-**feedback**: Run `feedback` with per-model evaluations. Always run — scores stagnate without it.
 </post-synthesis>
 
 <critical-gate>
