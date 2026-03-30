@@ -12,7 +12,7 @@ import { NoModelsAvailableError } from "./deliberation/team-composer";
 import { TeamDegradedError } from "./deliberation/engine";
 import { buildAcceptanceMessages } from "./deliberation/prompts";
 import type { GenerationParams } from "./deliberation/types";
-import { BINARY_DIMENSIONS, getDomainWeights } from "./axis/types";
+import { BINARY_DIMENSIONS, DIMENSION_WEIGHTS } from "./axis/types";
 import type { ModelInfo } from "./model/types";
 import type { SkillCellStore } from "./model/skillcell-store";
 
@@ -194,7 +194,7 @@ async function logRun(
 
 export async function handleScores(
   config: HandlersConfig,
-  args: { domain: string; task_type?: string; min_score?: number },
+  args: { task_type?: string; min_score?: number },
 ): Promise<HandlerResult> {
   return logRun(config, "scores", async () => {
     const reg = config.filteredRegistry;
@@ -206,7 +206,6 @@ export async function handleScores(
     config.anonymizer.reset();
 
     const available = reg.getAvailable();
-    const weights = getDomainWeights(args.domain);
     const taskType = args.task_type;
 
     type ScoredModel = {
@@ -228,12 +227,13 @@ export async function handleScores(
     const unscored: UnscoredModel[] = [];
 
     for (const model of available) {
+      // Try exact taskType match first, then aggregate all cells for this model
       const cell = config.skillCellStore && taskType
-        ? config.skillCellStore.get(model.id, args.domain, taskType)
+        ? config.skillCellStore.get(model.id, taskType)
         : undefined;
 
-      const domainCells = !cell && config.skillCellStore
-        ? config.skillCellStore.getForDomain(model.id, args.domain)
+      const allCells = !cell && config.skillCellStore
+        ? config.skillCellStore.getAllForModel(model.id)
         : [];
 
       if (cell) {
@@ -242,7 +242,7 @@ export async function handleScores(
         for (const dim of BINARY_DIMENSIONS) {
           const params = cell.dimensions[dim];
           const mean = params ? params.alpha / (params.alpha + params.beta) : 0.5;
-          const w = weights[dim] ?? 0.20;
+          const w = DIMENSION_WEIGHTS[dim] ?? 0.20;
           score += w * mean;
           dimensions[dim] = Number(mean.toFixed(2));
         }
@@ -254,22 +254,22 @@ export async function handleScores(
           observations: cell.total,
           dimensions,
         });
-      } else if (domainCells.length > 0) {
+      } else if (allCells.length > 0) {
         let score = 0;
         let totalObs = 0;
         const dimensions: Record<string, number> = {};
         for (const dim of BINARY_DIMENSIONS) {
           let alpha = 1, beta = 1;
-          for (const dc of domainCells) {
+          for (const dc of allCells) {
             const p = dc.dimensions[dim];
             if (p) { alpha += p.alpha - 1; beta += p.beta - 1; }
           }
           const mean = alpha / (alpha + beta);
-          const w = weights[dim] ?? 0.20;
+          const w = DIMENSION_WEIGHTS[dim] ?? 0.20;
           score += w * mean;
           dimensions[dim] = Number(mean.toFixed(2));
         }
-        for (const dc of domainCells) totalObs += dc.total;
+        for (const dc of allCells) totalObs += dc.total;
         scored.push({
           id: model.id,
           provider: model.provider,
@@ -334,7 +334,6 @@ export async function handleDeliberate(
     task: string;
     models: string[];
     count?: number;
-    domain?: string;
     task_type?: string;
     worker_instructions?: string;
     max_rounds?: number;
@@ -359,7 +358,7 @@ export async function handleDeliberate(
       const resolvedModels = args.models.map((id) => anon.resolveModel(id) ?? id);
 
       const userProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
-      const taskNature = args.domain ? resolveTaskNature(args.domain, args.task_type) : undefined;
+      const taskNature = resolveTaskNature(args.task_type);
 
       const input: DeliberateInput = {
         task: args.task,
@@ -369,7 +368,6 @@ export async function handleDeliberate(
         maxRounds: args.max_rounds,
         protocol: userProtocol,
         ...(taskNature ? { taskNature } : {}),
-        ...(args.domain ? { domain: args.domain } : {}),
         ...(args.task_type ? { taskType: args.task_type } : {}),
         ...(args.technique ? { technique: args.technique as DeliberateInput["technique"] } : {}),
         ...(args.onRound ? { onRound: args.onRound } : {}),
@@ -554,7 +552,7 @@ export async function handleFeedback(
   config: HandlersConfig,
   args: {
     evaluations?: {
-      model_id: string; domain: string; task_type: string;
+      model_id: string; task_type: string;
       dimensions: { factually_correct: boolean; addresses_task: boolean; provides_evidence: boolean; novel_perspective: boolean; internally_consistent: boolean };
       failures: { hallucination: boolean; refusal: boolean; off_topic: boolean; degenerate: boolean };
     }[];
@@ -577,7 +575,6 @@ export async function handleFeedback(
         config.skillCellStore.update({
           deliberation_id: crypto.randomUUID(),
           model_id: realModelId,
-          domain: ev.domain,
           task_type: ev.task_type,
           evaluator_id: "host",
           dimensions: ev.dimensions,

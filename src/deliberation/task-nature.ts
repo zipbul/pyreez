@@ -50,31 +50,15 @@ const ARTIFACT_TASKS = new Set([
 ]);
 
 /**
- * Domains that default to artifact when taskType is not specified.
- */
-const ARTIFACT_DOMAINS = new Set([
-  "CODING",
-  "TESTING",
-  "OPERATIONS",
-  "ARCHITECTURE",
-]);
-
-/**
- * Resolve task nature from domain and taskType.
+ * Resolve task nature from taskType.
  *
- * Priority: taskType (if in ARTIFACT_TASKS) > domain > default "critique".
- * taskType always wins — e.g. CODING/CODE_REVIEW → critique.
+ * If taskType is in ARTIFACT_TASKS → "artifact", otherwise → "critique".
  */
 export function resolveTaskNature(
-  domain?: string,
   taskType?: string,
 ): TaskNature {
   if (taskType) {
     return ARTIFACT_TASKS.has(taskType) ? "artifact" : "critique";
   }
-  if (domain) {
-    return ARTIFACT_DOMAINS.has(domain) ? "artifact" : "critique";
-  }
   return "critique";
 }
-

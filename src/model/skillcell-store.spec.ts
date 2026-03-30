@@ -7,7 +7,6 @@ function makeFeedback(overrides?: Partial<FeedbackRecord>): FeedbackRecord {
   return {
     deliberation_id: "delib-1",
     model_id: "test/model-a",
-    domain: "ARCHITECTURE",
     task_type: "SYSTEM_DESIGN",
     evaluator_id: "eval-1",
     dimensions: {
@@ -47,12 +46,12 @@ describe("FileSkillCellStore", () => {
   });
 
   it("should return undefined for unknown cell", () => {
-    expect(store.get("unknown", "ARCH", "SD")).toBeUndefined();
+    expect(store.get("unknown", "SD")).toBeUndefined();
   });
 
   it("should create cell on first update with correct alpha/beta", () => {
     store.update(makeFeedback());
-    const cell = store.get("test/model-a", "ARCHITECTURE", "SYSTEM_DESIGN");
+    const cell = store.get("test/model-a", "SYSTEM_DESIGN");
     expect(cell).toBeDefined();
     expect(cell!.total).toBe(1);
     // factually_correct: pass → alpha=2, beta=1
@@ -70,7 +69,7 @@ describe("FileSkillCellStore", () => {
       novel_perspective: false,
       internally_consistent: true,
     }}));
-    const cell = store.get("test/model-a", "ARCHITECTURE", "SYSTEM_DESIGN")!;
+    const cell = store.get("test/model-a", "SYSTEM_DESIGN")!;
     expect(cell.total).toBe(2);
     // factually_correct: 1 pass + 1 fail → alpha=2, beta=2
     expect(cell.dimensions.factually_correct).toEqual({ alpha: 2, beta: 2 });
@@ -83,31 +82,30 @@ describe("FileSkillCellStore", () => {
     store.update(makeFeedback({ failures: {
       hallucination: true, refusal: false, off_topic: true, degenerate: false,
     }}));
-    const cell = store.get("test/model-a", "ARCHITECTURE", "SYSTEM_DESIGN")!;
+    const cell = store.get("test/model-a", "SYSTEM_DESIGN")!;
     expect(cell.failure_counts.hallucination).toBe(2);
     expect(cell.failure_counts.off_topic).toBe(1);
     expect(cell.failure_counts.refusal).toBe(0);
   });
 
-  it("should separate cells by domain and task_type", () => {
-    store.update(makeFeedback({ domain: "CODING", task_type: "IMPLEMENT_FEATURE" }));
-    store.update(makeFeedback({ domain: "RESEARCH", task_type: "TECH_RESEARCH" }));
-    expect(store.get("test/model-a", "CODING", "IMPLEMENT_FEATURE")).toBeDefined();
-    expect(store.get("test/model-a", "RESEARCH", "TECH_RESEARCH")).toBeDefined();
-    expect(store.get("test/model-a", "CODING", "TECH_RESEARCH")).toBeUndefined();
+  it("should separate cells by task_type", () => {
+    store.update(makeFeedback({ task_type: "IMPLEMENT_FEATURE" }));
+    store.update(makeFeedback({ task_type: "TECH_RESEARCH" }));
+    expect(store.get("test/model-a", "IMPLEMENT_FEATURE")).toBeDefined();
+    expect(store.get("test/model-a", "TECH_RESEARCH")).toBeDefined();
   });
 
-  it("should getAll for domain+taskType", () => {
+  it("should getAll for taskType", () => {
     store.update(makeFeedback({ model_id: "test/model-a" }));
     store.update(makeFeedback({ model_id: "test/model-b" }));
-    store.update(makeFeedback({ model_id: "test/model-c", domain: "CODING", task_type: "X" }));
-    const all = store.getAll("ARCHITECTURE", "SYSTEM_DESIGN");
+    store.update(makeFeedback({ model_id: "test/model-c", task_type: "X" }));
+    const all = store.getAll("SYSTEM_DESIGN");
     expect(all).toHaveLength(2);
   });
 
-  it("should getAllForModel across domains", () => {
-    store.update(makeFeedback({ domain: "ARCH", task_type: "SD" }));
-    store.update(makeFeedback({ domain: "CODE", task_type: "IF" }));
+  it("should getAllForModel across task types", () => {
+    store.update(makeFeedback({ task_type: "SD" }));
+    store.update(makeFeedback({ task_type: "IF" }));
     const all = store.getAllForModel("test/model-a");
     expect(all).toHaveLength(2);
   });
@@ -118,9 +116,9 @@ describe("FileSkillCellStore", () => {
     store.update(makeFeedback({ model_id: "test/model-a" }));
     store.update(makeFeedback({ model_id: "test/model-b" }));
     store.update(makeFeedback({ model_id: "test/model-c" }));
-    const fam1 = store.getAllForFamily("fam-1", "ARCHITECTURE", "SYSTEM_DESIGN");
+    const fam1 = store.getAllForFamily("fam-1", "SYSTEM_DESIGN");
     expect(fam1).toHaveLength(2);
-    const fam2 = store.getAllForFamily("fam-2", "ARCHITECTURE", "SYSTEM_DESIGN");
+    const fam2 = store.getAllForFamily("fam-2", "SYSTEM_DESIGN");
     expect(fam2).toHaveLength(1);
   });
 
@@ -137,7 +135,7 @@ describe("FileSkillCellStore", () => {
     const store2 = new FileSkillCellStore({ io: io2, path: "test.json" });
     await store2.load();
 
-    const cell = store2.get("test/model-a", "ARCHITECTURE", "SYSTEM_DESIGN");
+    const cell = store2.get("test/model-a", "SYSTEM_DESIGN");
     expect(cell).toBeDefined();
     expect(cell!.total).toBe(1);
     expect(cell!.dimensions.factually_correct).toEqual({ alpha: 2, beta: 1 });
@@ -152,7 +150,7 @@ describe("FileSkillCellStore", () => {
     const store2 = new FileSkillCellStore({ io: io2, path: "test.json" });
     store2.update(makeFeedback()); // pre-existing data
     await store2.load(); // should clear because version !== 1
-    expect(store2.get("test/model-a", "ARCHITECTURE", "SYSTEM_DESIGN")).toBeUndefined();
+    expect(store2.get("test/model-a", "SYSTEM_DESIGN")).toBeUndefined();
   });
 
   it("should clear cells on corrupted JSON", async () => {
@@ -163,12 +161,12 @@ describe("FileSkillCellStore", () => {
     const store2 = new FileSkillCellStore({ io: io2, path: "test.json" });
     store2.update(makeFeedback()); // has data
     await store2.load(); // should clear on parse error
-    expect(store2.get("test/model-a", "ARCHITECTURE", "SYSTEM_DESIGN")).toBeUndefined();
+    expect(store2.get("test/model-a", "SYSTEM_DESIGN")).toBeUndefined();
   });
 
   it("should initialize all dimensions with uniform prior", () => {
     store.update(makeFeedback());
-    const cell = store.get("test/model-a", "ARCHITECTURE", "SYSTEM_DESIGN")!;
+    const cell = store.get("test/model-a", "SYSTEM_DESIGN")!;
     for (const dim of BINARY_DIMENSIONS) {
       expect(cell.dimensions[dim]).toBeDefined();
       // alpha + beta should be 3 (1 initial + 1 update)
@@ -179,31 +177,10 @@ describe("FileSkillCellStore", () => {
     }
   });
 
-  // -- getForDomain --
-
-  it("should return all cells for a model in a specific domain across taskTypes", () => {
-    store.update(makeFeedback({ domain: "ARCHITECTURE", task_type: "SYSTEM_DESIGN" }));
-    store.update(makeFeedback({ domain: "ARCHITECTURE", task_type: "MODULE_DESIGN" }));
-    store.update(makeFeedback({ domain: "CODING", task_type: "IMPLEMENT_FEATURE" }));
-
-    const cells = store.getForDomain("test/model-a", "ARCHITECTURE");
-    expect(cells).toHaveLength(2);
-    for (const c of cells) {
-      expect(c.domain).toBe("ARCHITECTURE");
-      expect(c.model_id).toBe("test/model-a");
-    }
-  });
-
-  it("should return empty for getForDomain with no matching cells", () => {
-    const cells = store.getForDomain("nonexistent/model", "CODING");
-    expect(cells).toHaveLength(0);
-  });
-
   // -- Failure severity integration --
 
-  it("should penalize ALL dimensions on critical hallucination (CODING)", () => {
+  it("should penalize ALL dimensions on critical hallucination", () => {
     store.update(makeFeedback({
-      domain: "CODING",
       task_type: "IMPLEMENT_FEATURE",
       dimensions: {
         factually_correct: true, addresses_task: true,
@@ -211,7 +188,7 @@ describe("FileSkillCellStore", () => {
       },
       failures: { hallucination: true, refusal: false, off_topic: false, degenerate: false },
     }));
-    const cell = store.get("test/model-a", "CODING", "IMPLEMENT_FEATURE")!;
+    const cell = store.get("test/model-a", "IMPLEMENT_FEATURE")!;
     // Critical → all dimensions overridden to false → beta incremented
     for (const dim of BINARY_DIMENSIONS) {
       expect(cell.dimensions[dim]!.beta).toBe(2); // 1 initial + 1 failure
@@ -219,40 +196,21 @@ describe("FileSkillCellStore", () => {
     }
   });
 
-  it("should penalize only factually_correct on warning hallucination (PLANNING)", () => {
+  it("should penalize only factually_correct on warning refusal", () => {
     store.update(makeFeedback({
-      domain: "PLANNING",
       task_type: "SCOPE_DEFINITION",
       dimensions: {
         factually_correct: true, addresses_task: true,
         provides_evidence: true, novel_perspective: true, internally_consistent: true,
       },
-      failures: { hallucination: true, refusal: false, off_topic: false, degenerate: false },
+      failures: { hallucination: false, refusal: true, off_topic: false, degenerate: false },
     }));
-    const cell = store.get("test/model-a", "PLANNING", "SCOPE_DEFINITION")!;
+    const cell = store.get("test/model-a", "SCOPE_DEFINITION")!;
     // Warning → factually_correct overridden to false
     expect(cell.dimensions["factually_correct"]!.beta).toBe(2);
     expect(cell.dimensions["factually_correct"]!.alpha).toBe(1);
     // Other dimensions keep original true → alpha incremented
     expect(cell.dimensions["addresses_task"]!.alpha).toBe(2);
     expect(cell.dimensions["novel_perspective"]!.alpha).toBe(2);
-  });
-
-  it("should not penalize dimensions on neutral hallucination (IDEATION)", () => {
-    store.update(makeFeedback({
-      domain: "IDEATION",
-      task_type: "BRAINSTORM",
-      dimensions: {
-        factually_correct: true, addresses_task: true,
-        provides_evidence: true, novel_perspective: true, internally_consistent: true,
-      },
-      failures: { hallucination: true, refusal: false, off_topic: false, degenerate: false },
-    }));
-    const cell = store.get("test/model-a", "IDEATION", "BRAINSTORM")!;
-    // Neutral → dimensions unchanged → all alpha incremented
-    for (const dim of BINARY_DIMENSIONS) {
-      expect(cell.dimensions[dim]!.alpha).toBe(2);
-      expect(cell.dimensions[dim]!.beta).toBe(1);
-    }
   });
 });

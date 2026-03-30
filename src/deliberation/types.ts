@@ -102,7 +102,6 @@ export interface SharedContext {
   readonly team: TeamComposition;
   readonly rounds: readonly Round[];
   readonly taskNature?: TaskNature;
-  readonly domain?: string;
 }
 
 // -- Token Usage --
@@ -153,8 +152,6 @@ export interface DeliberateInput {
   readonly count?: number;
   /** Task nature for prompt selection. Artifact = deliverable output, Critique = analysis. */
   readonly taskNature?: TaskNature;
-  /** Domain for SkillCell evaluator. */
-  readonly domain?: string;
   /** Task type for SkillCell evaluator. */
   readonly taskType?: string;
   /**

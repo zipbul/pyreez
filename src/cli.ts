@@ -3,8 +3,8 @@
  * Subcommands: scores, deliberate, acceptance, feedback
  *
  * Usage:
- *   bun run src/cli.ts scores --domain ARCHITECTURE
- *   bun run src/cli.ts deliberate --task "..." --models "A,B" --domain ARCHITECTURE
+ *   bun run src/cli.ts scores
+ *   bun run src/cli.ts deliberate --task "..." --models "A,B"
  *   bun run src/cli.ts acceptance --task "..." --synthesis "..." --workers '[...]'
  *   bun run src/cli.ts feedback --evaluations '[...]'
  */
@@ -222,10 +222,7 @@ async function main(): Promise<void> {
 
   switch (command) {
     case "scores": {
-      const domain = flags["domain"];
-      if (!domain) die("--domain is required for scores");
       result = await handleScores(config, {
-        domain: domain!,
         task_type: flags["task-type"],
         min_score: flags["min-score"] !== undefined ? Number(flags["min-score"]) : undefined,
       });
@@ -244,7 +241,6 @@ async function main(): Promise<void> {
         task: task!,
         models,
         count: flags["count"] !== undefined ? Number(flags["count"]) : undefined,
-        domain: flags["domain"],
         task_type: flags["task-type"],
         worker_instructions: workerInstructions,
         max_rounds: flags["max-rounds"] !== undefined ? Number(flags["max-rounds"]) : undefined,

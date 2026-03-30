@@ -1,5 +1,5 @@
 /**
- * SkillCell Store — per-model, per-domain, per-task_type skill profiles.
+ * SkillCell Store — per-model, per-task_type skill profiles.
  *
  * Stores Beta distribution parameters for Thompson Sampling model selection.
  * Persistence: scores/skillcells.json.
@@ -15,15 +15,13 @@ import { SkillCellStoreFileSchema } from "../validation/schemas";
 
 export interface SkillCellStore {
   /** Get a specific cell. Returns undefined if no data. */
-  get(modelId: string, domain: string, taskType: string): SkillCell | undefined;
-  /** Get all cells for a domain+taskType. */
-  getAll(domain: string, taskType: string): SkillCell[];
-  /** Get all cells for a model across all domains. */
+  get(modelId: string, taskType: string): SkillCell | undefined;
+  /** Get all cells for a taskType. */
+  getAll(taskType: string): SkillCell[];
+  /** Get all cells for a model across all taskTypes. */
   getAllForModel(modelId: string): SkillCell[];
   /** Get all cells for models in a given family. */
-  getAllForFamily(family: string, domain: string, taskType: string): SkillCell[];
-  /** Get all cells for a model in a specific domain (across all taskTypes). */
-  getForDomain(modelId: string, domain: string): SkillCell[];
+  getAllForFamily(family: string, taskType: string): SkillCell[];
   /** Update a cell with a new feedback record. */
   update(record: FeedbackRecord): void;
   /** Persist to disk. */
@@ -42,12 +40,12 @@ export interface SkillCellIO {
 // -- Implementation --
 
 /** Key for the in-memory map. */
-function cellKey(modelId: string, domain: string, taskType: string): string {
-  return `${modelId}:${domain}:${taskType}`;
+function cellKey(modelId: string, taskType: string): string {
+  return `${modelId}:${taskType}`;
 }
 
 /** Create a fresh SkillCell with uniform priors. */
-function freshCell(modelId: string, domain: string, taskType: string): SkillCell {
+function freshCell(modelId: string, taskType: string): SkillCell {
   const dimensions: Record<string, BetaParams> = {};
   for (const dim of BINARY_DIMENSIONS) {
     dimensions[dim] = { alpha: 1, beta: 1 };
@@ -56,7 +54,7 @@ function freshCell(modelId: string, domain: string, taskType: string): SkillCell
   for (const flag of FAILURE_FLAGS) {
     failure_counts[flag] = 0;
   }
-  return { model_id: modelId, domain, task_type: taskType, dimensions, failure_counts, total: 0 };
+  return { model_id: modelId, task_type: taskType, dimensions, failure_counts, total: 0 };
 }
 
 export class FileSkillCellStore implements SkillCellStore {
@@ -72,14 +70,14 @@ export class FileSkillCellStore implements SkillCellStore {
     this.familyLookup = opts.familyLookup ?? new Map();
   }
 
-  get(modelId: string, domain: string, taskType: string): SkillCell | undefined {
-    return this.cells.get(cellKey(modelId, domain, taskType));
+  get(modelId: string, taskType: string): SkillCell | undefined {
+    return this.cells.get(cellKey(modelId, taskType));
   }
 
-  getAll(domain: string, taskType: string): SkillCell[] {
+  getAll(taskType: string): SkillCell[] {
     const result: SkillCell[] = [];
     for (const cell of this.cells.values()) {
-      if (cell.domain === domain && cell.task_type === taskType) {
+      if (cell.task_type === taskType) {
         result.push(cell);
       }
     }
@@ -96,20 +94,10 @@ export class FileSkillCellStore implements SkillCellStore {
     return result;
   }
 
-  getForDomain(modelId: string, domain: string): SkillCell[] {
+  getAllForFamily(family: string, taskType: string): SkillCell[] {
     const result: SkillCell[] = [];
     for (const cell of this.cells.values()) {
-      if (cell.model_id === modelId && cell.domain === domain) {
-        result.push(cell);
-      }
-    }
-    return result;
-  }
-
-  getAllForFamily(family: string, domain: string, taskType: string): SkillCell[] {
-    const result: SkillCell[] = [];
-    for (const cell of this.cells.values()) {
-      if (cell.domain === domain && cell.task_type === taskType) {
+      if (cell.task_type === taskType) {
         const cellFamily = this.familyLookup.get(cell.model_id);
         if (cellFamily === family) {
           result.push(cell);
@@ -120,14 +108,14 @@ export class FileSkillCellStore implements SkillCellStore {
   }
 
   update(record: FeedbackRecord): void {
-    const key = cellKey(record.model_id, record.domain, record.task_type);
+    const key = cellKey(record.model_id, record.task_type);
     let cell = this.cells.get(key);
     if (!cell) {
-      cell = freshCell(record.model_id, record.domain, record.task_type);
+      cell = freshCell(record.model_id, record.task_type);
     }
 
     // Apply failure severity: critical → all dims false, warning → factual false
-    const effectiveDims = applyFailureSeverity(record.domain, record.dimensions, record.failures);
+    const effectiveDims = applyFailureSeverity(record.dimensions, record.failures);
 
     // Update binary dimensions
     for (const dim of BINARY_DIMENSIONS) {
@@ -170,9 +158,7 @@ export class FileSkillCellStore implements SkillCellStore {
           this.cells.set(key, cell as SkillCell);
         }
       }
-      // Validation failure or unsupported → empty store (cells already cleared)
     } catch {
-      // File doesn't exist or corrupted → start fresh
       this.cells.clear();
     }
   }

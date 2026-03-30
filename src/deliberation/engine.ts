@@ -610,7 +610,7 @@ export async function deliberate(
 ): Promise<DeliberateOutput> {
   const cfg = config ?? DEFAULT_CONFIG;
   let currentTeam = team;
-  let ctx = createSharedContext(input.task, currentTeam, input.taskNature, input.domain);
+  let ctx = createSharedContext(input.task, currentTeam, input.taskNature);
   let accTokens: TokenUsage = { input: 0, output: 0 };
   const allRounds: Round[] = [];
   const allModels = new Set<string>();
@@ -728,7 +728,7 @@ export async function deliberate(
       if (teamChanged) {
         currentTeam = { workers: updatedWorkers };
         const prevRounds = [...ctx.rounds];
-        ctx = createSharedContext(input.task, currentTeam, input.taskNature, input.domain);
+        ctx = createSharedContext(input.task, currentTeam, input.taskNature);
         for (const prevRound of prevRounds) {
           ctx = addRound(ctx, prevRound);
         }

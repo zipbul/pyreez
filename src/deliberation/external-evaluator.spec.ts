@@ -48,11 +48,10 @@ describe("LLMExternalEvaluator", () => {
     const evaluator = new LLMExternalEvaluator(makeDeps());
     const record = await evaluator.evaluate(
       "test task", "worker/model-1", "worker response content",
-      "ARCHITECTURE", "SYSTEM_DESIGN", "delib-1", new Set(["provX"]),
+      "SYSTEM_DESIGN", "delib-1", new Set(["provX"]),
     );
 
     expect(record.model_id).toBe("worker/model-1");
-    expect(record.domain).toBe("ARCHITECTURE");
     expect(record.task_type).toBe("SYSTEM_DESIGN");
     expect(record.dimensions.factually_correct).toBe(true);
     expect(record.dimensions.provides_evidence).toBe(false);
@@ -66,7 +65,7 @@ describe("LLMExternalEvaluator", () => {
 
     // Team uses provA — evaluator should be from provB (next cheapest)
     await evaluator.evaluate(
-      "task", "w1", "content", "D", "T", "d1", new Set(["provA"]),
+      "task", "w1", "content", "T", "d1", new Set(["provA"]),
     );
 
     const chatMock = deps.chat as ReturnType<typeof mock>;
@@ -79,9 +78,9 @@ describe("LLMExternalEvaluator", () => {
     const evaluator = new LLMExternalEvaluator(deps);
 
     // First call: team=provX, last=null → picks cheapest (provA)
-    await evaluator.evaluate("t", "w1", "c", "D", "T", "d1", new Set(["provX"]));
+    await evaluator.evaluate("t", "w1", "c", "T", "d1", new Set(["provX"]));
     // Second call: team=provX, last=provA → picks provB (rotation)
-    await evaluator.evaluate("t", "w2", "c", "D", "T", "d2", new Set(["provX"]));
+    await evaluator.evaluate("t", "w2", "c", "T", "d2", new Set(["provX"]));
 
     const chatMock = deps.chat as ReturnType<typeof mock>;
     expect(chatMock.mock.calls[0]![0]).toBe("cheap/eval-1"); // provA
@@ -96,7 +95,7 @@ describe("LLMExternalEvaluator", () => {
 
     // Team uses provA, only model is provA — should still work (last resort)
     const record = await evaluator.evaluate(
-      "t", "w1", "c", "D", "T", "d1", new Set(["provA"]),
+      "t", "w1", "c", "T", "d1", new Set(["provA"]),
     );
     expect(record.evaluator_id).toBe("only/model");
   });
@@ -108,7 +107,7 @@ describe("LLMExternalEvaluator", () => {
     const evaluator = new LLMExternalEvaluator(deps);
 
     await expect(
-      evaluator.evaluate("t", "w1", "c", "D", "T", "d1", new Set()),
+      evaluator.evaluate("t", "w1", "c", "T", "d1", new Set()),
     ).rejects.toThrow("Failed to parse evaluator response");
   });
 
@@ -117,7 +116,7 @@ describe("LLMExternalEvaluator", () => {
     const evaluator = new LLMExternalEvaluator(deps);
 
     await expect(
-      evaluator.evaluate("t", "w1", "c", "D", "T", "d1", new Set()),
+      evaluator.evaluate("t", "w1", "c", "T", "d1", new Set()),
     ).rejects.toThrow("No evaluator model available");
   });
 
@@ -129,7 +128,7 @@ describe("LLMExternalEvaluator", () => {
       })),
     });
     const evaluator = new LLMExternalEvaluator(deps);
-    const record = await evaluator.evaluate("t", "w1", "c", "D", "T", "d1", new Set());
+    const record = await evaluator.evaluate("t", "w1", "c", "T", "d1", new Set());
     expect(record.dimensions.factually_correct).toBe(true);
   });
 
@@ -142,7 +141,7 @@ describe("LLMExternalEvaluator", () => {
       chat: mock(async () => ({ content: partial, inputTokens: 0, outputTokens: 0 })),
     });
     const evaluator = new LLMExternalEvaluator(deps);
-    const record = await evaluator.evaluate("t", "w1", "c", "D", "T", "d1", new Set());
+    const record = await evaluator.evaluate("t", "w1", "c", "T", "d1", new Set());
     expect(record.dimensions.factually_correct).toBe(true);
     expect(record.dimensions.addresses_task).toBe(false); // missing → false
     expect(record.dimensions.provides_evidence).toBe(false);
@@ -154,9 +153,9 @@ describe("LLMExternalEvaluator", () => {
     const evaluator = new LLMExternalEvaluator(deps);
 
     // Evaluate 3 workers in sequence (like wire.ts loop)
-    await evaluator.evaluate("t", "w1", "c", "D", "T", "d1", new Set(["provX"]));
-    await evaluator.evaluate("t", "w2", "c", "D", "T", "d1", new Set(["provX"]));
-    await evaluator.evaluate("t", "w3", "c", "D", "T", "d1", new Set(["provX"]));
+    await evaluator.evaluate("t", "w1", "c", "T", "d1", new Set(["provX"]));
+    await evaluator.evaluate("t", "w2", "c", "T", "d1", new Set(["provX"]));
+    await evaluator.evaluate("t", "w3", "c", "T", "d1", new Set(["provX"]));
 
     const chatMock = deps.chat as ReturnType<typeof mock>;
     const evaluators = chatMock.mock.calls.map((c: any) => c[0]);
@@ -164,41 +163,24 @@ describe("LLMExternalEvaluator", () => {
     expect(evaluators[0]).not.toBe(evaluators[1]); // different evaluator for 2nd call
   });
 
-  it("should include domain context in evaluator prompt", async () => {
+  it("should include task type context in evaluator prompt", async () => {
     const deps = makeDeps();
     const evaluator = new LLMExternalEvaluator(deps);
     await evaluator.evaluate(
       "test task", "worker/model-1", "response",
-      "IDEATION", "BRAINSTORM", "delib-1", new Set(["provX"]),
+      "BRAINSTORM", "delib-1", new Set(["provX"]),
     );
 
     const chatMock = deps.chat as ReturnType<typeof mock>;
     const messages = chatMock.mock.calls[0]![1];
     const systemContent = messages[0].content;
-    expect(systemContent).toContain("IDEATION");
     expect(systemContent).toContain("BRAINSTORM");
-    expect(systemContent).toContain("novel_perspective");
-  });
-
-  it("should include domain without hint for unknown domains", async () => {
-    const deps = makeDeps();
-    const evaluator = new LLMExternalEvaluator(deps);
-    await evaluator.evaluate(
-      "test task", "worker/model-1", "response",
-      "CUSTOM_DOMAIN", "CUSTOM_TYPE", "delib-1", new Set(["provX"]),
-    );
-
-    const chatMock = deps.chat as ReturnType<typeof mock>;
-    const messages = chatMock.mock.calls[0]![1];
-    const systemContent = messages[0].content;
-    expect(systemContent).toContain("CUSTOM_DOMAIN");
-    expect(systemContent).toContain("CUSTOM_TYPE");
   });
 
   it("should use temperature 0 for deterministic evaluation", async () => {
     const deps = makeDeps();
     const evaluator = new LLMExternalEvaluator(deps);
-    await evaluator.evaluate("t", "w1", "c", "D", "T", "d1", new Set());
+    await evaluator.evaluate("t", "w1", "c", "T", "d1", new Set());
 
     const chatMock = deps.chat as ReturnType<typeof mock>;
     const params = chatMock.mock.calls[0]![2];

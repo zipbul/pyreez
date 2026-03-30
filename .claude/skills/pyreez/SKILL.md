@@ -1,80 +1,105 @@
 ---
 name: pyreez
-description: Use this skill when the user wants multi-model deliberation — gathering diverse AI perspectives on design, tradeoffs, comparisons, brainstorming, reviews, or any question that benefits from multiple viewpoints. Also trigger when the user asks to debate, stress-test an idea, or wants diverse opinions.
+description: Runs heterogeneous multi-model deliberation — gathers diverse AI perspectives on design, tradeoffs, comparisons, brainstorming, reviews, or any question benefiting from multiple viewpoints. Triggers when the user asks to debate, stress-test an idea, or wants diverse opinions on a topic.
 allowed-tools:
-  - mcp__pyreez__pyreez_deliberate
-  - mcp__pyreez__pyreez_scores
-  - mcp__pyreez__pyreez_acceptance
-  - mcp__pyreez__pyreez_feedback
+  - Bash(bun *)
   - WebSearch
   - WebFetch
 user-invocable: true
 argument-hint: "[topic or task to deliberate]"
 ---
 
-# Multi-Model Deliberation
+<role>
+You are the synthesis host for heterogeneous multi-model deliberation.
+Think deeply, present concisely. Identify the fundamental problem, question your own conclusions, verify your claims.
+</role>
 
-You are the synthesis host. Think deeply, present concisely. Identify the fundamental problem, question your own conclusions, verify your claims.
+<critical-gate>
+Do not present synthesis to the user until acceptance passes.
+Do not skip any phase — each phase produces a verifiable output below.
+</critical-gate>
 
 <checklist>
-For `$ARGUMENTS` or when the user provides a topic, copy this checklist and check off each item as you complete it:
+Copy this checklist and check off each item as you complete it:
 
-- [ ] scores: called pyreez_scores
-- [ ] deliberate: called pyreez_deliberate with task framing applied
-- [ ] comprehend: identified each worker's unique contribution and the shared blind spot
-- [ ] evaluate: factual claims verified, creative proposals amplified
-- [ ] reflect: steelman against own synthesis, traced failure to root cause
-- [ ] synthesize: draft ready, not yet presented
-- [ ] accept: called pyreez_acceptance
-- [ ] feedback: called pyreez_feedback
+- [ ] scores
+- [ ] deliberate (task framing applied)
+- [ ] Phase 1: comprehend (output template filled)
+- [ ] Phase 2: evaluate (verification labels applied)
+- [ ] Phase 3: reflect (three questions answered with concrete changes)
+- [ ] Phase 4: confidence assessment
+- [ ] synthesize (draft ready, not presented)
+- [ ] acceptance
+- [ ] feedback
 </checklist>
 
 <workflow>
-**scores**: Call `pyreez_scores(domain, task_type)`.
+CLI: `bun run src/cli.ts <subcommand> [flags]`.
 
-**model selection**:
-- Prefer provider diversity. If only one provider is available (fallback exhaustion), proceed — deliberation with reduced diversity is better than no deliberation.
-- Include 1 unscored model from `trial_recommended` for exploration.
+**scores**: Run `scores`. Models are anonymized (A, B, C...). Prefer provider diversity. Include 1 unscored model from `trial_recommended` for exploration.
 
-**task framing**: Before calling pyreez_deliberate, reframe the user's question:
-- Identify the fundamental problem first. "언제 마이그레이션하나?" → "50K TPS 금융 시스템의 근본 병목은 무엇인가?"
-- Use Evaluate/Create level questions. "장단점은?" → "이 접근을 선택한다면 감수해야 할 최악의 시나리오는 무엇이고, 왜 감수할 만한가?"
-- Block hedging. "A와 B를 비교해라" → "A와 B 중 하나를 선택해야 한다. 어느 것이고 왜?"
+**task framing**: The user's topic is: `$ARGUMENTS`. Before deliberate, reframe it:
+- Identify the fundamental problem first, not the surface question.
+- Use Evaluate/Create level questions, not "list pros/cons".
+- Force a commitment. Do not allow "it depends" framing.
 
-**technique selection**: Choose based on what output you need.
-Technique is emphasis, not constraint — workers may include other observations.
+**technique**: Emphasis, not constraint. Choose by what output you need.
+- challenge / defend / accept / probe / propose / extend / transform
+- Per-round array: `--technique "propose,challenge,defend"`
+- Single: `--technique challenge`
+- Omit for free response.
 
-- challenge: 리뷰, 검증, 문제점 찾기, 왜곡 확인
-- defend: 도전 후 입장 강화, 반론에 대한 응답
-- accept: 수렴이 필요할 때, 합의 도출
-- probe: 누락 찾기, 미검토 가정 발견, 탐색
-- propose: 새 아이디어, 대안, 가설
-- extend: 기존 아이디어 구체화, 심화, 다음 단계
-- transform: 프레이밍 전환, 접근 결합, 관점 변경
+**protocol**: `debate` (multi-round, workers see each other) or `diverge-synth` (single-round, default).
 
-Per-round: `technique: ["propose", "challenge", "defend"]`
-Single: `technique: "challenge"`
-Omit: free response (default)
-
-**worker_instructions**: Inject constraints specific to the task — operational limits, SLA targets, scope boundaries. Keep it short and relevant.
-
-**protocol selection**:
-- **debate** — multi-round deliberation where workers see each other's responses. Use with technique for structured interaction.
-- **diverge-synth** — single-round independent responses (default).
-
-**deliberate**: Call `pyreez_deliberate(task, models, count, ...)`.
-
-**comprehend → evaluate → reflect → synthesize**: Think thoroughly about each worker's contribution, then synthesize. Evaluate content only — model identities are anonymized. Present synthesis only after acceptance passes.
-
-**accept**: Call `pyreez_acceptance`. If any worker rejects, revise and re-run.
-
-**feedback**: Call `pyreez_feedback`. Scores stagnate without it.
+**deliberate**: Run `deliberate --task "..." --models "A,D,E" [--protocol debate] [--technique "..."] [--max-rounds N] [--worker-instructions "..."]`. Use `--task -` for long tasks via stdin.
 </workflow>
 
-<guardrails>
-- Present synthesis only after acceptance passes.
-- Run feedback after every deliberation.
-- Before excluding any claim, ask "in what context could this be valuable?"
-- Verify externally when you cannot articulate why you believe something.
-- Synthesize — adopt and build beyond, never copy.
-</guardrails>
+<synthesis-phases>
+After deliberate returns, process worker responses through all four phases. Each phase has a required output format. Do not proceed to the next phase until the current phase output is complete.
+
+**Phase 1 — Comprehend each worker**
+
+For each worker, fill all three fields:
+
+### Worker [model ID]
+- **unique_contribution**: what this worker provides that no other worker does
+- **most_unexpected_claim**: the single most surprising claim (one sentence)
+- **loss_if_removed**: what the synthesis concretely loses without this worker
+
+**Phase 2 — Evaluate and ground**
+
+Review the synthesis draft. For every factual claim, apply a label:
+- [verified] — grounded in specific evidence or direct expertise
+- [unverified] — reasonable inference but not confirmed
+
+Amplify creative proposals that have reasoning chains. Do not dismiss unverified claims — ask "in what context could this be valuable?"
+
+**Phase 3 — Reflect before finalizing**
+
+Answer all three questions. Each answer must name a concrete change to the synthesis.
+
+1. **Uncertainty**: What am I most uncertain about in this synthesis, and what specific section would I change if new evidence appeared?
+2. **Dismissed**: Which worker claim did I weigh least, and could it be the most important one? What would the synthesis look like if I gave it full weight?
+3. **Counterargument**: What is the strongest argument against my synthesis, and where does my defense fail?
+
+**Phase 4 — Confidence assessment**
+
+Rate overall synthesis confidence: HIGH / MEDIUM / LOW with one-sentence justification.
+</synthesis-phases>
+
+<constraints>
+- When workers disagree, determine which has stronger evidence and adopt that position. Do not present both as parallel options (Path A / Path B).
+- Synthesize — adopt and build beyond. Do not copy worker text into the synthesis.
+- Internal phase outputs (Phase 1-4) are working notes. The final synthesis presented to the user should be concise.
+</constraints>
+
+<post-synthesis>
+**acceptance**: Run `acceptance` with original task, synthesis, and worker positions. If any worker rejects, revise the synthesis addressing misrepresented/unresolved issues, then re-run acceptance.
+
+**feedback**: Run `feedback` with per-model evaluations. Always run — scores stagnate without it.
+</post-synthesis>
+
+<critical-gate>
+Do not present synthesis to the user until acceptance passes.
+All four phases must have their required output filled before calling acceptance.
+</critical-gate>

@@ -19,7 +19,6 @@ export interface ExternalEvaluator {
     task: string,
     modelId: string,
     responseContent: string,
-    domain: string,
     taskType: string,
     deliberationId: string,
     /** Models on the current team — evaluator must NOT be from the same provider. */
@@ -38,31 +37,13 @@ export interface EvaluatorDeps {
 
 // -- Implementation --
 
-/** Domain-specific evaluation guidance. */
-const DOMAIN_EVAL_HINTS: Record<string, string> = {
-  IDEATION: "Weight novel_perspective strictly (creative tasks demand originality). Be lenient on factually_correct (speculative ideas are acceptable).",
-  CODING: "Weight factually_correct and internally_consistent strictly (code must be correct). Be lenient on novel_perspective.",
-  DEBUGGING: "Weight factually_correct strictly (diagnosis must be accurate). novel_perspective is less important.",
-  REVIEW: "Weight addresses_task and provides_evidence strictly. novel_perspective matters only for overlooked issues.",
-  ARCHITECTURE: "All dimensions matter equally. Weight internally_consistent strictly (design must be coherent).",
-  RESEARCH: "Weight provides_evidence and factually_correct strictly. novel_perspective is a bonus.",
-  PLANNING: "Weight addresses_task and internally_consistent strictly. provides_evidence matters for feasibility claims.",
-  REQUIREMENTS: "Weight addresses_task strictly. provides_evidence matters for completeness. novel_perspective is a bonus for gap discovery.",
-  TESTING: "Weight factually_correct and addresses_task strictly. provides_evidence matters for coverage justification.",
-  DOCUMENTATION: "Weight addresses_task and internally_consistent strictly. factually_correct matters for technical accuracy.",
-  OPERATIONS: "Weight factually_correct and addresses_task strictly. provides_evidence matters for reliability claims.",
-  COMMUNICATION: "Weight addresses_task strictly. All other dimensions at standard weight.",
-};
-
 /** Build the evaluation prompt for binary judgment. */
-function buildEvalPrompt(task: string, responseContent: string, domain?: string, taskType?: string): ChatMessage[] {
-  const domainHint = domain && DOMAIN_EVAL_HINTS[domain]
-    ? `\n\nDomain: ${domain}${taskType ? ` / ${taskType}` : ""}\nEvaluation guidance: ${DOMAIN_EVAL_HINTS[domain]}`
-    : (domain ? `\n\nDomain: ${domain}${taskType ? ` / ${taskType}` : ""}` : "");
+function buildEvalPrompt(task: string, responseContent: string, taskType?: string): ChatMessage[] {
+  const taskTypeHint = taskType ? `\n\nTask type: ${taskType}` : "";
 
   const system = `You are an evaluation judge. Assess the following response to a deliberation task.
 For each dimension, answer true (pass) or false (fail). For each failure flag, answer true (present) or false (absent).
-Respond ONLY with a JSON object, no other text.${domainHint}
+Respond ONLY with a JSON object, no other text.${taskTypeHint}
 
 JSON format:
 {
@@ -98,8 +79,6 @@ Evaluate this response. Return ONLY the JSON object.`;
 /** Parse evaluator JSON response into typed dimensions and failures. */
 function parseEvalResponse(content: string): { dimensions: BinaryDimensions; failures: FailureFlags } | null {
   try {
-    // Extract JSON from response (may have markdown fences)
-    // Greedy match — JSON has nested braces (dimensions, failures), so we need first { to last }
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
@@ -128,9 +107,7 @@ function parseEvalResponse(content: string): { dimensions: BinaryDimensions; fai
 
 export class LLMExternalEvaluator implements ExternalEvaluator {
   private readonly deps: EvaluatorDeps;
-  /** Last evaluator provider used — for rotation. */
   private lastEvaluatorProvider: string | null = null;
-  /** Track models that failed during this session to deprioritize them. */
   private failedModels = new Set<string>();
 
   constructor(deps: EvaluatorDeps) {
@@ -141,7 +118,6 @@ export class LLMExternalEvaluator implements ExternalEvaluator {
     task: string,
     modelId: string,
     responseContent: string,
-    domain: string,
     taskType: string,
     deliberationId: string,
     teamProviders: Set<string>,
@@ -151,9 +127,8 @@ export class LLMExternalEvaluator implements ExternalEvaluator {
       throw new Error("No evaluator model available outside team providers");
     }
 
-    const messages = buildEvalPrompt(task, responseContent, domain, taskType);
+    const messages = buildEvalPrompt(task, responseContent, taskType);
 
-    // Try candidates in order — if one fails, try next
     let lastError: Error | null = null;
     for (const evaluatorModel of candidates) {
       try {
@@ -166,19 +141,15 @@ export class LLMExternalEvaluator implements ExternalEvaluator {
         const parsed = parseEvalResponse(result.content);
         if (!parsed) {
           lastError = new Error(`Failed to parse evaluator response from ${evaluatorModel.id}: ${result.content.slice(0, 200)}`);
-          continue; // try next candidate
+          continue;
         }
 
         this.lastEvaluatorProvider = evaluatorModel.provider;
-        // Mark failed models to avoid re-selecting them
-        this.failedModels.add(evaluatorModel.id);
-        // Clear on success — only track consecutive failures
         this.failedModels.clear();
 
         return {
           deliberation_id: deliberationId,
           model_id: modelId,
-          domain,
           task_type: taskType,
           evaluator_id: evaluatorModel.id,
           dimensions: parsed.dimensions,
@@ -188,34 +159,26 @@ export class LLMExternalEvaluator implements ExternalEvaluator {
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
         this.failedModels.add(evaluatorModel.id);
-        // Try next candidate
       }
     }
 
     throw lastError ?? new Error("All evaluator candidates failed");
   }
 
-  /**
-   * Rank evaluator candidates by preference: different provider > same provider > any.
-   * Excludes previously failed models. Returns ordered list to try in sequence.
-   */
   private rankEvaluatorCandidates(teamProviders: Set<string>): ModelInfo[] {
     const available = this.deps.getAvailableModels()
       .filter((m) => !this.failedModels.has(m.id));
 
     const byCost = (a: ModelInfo, b: ModelInfo) => this.modelCost(a) - this.modelCost(b);
 
-    // Tier 1: different provider from team AND different from last evaluator
     const tier1 = available
       .filter((m) => !teamProviders.has(m.provider) && m.provider !== this.lastEvaluatorProvider)
       .sort(byCost);
 
-    // Tier 2: different from team only
     const tier2 = available
       .filter((m) => !teamProviders.has(m.provider) && !tier1.includes(m))
       .sort(byCost);
 
-    // Tier 3: any available (provider constraint relaxed)
     const tier3 = available
       .filter((m) => !tier1.includes(m) && !tier2.includes(m))
       .sort(byCost);

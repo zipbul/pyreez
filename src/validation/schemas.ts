@@ -28,7 +28,6 @@ export const FailureFlagsSchema = z.object({
 
 export const EvaluationInputSchema = z.object({
   model_id: z.string().min(1),
-  domain: z.string().min(1),
   task_type: z.string().min(1),
   dimensions: BinaryDimensionsSchema,
   failures: FailureFlagsSchema,
@@ -81,7 +80,6 @@ const BetaParamsSchema = z.object({
 
 const SkillCellSchema = z.object({
   model_id: z.string(),
-  domain: z.string(),
   task_type: z.string(),
   dimensions: z.record(z.string(), BetaParamsSchema),
   failure_counts: z.record(z.string(), z.number()),

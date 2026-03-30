@@ -206,7 +206,7 @@ export function createDeliberateFn(
     let result = await deliberate(team, input, engineDeps, config, fallbackDeps);
 
     // 10. External evaluator → SkillCell update (best-effort)
-    if (deps.externalEvaluator && deps.skillCellStore && result.rounds && input.domain) {
+    if (deps.externalEvaluator && deps.skillCellStore && result.rounds) {
       try {
         const lastRound = result.rounds[result.rounds.length - 1];
         if (lastRound?.responses) {
@@ -219,7 +219,7 @@ export function createDeliberateFn(
             try {
               const feedback = await deps.externalEvaluator.evaluate(
                 input.task, response.model, response.content ?? "",
-                input.domain, taskType, deliberationId, teamProviders,
+                taskType, deliberationId, teamProviders,
               );
               deps.skillCellStore.update(feedback);
             } catch {
