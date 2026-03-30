@@ -110,7 +110,7 @@
       "contextWindow": 2000000,
       "available": true,
       "cost": { "inputPer1M": 0.2, "outputPer1M": 0.5 },
-      "benchmark": { "agentic": 71, "coding": 61, "reasoning": 88, "knowledge": 90, "multilingual": 85, "instruction_following": 90, "math": 94 }
+      "benchmark": { "knowledge": 90 }
     },
     "xai/grok-code-fast-1": {
       "name": "Grok Code Fast 1",

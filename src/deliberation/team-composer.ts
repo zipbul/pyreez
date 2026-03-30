@@ -49,11 +49,17 @@ export { extractProvider };
  * Average of all available benchmark category scores.
  * Fallback: output cost as proxy (higher cost ≈ higher quality).
  */
+/** Full benchmark has 7 categories. Fewer categories → less reliable score. */
+const FULL_BENCHMARK_CATEGORIES = 7;
+
 export function scoreModel(model: ModelInfo): number {
   if (model.benchmark) {
     const values = Object.values(model.benchmark);
     if (values.length > 0) {
-      return values.reduce((sum, v) => sum + v, 0) / values.length;
+      const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
+      // Penalize incomplete benchmarks: coverage ratio scales the score
+      const coverage = values.length / FULL_BENCHMARK_CATEGORIES;
+      return avg * coverage;
     }
   }
   // Fallback: cost proxy (normalize to 0-100 scale, cap at $25/1M output)

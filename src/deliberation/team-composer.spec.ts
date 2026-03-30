@@ -44,10 +44,19 @@ describe("extractProvider", () => {
 // -- scoreModel --
 
 describe("scoreModel", () => {
-  it("should average benchmark scores when available", () => {
+  it("should average benchmark scores penalized by coverage", () => {
     const model = makeModel({
       id: "test/model",
       benchmark: { coding: 80, reasoning: 60, math: 100 },
+    });
+    // avg=80, coverage=3/7 → 80 * 3/7 ≈ 34.3
+    expect(scoreModel(model)).toBeCloseTo(80 * 3 / 7, 0);
+  });
+
+  it("should not penalize full benchmark (7 categories)", () => {
+    const model = makeModel({
+      id: "test/model",
+      benchmark: { agentic: 80, coding: 80, reasoning: 80, knowledge: 80, multilingual: 80, instruction_following: 80, math: 80 },
     });
     expect(scoreModel(model)).toBe(80);
   });
