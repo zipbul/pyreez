@@ -82,10 +82,17 @@ export class GeminiCliProvider implements LLMProvider {
       ]);
 
       if (exitCode !== 0) {
+        const stderrText = stderr.trim();
+        // Google quotas are per-model, NOT per-provider.
+        // Map to "timeout" (model-scoped cooldown) instead of "rate_limit" (provider-scoped).
+        // This allows fallback to other gemini models in the same session.
+        const isCapacityExhausted = stderrText.includes("429")
+          || stderrText.includes("RESOURCE_EXHAUSTED")
+          || stderrText.includes("rateLimitExceeded");
         throw new LLMClientError(
-          500,
-          `gemini CLI exited with code ${exitCode}: ${stderr.trim()}`,
-          "cli_error",
+          isCapacityExhausted ? 429 : 500,
+          `gemini CLI exited with code ${exitCode}: ${stderrText}`,
+          isCapacityExhausted ? "timeout" : "cli_error",
         );
       }
 
