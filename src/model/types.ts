@@ -150,4 +150,6 @@ export interface ModelInfo {
   available?: boolean;
   /** Model architecture family (e.g., "claude-4", "grok-4", "gpt-5"). Models in the same family share training biases. Falls back to provider if omitted. */
   family?: string;
+  /** Per-category benchmark scores (0-100). Source: benchlm.ai / artificialanalysis.ai. */
+  benchmark?: Record<string, number>;
 }

@@ -36,9 +36,17 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Claude Code MCP config (contains local paths)
 .mcp.json
 
-# pyreez runtime data (user-specific, not tracked)
+# pyreez runtime data (ephemeral, not tracked)
+.pyreez/session.json
+.pyreez/cooldown.json
+.pyreez/skillcells.json
 .pyreez/reports/
 .pyreez/deliberations/
 .pyreez/runs/
 .pyreez/benchmarks/
 .pyreez/learning/
+.pyreez/feedback/
+
+# pyreez tracked files (DO NOT ignore):
+# .pyreez/models.jsonc — model definitions + benchmark data
+# .pyreez/config.jsonc — routing config

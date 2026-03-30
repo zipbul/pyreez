@@ -142,13 +142,13 @@ async function buildConfig(anonymizer: Anonymizer): Promise<HandlersConfig> {
   const { modelIds, warnings } = filterModelsByProviders(registry, providers);
   for (const w of warnings) console.error(`[pyreez] ${w}`);
   if (modelIds.length === 0) {
-    die("[pyreez] No models available. Check API keys and scores/models.json.");
+    die("[pyreez] No models available. Check API keys and .pyreez/models.jsonc.");
   }
 
   const sharedCooldown = createCooldownManager();
 
   // Restore cooldown state
-  const COOLDOWN_PATH = "scores/cooldown.json";
+  const COOLDOWN_PATH = ".pyreez/cooldown.json";
   try {
     const raw = await fileIO.readFile(COOLDOWN_PATH);
     const result = parseWithSchema(raw, CooldownStateSchema, "cooldown.json");

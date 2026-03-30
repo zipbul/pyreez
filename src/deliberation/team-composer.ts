@@ -25,7 +25,7 @@ export class NoModelsAvailableError extends Error {
     this.name = "NoModelsAvailableError";
     this.remediation = remediation ?? [
       "Check that at least one provider API key is configured (PYREEZ_ANTHROPIC_KEY, PYREEZ_GOOGLE_API_KEY, etc.)",
-      "Verify models have 'available: true' in scores/models.json",
+      "Verify models have 'available: true' in .pyreez/models.jsonc",
       "If models were recently failing, they may be on cooldown — retry after a few minutes",
     ];
   }

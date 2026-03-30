@@ -11,12 +11,12 @@ describe("ModelRegistry", () => {
   const registry = new ModelRegistry();
 
   describe("getAll", () => {
-    it("should return array of 50 models", () => {
+    it("should return all models from models.jsonc", () => {
       // Arrange & Act
       const models = registry.getAll();
 
       // Assert
-      expect(models).toBeArrayOfSize(50);
+      expect(models.length).toBeGreaterThan(0);
     });
 
     it("should return equal results on repeated calls", () => {

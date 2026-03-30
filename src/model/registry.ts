@@ -1,6 +1,5 @@
 /**
- * Model registry — loads models from scores/models.json.
- * 21-dimension capability model, Anthropic + Google providers.
+ * Model registry — loads models from .pyreez/models.jsonc.
  */
 
 import type {
@@ -10,7 +9,6 @@ import type {
 } from "./types";
 import type { ProviderName } from "../llm/types";
 import { ALL_DIMENSIONS, SIGMA_BASE } from "./types";
-import modelsJson from "../../scores/models.json";
 
 // -- JSON → ModelInfo parser --
 
@@ -18,9 +16,11 @@ interface JsonModelEntry {
   name: string;
   provider: ProviderName;
   contextWindow: number;
-  supportsToolCalling: boolean;
   cost: { inputPer1M: number; outputPer1M: number };
   available?: boolean;
+  family?: string;
+  supportsToolCalling?: boolean;
+  benchmark?: Record<string, number>;
 }
 
 interface ModelsJsonSchema {
@@ -47,16 +47,24 @@ function parseModels(data: ModelsJsonSchema): ModelInfo[] {
       contextWindow: entry.contextWindow,
       capabilities: capabilities as ModelCapabilities,
       cost: entry.cost,
-      supportsToolCalling: entry.supportsToolCalling,
+      supportsToolCalling: entry.supportsToolCalling !== false,
       available: entry.available !== false,
-      family: (entry as any).family,
+      family: entry.family,
+      benchmark: entry.benchmark,
     });
   }
 
   return result;
 }
 
-const MODELS: readonly ModelInfo[] = parseModels(modelsJson as unknown as ModelsJsonSchema);
+/** Load models from .pyreez/models.jsonc using Bun.JSONC parser. */
+function loadModels(): readonly ModelInfo[] {
+  const text = require("fs").readFileSync(".pyreez/models.jsonc", "utf-8");
+  const data = Bun.JSONC.parse(text) as ModelsJsonSchema;
+  return parseModels(data);
+}
+
+const MODELS: readonly ModelInfo[] = loadModels();
 
 /**
  * Registry of available LLM models with capability scores.
@@ -105,13 +113,6 @@ export class ModelRegistry {
   /** Filter available models that support tool/function calling. */
   filterByToolCalling(): ModelInfo[] {
     return this.getAvailable().filter((m) => m.supportsToolCalling);
-  }
-
-  /** Filter available models by minimum MULTILINGUAL mu score. */
-  filterByMultilingual(minScore: number): ModelInfo[] {
-    return this.getAvailable().filter(
-      (m) => m.capabilities.MULTILINGUAL.mu >= minScore,
-    );
   }
 
   /** Build a model ID → provider name map for ProviderRegistry. */
