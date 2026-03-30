@@ -59,10 +59,9 @@ function printUsage(): never {
   console.error(`Usage: bun run src/cli.ts <command> [options]
 
 Commands:
-  scores       Get model scores for a domain
+  models       List available models with benchmark scores
   deliberate   Run multi-model deliberation
   acceptance   Verify a synthesis against worker positions
-  feedback     Submit per-model evaluations
 
 Run "bun run src/cli.ts <command> --help" for command-specific help.`);
   process.exit(1);
@@ -166,6 +165,24 @@ async function main(): Promise<void> {
   let result: import("./handlers").HandlerResult;
 
   switch (command) {
+    case "models": {
+      const reg = config.filteredRegistry;
+      if (!reg) die("Registry not available");
+      const available = reg.getAvailable();
+      const { scoreModel } = await import("./deliberation/team-composer");
+      const models = available
+        .map((m) => ({
+          id: m.id,
+          provider: m.provider,
+          cost: m.cost,
+          benchmark: m.benchmark,
+          score: Math.round(scoreModel(m)),
+        }))
+        .sort((a, b) => b.score - a.score);
+      result = { data: { models, total: models.length } };
+      break;
+    }
+
     case "deliberate": {
       const task = await resolveValue(flags["task"]);
       if (!task) die("--task is required for deliberate");

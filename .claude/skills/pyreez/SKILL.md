@@ -34,7 +34,7 @@ Copy this checklist and check off each item as you complete it:
 <workflow>
 CLI: `bun run src/cli.ts <subcommand> [flags]`.
 
-**model selection**: Choose models from `.pyreez/models.jsonc`. Select by benchmark scores matching the task's needs (coding, reasoning, agentic, etc.) + provider diversity (at least 2 providers). Use real model IDs from the file.
+**model selection**: Run `models` to see available models with benchmark scores. Select by benchmark categories matching the task's needs (coding, reasoning, agentic, etc.) + provider diversity (at least 2 providers). Use real model IDs.
 
 **task framing**: The user's topic is: `$ARGUMENTS`. Before deliberate, reframe it:
 - Identify the fundamental problem first, not the surface question.
