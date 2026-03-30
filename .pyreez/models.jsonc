@@ -1,8 +1,9 @@
-// Source: https://benchlm.ai/ + https://artificialanalysis.ai/leaderboards/models
+// Source: https://benchlm.ai/ (per-category scores, 0-100)
 // Last updated: 2026-03-30
-// Benchmark categories: agentic, coding, reasoning, knowledge, multilingual, instruction_following, math (0-100 scale, BenchLM.ai)
+// Categories: agentic, coding, reasoning, knowledge, multilingual, instruction_following, math
+// Models without sufficient benchmark data use partial scores where available
 {
-  "version": 4,
+  "version": 5,
   "models": {
     "anthropic/claude-opus-4.6": {
       "name": "Claude Opus 4.6",
@@ -28,7 +29,8 @@
       "family": "claude-4",
       "contextWindow": 200000,
       "available": true,
-      "cost": { "inputPer1M": 1, "outputPer1M": 5 }
+      "cost": { "inputPer1M": 1, "outputPer1M": 5 },
+      "benchmark": { "agentic": 52, "coding": 49, "reasoning": 69, "knowledge": 54, "multilingual": 80, "instruction_following": 86, "math": 71 }
     },
     "google/gemini-3.1-pro-preview": {
       "name": "Gemini 3.1 Pro (Preview)",
@@ -56,30 +58,6 @@
       "available": true,
       "cost": { "inputPer1M": 0.25, "outputPer1M": 1.5 }
     },
-    "google/gemini-2.5-pro": {
-      "name": "Gemini 2.5 Pro",
-      "provider": "google",
-      "family": "gemini-2",
-      "contextWindow": 1048576,
-      "available": true,
-      "cost": { "inputPer1M": 1.25, "outputPer1M": 10 }
-    },
-    "google/gemini-2.5-flash": {
-      "name": "Gemini 2.5 Flash",
-      "provider": "google",
-      "family": "gemini-2",
-      "contextWindow": 1048576,
-      "available": true,
-      "cost": { "inputPer1M": 0.3, "outputPer1M": 2.5 }
-    },
-    "google/gemini-2.5-flash-lite": {
-      "name": "Gemini 2.5 Flash-Lite",
-      "provider": "google",
-      "family": "gemini-2",
-      "contextWindow": 1048576,
-      "available": true,
-      "cost": { "inputPer1M": 0.1, "outputPer1M": 0.4 }
-    },
     "openai/gpt-5.4": {
       "name": "GPT-5.4",
       "provider": "openai",
@@ -95,7 +73,8 @@
       "family": "gpt-5",
       "contextWindow": 400000,
       "available": true,
-      "cost": { "inputPer1M": 0.75, "outputPer1M": 4.5 }
+      "cost": { "inputPer1M": 0.75, "outputPer1M": 4.5 },
+      "benchmark": { "agentic": 66, "coding": 54, "reasoning": 41, "knowledge": 57 }
     },
     "openai/gpt-5.4-nano": {
       "name": "GPT-5.4 Nano",
@@ -103,7 +82,8 @@
       "family": "gpt-5",
       "contextWindow": 400000,
       "available": true,
-      "cost": { "inputPer1M": 0.2, "outputPer1M": 1.25 }
+      "cost": { "inputPer1M": 0.2, "outputPer1M": 1.25 },
+      "benchmark": { "agentic": 43, "coding": 52, "reasoning": 39, "knowledge": 53 }
     },
     "openai/gpt-5.3-codex": {
       "name": "GPT-5.3 Codex",
@@ -113,39 +93,6 @@
       "available": true,
       "cost": { "inputPer1M": 1.75, "outputPer1M": 14 },
       "benchmark": { "agentic": 80, "coding": 76, "reasoning": 69, "knowledge": 91, "multilingual": 82, "instruction_following": 93, "math": 93 }
-    },
-    "openai/gpt-5.2": {
-      "name": "GPT-5.2",
-      "provider": "openai",
-      "family": "gpt-5",
-      "contextWindow": 400000,
-      "available": true,
-      "cost": { "inputPer1M": 1.75, "outputPer1M": 14 },
-      "benchmark": { "agentic": 77, "coding": 66, "reasoning": 70, "knowledge": 95, "multilingual": 80, "instruction_following": 92, "math": 94 }
-    },
-    "openai/gpt-5": {
-      "name": "GPT-5",
-      "provider": "openai",
-      "family": "gpt-5",
-      "contextWindow": 400000,
-      "available": true,
-      "cost": { "inputPer1M": 1.25, "outputPer1M": 10 }
-    },
-    "openai/gpt-5-mini": {
-      "name": "GPT-5 Mini",
-      "provider": "openai",
-      "family": "gpt-5",
-      "contextWindow": 400000,
-      "available": true,
-      "cost": { "inputPer1M": 0.25, "outputPer1M": 2 }
-    },
-    "openai/gpt-5-nano": {
-      "name": "GPT-5 Nano",
-      "provider": "openai",
-      "family": "gpt-5",
-      "contextWindow": 400000,
-      "available": true,
-      "cost": { "inputPer1M": 0.05, "outputPer1M": 0.4 }
     },
     "xai/grok-4": {
       "name": "Grok 4",
@@ -162,7 +109,8 @@
       "family": "grok-4",
       "contextWindow": 2000000,
       "available": true,
-      "cost": { "inputPer1M": 0.2, "outputPer1M": 0.5 }
+      "cost": { "inputPer1M": 0.2, "outputPer1M": 0.5 },
+      "benchmark": { "agentic": 71, "coding": 61, "reasoning": 88, "knowledge": 90, "multilingual": 85, "instruction_following": 90, "math": 94 }
     },
     "xai/grok-code-fast-1": {
       "name": "Grok Code Fast 1",
@@ -170,7 +118,8 @@
       "family": "grok-4",
       "contextWindow": 256000,
       "available": true,
-      "cost": { "inputPer1M": 0.2, "outputPer1M": 1.5 }
+      "cost": { "inputPer1M": 0.2, "outputPer1M": 1.5 },
+      "benchmark": { "coding": 63, "knowledge": 61 }
     },
     "xai/grok-4-1-fast-reasoning": {
       "name": "Grok 4.1 Fast Reasoning",
@@ -182,22 +131,6 @@
     },
     "xai/grok-4-1-fast-non-reasoning": {
       "name": "Grok 4.1 Fast Non-Reasoning",
-      "provider": "xai",
-      "family": "grok-4",
-      "contextWindow": 2000000,
-      "available": true,
-      "cost": { "inputPer1M": 0.2, "outputPer1M": 0.5 }
-    },
-    "xai/grok-4-fast-reasoning": {
-      "name": "Grok 4 Fast Reasoning",
-      "provider": "xai",
-      "family": "grok-4",
-      "contextWindow": 2000000,
-      "available": true,
-      "cost": { "inputPer1M": 0.2, "outputPer1M": 0.5 }
-    },
-    "xai/grok-4-fast-non-reasoning": {
-      "name": "Grok 4 Fast Non-Reasoning",
       "provider": "xai",
       "family": "grok-4",
       "contextWindow": 2000000,

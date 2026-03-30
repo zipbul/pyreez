@@ -81,7 +81,7 @@ describe("ModelRegistry", () => {
     });
 
     it("should have undefined benchmark for models without scores", () => {
-      const model = registry.getById("anthropic/claude-haiku-4.5");
+      const model = registry.getById("google/gemini-3.1-flash-lite-preview");
       expect(model!.benchmark).toBeUndefined();
     });
   });
