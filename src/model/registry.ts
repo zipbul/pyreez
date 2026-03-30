@@ -2,13 +2,8 @@
  * Model registry — loads models from .pyreez/models.jsonc.
  */
 
-import type {
-  ModelInfo,
-  ModelCapabilities,
-  DimensionRating,
-} from "./types";
+import type { ModelInfo } from "./types";
 import type { ProviderName } from "../llm/types";
-import { ALL_DIMENSIONS, SIGMA_BASE } from "./types";
 
 // -- JSON → ModelInfo parser --
 
@@ -28,24 +23,14 @@ interface ModelsJsonSchema {
   models: Record<string, JsonModelEntry>;
 }
 
-/** Default DimensionRating for missing entries. */
-const DEFAULT_RATING: DimensionRating = { mu: 500, sigma: SIGMA_BASE, comparisons: 0 };
-
 function parseModels(data: ModelsJsonSchema): ModelInfo[] {
   const result: ModelInfo[] = [];
-
   for (const [id, entry] of Object.entries(data.models)) {
-    const capabilities: Record<string, DimensionRating> = {};
-    for (const dim of ALL_DIMENSIONS) {
-      capabilities[dim] = { ...DEFAULT_RATING };
-    }
-
     result.push({
       id,
       name: entry.name,
       provider: entry.provider,
       contextWindow: entry.contextWindow,
-      capabilities: capabilities as ModelCapabilities,
       cost: entry.cost,
       supportsToolCalling: entry.supportsToolCalling !== false,
       available: entry.available !== false,
@@ -53,7 +38,6 @@ function parseModels(data: ModelsJsonSchema): ModelInfo[] {
       benchmark: entry.benchmark,
     });
   }
-
   return result;
 }
 
@@ -67,7 +51,7 @@ function loadModels(): readonly ModelInfo[] {
 const MODELS: readonly ModelInfo[] = loadModels();
 
 /**
- * Registry of available LLM models with capability scores.
+ * Registry of available LLM models.
  */
 export class ModelRegistry {
   private readonly models: ReadonlyMap<string, ModelInfo>;
@@ -80,22 +64,18 @@ export class ModelRegistry {
     this.models = map;
   }
 
-  /** Return all registered models. */
   getAll(): ModelInfo[] {
     return [...this.models.values()];
   }
 
-  /** Return only models available in the API. */
   getAvailable(): ModelInfo[] {
     return this.getAll().filter((m) => m.available !== false);
   }
 
-  /** Look up a model by its ID. */
   getById(id: string): ModelInfo | undefined {
     return this.models.get(id);
   }
 
-  /** Batch lookup — returns only found models, preserving order. */
   getByIds(ids: string[]): ModelInfo[] {
     const result: ModelInfo[] = [];
     for (const id of ids) {
@@ -105,17 +85,6 @@ export class ModelRegistry {
     return result;
   }
 
-  /** Filter available models by minimum context window size. */
-  filterByContext(minContext: number): ModelInfo[] {
-    return this.getAvailable().filter((m) => m.contextWindow >= minContext);
-  }
-
-  /** Filter available models that support tool/function calling. */
-  filterByToolCalling(): ModelInfo[] {
-    return this.getAvailable().filter((m) => m.supportsToolCalling);
-  }
-
-  /** Build a model ID → provider name map for ProviderRegistry. */
   buildProviderMap(): ReadonlyMap<string, ProviderName> {
     const map = new Map<string, ProviderName>();
     for (const model of this.models.values()) {
@@ -125,5 +94,5 @@ export class ModelRegistry {
   }
 }
 
-/** Exported for unit testing only — not part of public API. */
+/** Exported for unit testing only. */
 export const __testing__ = { parseModels } as const;

@@ -1,46 +1,15 @@
 /**
  * Pyreez CLI entry point.
- * Subcommands: scores, deliberate, acceptance, feedback
+ * Subcommands: deliberate, acceptance
  *
  * Usage:
- *   bun run src/cli.ts scores
- *   bun run src/cli.ts deliberate --task "..." --models "A,B"
+ *   bun run src/cli.ts deliberate --task "..." --models "model1,model2"
  *   bun run src/cli.ts acceptance --task "..." --synthesis "..." --workers '[...]'
- *   bun run src/cli.ts feedback --evaluations '[...]'
  */
 
-import { Anonymizer, emptyAnonymizationState } from "./handlers";
-import type { AnonymizationState } from "./handlers";
 import type { HandlersConfig } from "./handlers";
 import { handleDeliberate, handleAcceptance } from "./handlers";
-import {
-  AnonymizationStateSchema,
-  CooldownStateSchema,
-  AcceptanceWorkersArraySchema,
-  parseWithSchema,
-} from "./validation/schemas";
-
-// -- Session persistence --
-
-const SESSION_PATH = ".pyreez/session.json";
-
-async function loadSession(): Promise<AnonymizationState> {
-  try {
-    const file = Bun.file(SESSION_PATH);
-    if (await file.exists()) {
-      const result = parseWithSchema(await file.text(), AnonymizationStateSchema, "session.json");
-      if (result.success) return result.data;
-      console.error(`[pyreez] ${result.error} — starting fresh session`);
-    }
-  } catch {
-    // corrupt or missing — start fresh
-  }
-  return emptyAnonymizationState();
-}
-
-async function saveSession(state: AnonymizationState): Promise<void> {
-  await Bun.write(SESSION_PATH, JSON.stringify(state, null, 2));
-}
+import { CooldownStateSchema, AcceptanceWorkersArraySchema, parseWithSchema } from "./validation/schemas";
 
 // -- Arg parsing --
 
@@ -101,7 +70,7 @@ Run "bun run src/cli.ts <command> --help" for command-specific help.`);
 
 // -- Wiring (same as index.ts) --
 
-async function buildConfig(anonymizer: Anonymizer): Promise<HandlersConfig> {
+async function buildConfig(): Promise<HandlersConfig> {
   const { loadConfigFromEnv, loadRoutingConfig } = await import("./config");
   const { createChatAdapter, createDeliberateFn } = await import("./deliberation/wire");
   const { FileDeliberationStore } = await import("./deliberation/file-store");
@@ -180,7 +149,6 @@ async function buildConfig(anonymizer: Anonymizer): Promise<HandlersConfig> {
     deliberateFn,
     runLogger,
     chatFn: (model, messages, params) => chatAdapter(model, messages, params),
-    anonymizer,
   };
 }
 
@@ -193,10 +161,7 @@ async function main(): Promise<void> {
     printUsage();
   }
 
-  const sessionState = await loadSession();
-  const anonymizer = new Anonymizer(sessionState);
-
-  const config = await buildConfig(anonymizer);
+  const config = await buildConfig();
 
   let result: import("./handlers").HandlerResult;
 
@@ -249,9 +214,6 @@ async function main(): Promise<void> {
     default:
       die(`Unknown command: ${command}. Run without arguments for usage.`);
   }
-
-  // Save session after every command
-  await saveSession(config.anonymizer.serialize());
 
   if (result!.error) {
     console.error(result!.error);

@@ -72,7 +72,6 @@ function makeModelInfo(id: string): ModelInfo {
     name: id.split("/")[1] ?? id,
     provider: id.split("/")[0] as any,
     contextWindow: 128_000,
-    capabilities: {} as any,
     cost: { inputPer1M: 2, outputPer1M: 8 },
     supportsToolCalling: true,
   };

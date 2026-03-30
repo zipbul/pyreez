@@ -13,46 +13,17 @@ import { createDeliberateFn } from "../src/deliberation/wire";
 import type { DeliberateInput } from "../src/deliberation/types";
 import type { ChatMessage } from "../src/llm/types";
 import type { ChatResult } from "../src/deliberation/engine";
-import type {
-  ModelInfo,
-  ModelCapabilities,
-  DimensionRating,
-  CapabilityDimension,
-} from "../src/model/types";
-import { ALL_DIMENSIONS } from "../src/model/types";
+import type { ModelInfo } from "../src/model/types";
 
 // ============================================================
 // Fixtures — 3 providers x 1 model each (diversity guarantee)
 // ============================================================
-
-const DEFAULT_RATING: DimensionRating = { mu: 500, sigma: 350, comparisons: 0 };
-
-function makeCapabilities(
-  overrides: Partial<Record<CapabilityDimension, number>> = {},
-): ModelCapabilities {
-  const caps = {} as Record<CapabilityDimension, DimensionRating>;
-  for (const dim of ALL_DIMENSIONS) {
-    const v = overrides[dim];
-    caps[dim] = v !== undefined
-      ? { mu: v * 100, sigma: 350, comparisons: 0 }
-      : DEFAULT_RATING;
-  }
-  return caps as ModelCapabilities;
-}
 
 const MODEL_A: ModelInfo = {
   id: "openai/gpt-4.1",
   name: "GPT-4.1",
   provider: "anthropic",
   contextWindow: 128000,
-  capabilities: makeCapabilities({
-    CODE_GENERATION: 9,
-    REASONING: 9,
-    JUDGMENT: 9,
-    INSTRUCTION_FOLLOWING: 9,
-    CREATIVITY: 8,
-    ANALYSIS: 8,
-  }),
   cost: { inputPer1M: 2, outputPer1M: 8 },
   supportsToolCalling: true,
 };
@@ -62,13 +33,6 @@ const MODEL_B: ModelInfo = {
   name: "Llama 4 Scout",
   provider: "anthropic",
   contextWindow: 512000,
-  capabilities: makeCapabilities({
-    HALLUCINATION_RESISTANCE: 8,
-    DEBUGGING: 8,
-    ANALYSIS: 9,
-    SPEED: 9,
-    SYSTEM_THINKING: 8,
-  }),
   cost: { inputPer1M: 0.5, outputPer1M: 1 },
   supportsToolCalling: true,
 };
@@ -78,13 +42,6 @@ const MODEL_C: ModelInfo = {
   name: "Mistral Large",
   provider: "anthropic",
   contextWindow: 128000,
-  capabilities: makeCapabilities({
-    CREATIVITY: 9,
-    SYSTEM_THINKING: 9,
-    REASONING: 8,
-    SELF_CONSISTENCY: 8,
-    CODE_UNDERSTANDING: 8,
-  }),
   cost: { inputPer1M: 2, outputPer1M: 6 },
   supportsToolCalling: true,
 };

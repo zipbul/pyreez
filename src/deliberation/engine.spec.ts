@@ -63,39 +63,12 @@ function makeConfig(overrides?: Partial<EngineConfig>): EngineConfig {
   return { maxRounds: 1, ...overrides };
 }
 
-function dim(mu = 1500): { mu: number; sigma: number; comparisons: number } {
-  return { mu, sigma: 100, comparisons: 10 };
-}
-
 function makeModelInfo(id: string): ModelInfo {
   return {
     id,
     name: id,
     provider: "openai",
     contextWindow: 128000,
-    capabilities: {
-      REASONING: dim(1600),
-      MATH_REASONING: dim(),
-      MULTI_STEP_DEPTH: dim(),
-      CREATIVITY: dim(),
-      ANALYSIS: dim(1600),
-      JUDGMENT: dim(1600),
-      CODE_GENERATION: dim(),
-      CODE_UNDERSTANDING: dim(),
-      DEBUGGING: dim(),
-      SYSTEM_THINKING: dim(),
-      TOOL_USE: dim(),
-      HALLUCINATION_RESISTANCE: dim(),
-      CONFIDENCE_CALIBRATION: dim(),
-      SELF_CONSISTENCY: dim(),
-      AMBIGUITY_HANDLING: dim(),
-      INSTRUCTION_FOLLOWING: dim(),
-      STRUCTURED_OUTPUT: dim(),
-      LONG_CONTEXT: dim(),
-      MULTILINGUAL: dim(),
-      SPEED: dim(),
-      COST_EFFICIENCY: dim(),
-    },
     cost: { inputPer1M: 5, outputPer1M: 15 },
     supportsToolCalling: true,
   };

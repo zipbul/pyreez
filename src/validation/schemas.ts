@@ -18,16 +18,6 @@ export const AcceptanceWorkerSchema = z.object({
 
 export const AcceptanceWorkersArraySchema = z.array(AcceptanceWorkerSchema).min(1);
 
-// -- Anonymization State (session.json) --
-
-export const AnonymizationStateSchema = z.object({
-  anonToReal: z.record(z.string(), z.string()),
-  realToAnon: z.record(z.string(), z.string()),
-  providerRealToAnon: z.record(z.string(), z.string()),
-  nextAnonIndex: z.number().int().min(0),
-  nextProviderIndex: z.number().int().min(0),
-});
-
 // -- Cooldown State (cooldown.json) --
 
 const CooldownErrorTypeSchema = z.enum([
