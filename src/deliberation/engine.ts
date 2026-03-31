@@ -96,6 +96,8 @@ export class RoundExecutionError extends Error {
 export interface FallbackPool {
   /** Get next available model. Claimed on return — removed from pool. */
   getNext(excludeIds: Set<string>): ModelInfo | undefined;
+  /** Get next available model from a specific provider. Claimed on return. */
+  getNextByProvider(provider: string, excludeIds: Set<string>): ModelInfo | undefined;
   /** Mark failure with error-type-scoped cooldown (provider or model level). */
   markFailed(modelId: string, reason: string, errorType: CooldownErrorType): void;
   /** Check if a model is currently on cooldown. */
@@ -290,7 +292,16 @@ export function createFallbackPool(
     getNext(excludeIds: Set<string>): ModelInfo | undefined {
       for (const model of remaining) {
         if (!excludeIds.has(model.id) && !cooldown.isOnCooldown(model.id)) {
-          remaining.delete(model); // Claim — prevents concurrent double-assignment
+          remaining.delete(model);
+          return model;
+        }
+      }
+      return undefined;
+    },
+    getNextByProvider(provider: string, excludeIds: Set<string>): ModelInfo | undefined {
+      for (const model of remaining) {
+        if (model.provider === provider && !excludeIds.has(model.id) && !cooldown.isOnCooldown(model.id)) {
+          remaining.delete(model);
           return model;
         }
       }
@@ -340,21 +351,27 @@ function findFallbackModel(
   pool: FallbackPool,
   excludeIds: Set<string>,
   ctx: SharedContext,
+  /** Provider of the failed model — prefer same provider first. */
+  failedProvider?: string,
 ): FallbackResult | undefined {
-  // Phase 1: unique model (exclude team members)
-  const teamExclude = new Set([
-    ...excludeIds,
-    ...ctx.team.workers.map((w) => w.model),
-  ]);
+  const teamIds = new Set(ctx.team.workers.map((w) => w.model));
+  const teamExclude = new Set([...excludeIds, ...teamIds]);
+
+  // Phase 1: same provider, not on team (preserve provider diversity)
+  if (failedProvider) {
+    const sameProvider = pool.getNextByProvider(failedProvider, teamExclude);
+    if (sameProvider) return sameProvider;
+  }
+
+  // Phase 2: any unique model not on team
   const unique = pool.getNext(teamExclude);
   if (unique) return unique;
 
-  // Phase 2: team-duplicate from pool (only exclude failed models)
+  // Phase 3: team-duplicate from pool (only exclude failed models)
   const duplicate = pool.getNext(excludeIds);
   if (duplicate) return duplicate;
 
-  // Phase 3: reuse alive team member directly (pool exhausted)
-  // Find any team model that isn't failed and isn't on cooldown
+  // Phase 4: reuse alive team member directly (pool exhausted)
   for (const worker of ctx.team.workers) {
     if (!excludeIds.has(worker.model) && !pool.isOnCooldown(worker.model)) {
       return { id: worker.model };
@@ -414,7 +431,7 @@ async function callWithFallback(
   // skip directly to fallback without wasting an API call.
   if (pool?.isOnCooldown(currentModel)) {
     excludeIds.add(currentModel);
-    const next = findFallbackModel(pool, excludeIds, ctx);
+    const next = findFallbackModel(pool, excludeIds, ctx, extractProvider(currentModel));
 
     const priorEntry = pool.getEntry(currentModel);
     swaps.push({
@@ -477,8 +494,8 @@ async function callWithFallback(
       pool.markFailed(currentModel, errorMsg, errorType);
       excludeIds.add(currentModel);
 
-      // Try next from pool — prefer unique, allow team duplicate, last resort reuse alive team member
-      const next = findFallbackModel(pool, excludeIds, ctx);
+      // Try next from pool — same provider first, then unique, then team duplicate
+      const next = findFallbackModel(pool, excludeIds, ctx, extractProvider(currentModel));
 
       swaps.push({
         original: currentModel,

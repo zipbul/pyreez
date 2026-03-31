@@ -170,26 +170,26 @@ export function createDeliberateFn(
     };
 
     // 8. Build fallback pool + replenishment
-    //    Fallback: cost descending (expensive = likely more capable)
+    //    Fallback: benchmark score descending, cost as tiebreaker
+    const { scoreModel } = await import("./team-composer");
     const allAvailable = deps.registry.getAvailable();
-    const sortedByCost = [...allAvailable].sort(
-      (a, b) => b.cost.outputPer1M - a.cost.outputPer1M,
+    const sortedByScore = [...allAvailable].sort(
+      (a, b) => scoreModel(b) - scoreModel(a) || b.cost.outputPer1M - a.cost.outputPer1M,
     );
-    const pool = createFallbackPool(sortedByCost, cooldown);
+    const pool = createFallbackPool(sortedByScore, cooldown);
     const teamModelIds = new Set(team.workers.map((w) => w.model));
 
     const fallbackDeps: FallbackDeps = {
       pool,
       replenish(aliveProviders, emptySlots, respondedModels) {
-        // Select replacement models from alive providers, cost descending
-        const candidates = sortedByCost.filter(
-          (m) => aliveProviders.has(m.provider) && !teamModelIds.has(m.id)
+        // Select replacement models from alive providers, score descending
+        const candidates = sortedByScore.filter(
+          (m: ModelInfo) => aliveProviders.has(m.provider) && !teamModelIds.has(m.id)
             && !cooldown.isOnCooldown(m.id) && !respondedModels.has(m.id),
         );
         if (candidates.length === 0) return [];
 
-        // Take top N by cost (already sorted)
-        return candidates.slice(0, emptySlots).map((m) => ({
+        return candidates.slice(0, emptySlots).map((m: ModelInfo) => ({
           model: m.id,
           role: "worker" as const,
         }));

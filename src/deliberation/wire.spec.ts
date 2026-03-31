@@ -41,6 +41,7 @@ mock.module("./engine", () => ({
   deliberate: (...args: any[]) => (mockDeliberate as Function)(...args),
   createFallbackPool: () => ({
     getNext: () => undefined,
+    getNextByProvider: () => undefined,
     markFailed: () => {},
     isOnCooldown: () => false,
     getEntry: () => undefined,
