@@ -70,7 +70,7 @@ describe("buildWorkerMessages", () => {
     const messages = buildWorkerMessages(makeCtx());
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toContain("Think thoroughly");
+    expect(messages[0]!.content).toContain("Think deeply");
     expect(messages[0]!.content).toContain("fundamental problem");
     expect(messages[1]!.role).toBe("user");
     expect(messages[1]!.content).toContain("Write a sorting function");
@@ -192,7 +192,7 @@ describe("buildDebateWorkerMessages", () => {
 
   it("should include depth techniques in system prompt", () => {
     const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[0]!.content!;
-    expect(sys).toContain("Think thoroughly");
+    expect(sys).toContain("Think deeply");
     expect(sys).toContain("strongest possible argument against");
     expect(sys).toContain("verify your key claims");
   });
@@ -318,7 +318,7 @@ describe("buildDebateFollowUp", () => {
     // Follow-up is just a user message — no system, no role, no domain tag
     expect(msg.content).not.toContain("<role>");
     expect(msg.content).not.toContain("<domain>");
-    expect(msg.content).not.toContain("Think thoroughly");
+    expect(msg.content).not.toContain("Think deeply");
   });
 
   it("should escape XML in other responses", () => {

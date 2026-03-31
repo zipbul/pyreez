@@ -160,7 +160,7 @@ export function buildWorkerMessages(
 ): ChatMessage[] {
   const nature = ctx.taskNature ?? "critique";
   const systemContent = buildSystemPrompt(
-    "Think thoroughly. Identify the fundamental problem before answering.",
+    "Think deeply, present concisely. No preamble — lead with your position.",
     nature,
   );
 
@@ -214,7 +214,7 @@ export function buildDebateWorkerMessages(
 
   // System: depth instructions only (constant for prompt caching)
   const systemContent = buildSystemPrompt(
-    "Think thoroughly. You are seeing other analysts' positions.",
+    "Think deeply, present concisely. No preamble — lead with your position. You are seeing other analysts' positions.",
     nature,
   );
 
