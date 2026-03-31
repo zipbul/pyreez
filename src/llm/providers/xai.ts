@@ -21,6 +21,9 @@ function stripPrefix(modelId: string): string {
   return i === -1 ? modelId : modelId.slice(i + 1);
 }
 
+/** Abort xAI HTTP request after 5 minutes of no response. */
+const REQUEST_TIMEOUT_MS = 300_000;
+
 export class XaiProvider implements LLMProvider {
   readonly name = "xai" as const;
   private readonly client: ReturnType<typeof createXai>;
@@ -44,6 +47,7 @@ export class XaiProvider implements LLMProvider {
         })),
         temperature: request.temperature,
         topP: request.top_p,
+        abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
 
       // Normalize to ChatCompletionResponse format
@@ -67,6 +71,9 @@ export class XaiProvider implements LLMProvider {
       };
     } catch (error) {
       if (error instanceof Error) {
+        if (error.name === "AbortError" || error.name === "TimeoutError") {
+          throw new LLMClientError(408, `xai: request timed out after ${REQUEST_TIMEOUT_MS}ms`, "timeout");
+        }
         const status = (error as unknown as Record<string, unknown>).status;
         throw new LLMClientError(
           typeof status === "number" ? status : 500,
