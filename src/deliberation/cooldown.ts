@@ -199,9 +199,14 @@ export function findLLMClientError(error: unknown): { status: number; type?: str
  * Map HTTP status + error type string to CooldownErrorType.
  */
 function classifyByStatus(status: number, type?: string): CooldownErrorType {
-  if (status === 429 || type === "rate_limit_error") return "rate_limit";
-  if (status === 401 || status === 403 || type === "authentication_error") return "auth_error";
-  if (status === 408 || type === "timeout_error" || type === "connection_error") return "timeout";
+  // Provider-specified type takes precedence over HTTP status.
+  // Gemini uses type="timeout" for 429 because Google quotas are per-model, not per-provider.
+  if (type === "timeout" || type === "timeout_error" || type === "connection_error") return "timeout";
+  if (type === "rate_limit_error") return "rate_limit";
+  if (type === "authentication_error") return "auth_error";
+  if (status === 429) return "rate_limit";
+  if (status === 401 || status === 403) return "auth_error";
+  if (status === 408) return "timeout";
   if (status >= 500) return "server_error";
   return "unknown";
 }
