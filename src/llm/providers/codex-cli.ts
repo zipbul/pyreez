@@ -5,12 +5,16 @@
  */
 
 import { LLMClientError } from "../errors";
+import { spawnWithIdleTimeout, IdleTimeoutError } from "./spawn-with-idle";
 import type {
   LLMProvider,
   ChatCompletionRequest,
   ChatCompletionResponse,
   ChatMessage,
 } from "../types";
+
+/** Kill CLI subprocess after 5 minutes of no stdout/stderr activity. */
+const IDLE_TIMEOUT_MS = 300_000;
 
 /**
  * Convert pyreez model ID to Codex CLI --model value.
@@ -55,21 +59,16 @@ export class CodexCliProvider implements LLMProvider {
       "--json",
       "-m", modelId,
       "--full-auto",
+      "--skip-git-repo-check",
       prompt,
     ];
 
     try {
-      const proc = Bun.spawn(["codex", ...args], {
-        stdout: "pipe",
-        stderr: "pipe",
-        cwd: "/tmp",
-      });
-
-      const [stdout, stderr, exitCode] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
-      ]);
+      const { stdout, stderr, exitCode } = await spawnWithIdleTimeout(
+        ["codex", ...args],
+        { cwd: "/tmp" },
+        { idleMs: IDLE_TIMEOUT_MS },
+      );
 
       if (exitCode !== 0) {
         throw new LLMClientError(
@@ -82,6 +81,9 @@ export class CodexCliProvider implements LLMProvider {
       return this.parseResponse(stdout, request.model);
     } catch (error) {
       if (error instanceof LLMClientError) throw error;
+      if (error instanceof IdleTimeoutError) {
+        throw new LLMClientError(408, error.message, "timeout");
+      }
       throw new LLMClientError(
         500,
         `Failed to spawn codex CLI: ${error instanceof Error ? error.message : String(error)}`,

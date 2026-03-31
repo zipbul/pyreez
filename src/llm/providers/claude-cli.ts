@@ -5,12 +5,16 @@
  */
 
 import { LLMClientError } from "../errors";
+import { spawnWithIdleTimeout, IdleTimeoutError } from "./spawn-with-idle";
 import type {
   LLMProvider,
   ChatCompletionRequest,
   ChatCompletionResponse,
   ChatMessage,
 } from "../types";
+
+/** Kill CLI subprocess after 5 minutes of no stdout/stderr activity. */
+const IDLE_TIMEOUT_MS = 300_000;
 
 /**
  * Convert pyreez model ID to Claude CLI --model value.
@@ -77,21 +81,17 @@ export class ClaudeCliProvider implements LLMProvider {
       const env = { ...process.env };
       delete env.CLAUDECODE;
 
-      const proc = Bun.spawn(["claude", ...args], {
-        stdin: new Blob([prompt]),
-        stdout: "pipe",
-        stderr: "pipe",
-        env,
-        // Run from /tmp to prevent Claude Code from loading CLAUDE.md
-        // and project context (~18K tokens overhead per call)
-        cwd: "/tmp",
-      });
-
-      const [stdout, stderr, exitCode] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
-      ]);
+      const { stdout, stderr, exitCode } = await spawnWithIdleTimeout(
+        ["claude", ...args],
+        {
+          stdin: new Blob([prompt]),
+          env,
+          // Run from /tmp to prevent Claude Code from loading CLAUDE.md
+          // and project context (~18K tokens overhead per call)
+          cwd: "/tmp",
+        },
+        { idleMs: IDLE_TIMEOUT_MS },
+      );
 
       if (exitCode !== 0) {
         throw new LLMClientError(
@@ -104,6 +104,9 @@ export class ClaudeCliProvider implements LLMProvider {
       return this.parseResponse(stdout, request.model);
     } catch (error) {
       if (error instanceof LLMClientError) throw error;
+      if (error instanceof IdleTimeoutError) {
+        throw new LLMClientError(408, error.message, "timeout");
+      }
       throw new LLMClientError(
         500,
         `Failed to spawn claude CLI: ${error instanceof Error ? error.message : String(error)}`,
