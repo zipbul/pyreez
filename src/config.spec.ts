@@ -8,13 +8,7 @@ import { loadConfigFromEnv, loadRoutingConfig, DEFAULT_ROUTING_CONFIG } from "./
 // -- Helpers --
 
 const ENV_KEYS = [
-  "PYREEZ_DEEPSEEK_KEY",
   "PYREEZ_XAI_KEY",
-  "PYREEZ_MISTRAL_KEY",
-  "PYREEZ_QWEN_KEY",
-  "PYREEZ_GROQ_KEY",
-  "PYREEZ_LOCAL_URL",
-  "PYREEZ_LOCAL_SOCKET",
   "PYREEZ_MODEL",
 ] as const;
 
@@ -71,14 +65,6 @@ describe("loadConfigFromEnv", () => {
     expect(() => loadConfigFromEnv()).toThrow("No LLM providers configured");
   });
 
-  it("should configure deepseek provider when PYREEZ_DEEPSEEK_KEY is set", () => {
-    Bun.env.PYREEZ_DEEPSEEK_KEY = "sk-ds";
-
-    const result = loadConfigFromEnv();
-
-    expect(result.providers.deepseek).toEqual({ apiKey: "sk-ds" });
-  });
-
   it("should configure xai provider when PYREEZ_XAI_KEY is set", () => {
     Bun.env.PYREEZ_XAI_KEY = "xai-key";
 
@@ -87,39 +73,6 @@ describe("loadConfigFromEnv", () => {
     expect(result.providers.xai).toEqual({ apiKey: "xai-key" });
   });
 
-  it("should configure mistral provider when PYREEZ_MISTRAL_KEY is set", () => {
-    Bun.env.PYREEZ_MISTRAL_KEY = "mist-key";
-
-    const result = loadConfigFromEnv();
-
-    expect(result.providers.mistral).toEqual({ apiKey: "mist-key" });
-  });
-
-  it("should configure qwen provider when PYREEZ_QWEN_KEY is set", () => {
-    Bun.env.PYREEZ_QWEN_KEY = "qwen-key";
-
-    const result = loadConfigFromEnv();
-
-    expect(result.providers.qwen).toEqual({ apiKey: "qwen-key" });
-  });
-
-  it("should configure groq provider when PYREEZ_GROQ_KEY is set", () => {
-    Bun.env.PYREEZ_GROQ_KEY = "groq-key";
-
-    const result = loadConfigFromEnv();
-
-    expect(result.providers.groq).toEqual({ apiKey: "groq-key" });
-  });
-
-  it("should configure multiple providers when multiple keys are set", () => {
-    Bun.env.PYREEZ_XAI_KEY = "xai";
-    Bun.env.PYREEZ_DEEPSEEK_KEY = "ds";
-
-    const result = loadConfigFromEnv();
-
-    expect(result.providers.xai).toBeDefined();
-    expect(result.providers.deepseek).toBeDefined();
-  });
 
   it("should use default routing config when no routing param provided", () => {
     Bun.env.PYREEZ_XAI_KEY = "test-key";

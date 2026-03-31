@@ -9,12 +9,7 @@ export type ProviderName =
   | "anthropic"
   | "google"
   | "openai"
-  | "deepseek"
-  | "xai"
-  | "mistral"
-  | "qwen"
-  | "groq"
-  | "local";
+  | "xai";
 
 export interface LLMProvider {
   readonly name: ProviderName;

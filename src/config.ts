@@ -20,12 +20,7 @@ export const DEFAULT_ROUTING_CONFIG: RoutingConfig = {
 
 export interface PyreezConfig {
   providers: {
-    deepseek?: { apiKey: string };
     xai?: { apiKey: string };
-    mistral?: { apiKey: string };
-    qwen?: { apiKey: string };
-    groq?: { apiKey: string };
-    local?: { baseUrl: string; socketPath?: string };
   };
   defaultModel?: string;
   routing: RoutingConfig;
@@ -35,13 +30,7 @@ export interface PyreezConfig {
  * Load config from environment variables.
  * All providers are optional — only configure ones with keys present.
  *
- * PYREEZ_DEEPSEEK_KEY — DeepSeek API key
  * PYREEZ_XAI_KEY — xAI (Grok) API key
- * PYREEZ_MISTRAL_KEY — Mistral AI API key
- * PYREEZ_QWEN_KEY — Qwen/Alibaba Cloud API key
- * PYREEZ_GROQ_KEY — Groq API key
- * PYREEZ_LOCAL_URL — Local LLM base URL (e.g., Docker Model Runner, Ollama, LM Studio)
- * PYREEZ_LOCAL_SOCKET — Unix socket path for Docker Model Runner (e.g., /var/run/docker.sock)
  * PYREEZ_MODEL — default model (optional, default "anthropic/claude-sonnet-4.6")
  */
 
@@ -79,45 +68,15 @@ export function loadConfigFromEnv(routing?: RoutingConfig): PyreezConfig {
     routing: routing ?? { ...DEFAULT_ROUTING_CONFIG },
   };
 
-  const deepseekKey = Bun.env.PYREEZ_DEEPSEEK_KEY;
-  if (deepseekKey) {
-    config.providers.deepseek = { apiKey: deepseekKey };
-  }
-
   const xaiKey = Bun.env.PYREEZ_XAI_KEY;
   if (xaiKey) {
     config.providers.xai = { apiKey: xaiKey };
   }
 
-  const mistralKey = Bun.env.PYREEZ_MISTRAL_KEY;
-  if (mistralKey) {
-    config.providers.mistral = { apiKey: mistralKey };
-  }
-
-  const qwenKey = Bun.env.PYREEZ_QWEN_KEY;
-  if (qwenKey) {
-    config.providers.qwen = { apiKey: qwenKey };
-  }
-
-  const groqKey = Bun.env.PYREEZ_GROQ_KEY;
-  if (groqKey) {
-    config.providers.groq = { apiKey: groqKey };
-  }
-
-  // Local LLM provider (Docker Model Runner, Ollama, LM Studio, etc.)
-  const localUrl = Bun.env.PYREEZ_LOCAL_URL;
-  const localSocket = Bun.env.PYREEZ_LOCAL_SOCKET;
-  if (localUrl || localSocket) {
-    config.providers.local = {
-      baseUrl: localUrl ?? "http://localhost/exp/vDD4.40/engines",
-      socketPath: localSocket,
-    };
-  }
-
   // At least one provider must be configured
   if (Object.keys(config.providers).length === 0) {
     throw new Error(
-      "No LLM providers configured. Set at least one of: PYREEZ_DEEPSEEK_KEY, PYREEZ_XAI_KEY, PYREEZ_MISTRAL_KEY, PYREEZ_QWEN_KEY, PYREEZ_GROQ_KEY, PYREEZ_LOCAL_URL, PYREEZ_LOCAL_SOCKET",
+      "No LLM providers configured. Set PYREEZ_XAI_KEY.",
     );
   }
 

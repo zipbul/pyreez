@@ -6,11 +6,9 @@
 import { loadConfigFromEnv, loadRoutingConfig } from "../src/config";
 import { createChatAdapter, createDeliberateFn } from "../src/deliberation/wire";
 import { ProviderRegistry } from "../src/llm/registry";
-import { OpenAICompatibleProvider } from "../src/llm/providers/openai-compatible";
 import { XaiProvider } from "../src/llm/providers/xai";
-import { LocalProvider } from "../src/llm/providers/local";
 import { ClaudeCliProvider } from "../src/llm/providers/claude-cli";
-import type { LLMProvider, ProviderName } from "../src/llm/types";
+import type { LLMProvider } from "../src/llm/types";
 import { ModelRegistry } from "../src/model/registry";
 
 // -- Config --
@@ -64,29 +62,6 @@ async function main() {
   providers.push(new (await import("../src/llm/providers/codex-cli")).CodexCliProvider());
   if (config.providers.xai) {
     providers.push(new XaiProvider(config.providers.xai));
-  }
-  if (config.providers.local) {
-    providers.push(new LocalProvider(config.providers.local));
-  }
-
-  const OPENAI_COMPAT_PROVIDERS = {
-    deepseek: "https://api.deepseek.com",
-    mistral: "https://api.mistral.ai",
-    qwen: "https://dashscope-intl.aliyuncs.com/compatible-mode",
-    groq: "https://api.groq.com/openai",
-  } as const;
-
-  for (const [name, baseUrl] of Object.entries(OPENAI_COMPAT_PROVIDERS)) {
-    const block = config.providers[name as keyof typeof OPENAI_COMPAT_PROVIDERS];
-    if (block) {
-      providers.push(
-        new OpenAICompatibleProvider({
-          name: name as ProviderName,
-          baseUrl,
-          apiKey: block.apiKey,
-        }),
-      );
-    }
   }
 
   const providerRegistry = new ProviderRegistry(
