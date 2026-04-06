@@ -191,7 +191,12 @@ export function createDeliberateFn(
       );
     }
 
-    // 2. Determine effective count: clamp to [1, MAX_WORKERS]
+    // 2. Protocol-specific minimum workers
+    if (input.protocol === "red_team" && input.models.length < 2) {
+      throw new Error("red_team protocol requires at least 2 models (generator + attacker)");
+    }
+
+    // 3. Determine effective count: clamp to [1, MAX_WORKERS]
     const effectiveCount = Math.min(
       Math.max(input.count ?? input.models.length, 1),
       MAX_WORKERS,
