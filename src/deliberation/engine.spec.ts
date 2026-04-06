@@ -37,6 +37,7 @@ function makeInput(overrides?: Partial<DeliberateInput>): DeliberateInput {
   return {
     task: "Write a function",
     models: ["test/model-a", "test/model-b"],
+    protocol: "shared_convergence",
     ...overrides,
   };
 }
@@ -52,7 +53,7 @@ function chatResult(content: string, inputTokens = 10, outputTokens = 20): ChatR
 function makeDeps(overrides?: Partial<EngineDeps>): EngineDeps {
   return {
     chat: mock(async (_model: string, _messages: any, _params?: any) => chatResult(validWorkerContent("mock response"))),
-    buildWorkerMessages: mock((_ctx: any, _instructions?: any, _roundInfo?: any, _workerIndex?: any) => [
+    buildR1Messages: mock((_ctx: any, _instructions?: any, _roundInfo?: any, _workerIndex?: any) => [
       { role: "user" as const, content: "work" },
     ]),
     ...overrides,
@@ -60,7 +61,7 @@ function makeDeps(overrides?: Partial<EngineDeps>): EngineDeps {
 }
 
 function makeConfig(overrides?: Partial<EngineConfig>): EngineConfig {
-  return { maxRounds: 1, ...overrides };
+  return { maxRounds: 1, protocol: "shared_convergence", ...overrides };
 }
 
 function makeModelInfo(id: string): ModelInfo {
@@ -107,8 +108,8 @@ describe("executeRound", () => {
     expect(tokens.input).toBe(20);
     expect(tokens.output).toBe(40);
 
-    // buildWorkerMessages called per-worker (not shared)
-    expect(deps.buildWorkerMessages).toHaveBeenCalledTimes(2);
+    // buildR1Messages called per-worker (not shared)
+    expect(deps.buildR1Messages).toHaveBeenCalledTimes(2);
     expect(deps.chat).toHaveBeenCalledTimes(2); // 2 workers
   });
 
@@ -186,7 +187,7 @@ describe("executeRound", () => {
     expect(tokens.output).toBe(600);
   });
 
-  it("should pass workerIndex to buildWorkerMessages for each worker", async () => {
+  it("should pass workerIndex to buildR1Messages for each worker", async () => {
     const team = makeTeam(3);
     const input = makeInput();
     const config = makeConfig();
@@ -194,7 +195,7 @@ describe("executeRound", () => {
     const workerIndices: number[] = [];
     const deps = makeDeps({
       chat: mock(async () => chatResult(validWorkerContent("response"))),
-      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, workerIndex?: any) => {
+      buildR1Messages: mock((_ctx: any, _inst?: any, _ri?: any, workerIndex?: any) => {
         if (workerIndex !== undefined) workerIndices.push(workerIndex);
         return [{ role: "user" as const, content: "work" }];
       }),
@@ -596,80 +597,80 @@ describe("failedWorkers propagation in deliberate output", () => {
 // Debate Protocol Convergence
 // =============================================================================
 
-describe("debate protocol", () => {
-  it("should use buildDebateWorkerMessages for round > 1 when protocol is debate", async () => {
+describe("adversarial_debate protocol", () => {
+  it("should use buildR2Messages for round > 1 when protocol is adversarial_debate", async () => {
     const team = makeTeam(1);
-    const input = makeInput();
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+    const input = makeInput({ protocol: "adversarial_debate" });
+    const config = makeConfig({ maxRounds: 2, protocol: "adversarial_debate" });
 
-    let debateBuilderCalls = 0;
-    let normalBuilderCalls = 0;
+    let r2BuilderCalls = 0;
+    let r1BuilderCalls = 0;
 
     const deps = makeDeps({
       chat: mock(async (_model: string) => chatResult(validWorkerContent("response"))),
-      buildWorkerMessages: mock((_ctx: any, _instructions?: any, _roundInfo?: any, _idx?: any) => {
-        normalBuilderCalls++;
+      buildR1Messages: mock((_ctx: any, _instructions?: any, _roundInfo?: any, _idx?: any) => {
+        r1BuilderCalls++;
         return [{ role: "user" as const, content: "work" }];
       }),
-      buildDebateWorkerMessages: mock((_ctx: any, _instructions?: any, _roundInfo?: any, _idx?: any) => {
-        debateBuilderCalls++;
+      buildR2Messages: mock((_ctx: any, _others?: any, _own?: any, _instructions?: any, _roundInfo?: any, _idx?: any) => {
+        r2BuilderCalls++;
         return [{ role: "user" as const, content: "debate" }];
       }),
     });
 
     await deliberate(team, input, deps, config);
 
-    // Round 1: normal builder (1 worker), Round 2: debate builder (1 worker)
-    expect(normalBuilderCalls).toBe(1);
-    expect(debateBuilderCalls).toBe(1);
+    // Round 1: R1 builder (1 worker), Round 2: R2 builder (1 worker)
+    expect(r1BuilderCalls).toBe(1);
+    expect(r2BuilderCalls).toBe(1);
   });
 
-  it("should accumulate previous responses in debate context across rounds", async () => {
+  it("should accumulate previous responses in R2 context across rounds", async () => {
     const team = makeTeam(2);
-    const input = makeInput();
-    const config = makeConfig({ maxRounds: 3, protocol: "debate" });
+    const input = makeInput({ protocol: "adversarial_debate" });
+    const config = makeConfig({ maxRounds: 3, protocol: "adversarial_debate" });
 
-    const debateContexts: string[] = [];
+    const r2Contexts: string[] = [];
 
     let callCount = 0;
     const deps = makeDeps({
       chat: mock(async (_model: string) => {
         return chatResult(`Response ${++callCount} unique: ${"z".repeat(callCount * 50)}`, 10, 20);
       }),
-      buildDebateWorkerMessages: mock((ctx: any, _instructions?: any, _roundInfo?: any, _idx?: any) => {
-        // Capture the number of previous rounds visible to debate builder
-        debateContexts.push(`rounds=${ctx.rounds.length}`);
+      buildR2Messages: mock((ctx: any, _others?: any, _own?: any, _instructions?: any, _roundInfo?: any, _idx?: any) => {
+        // Capture the number of previous rounds visible to R2 builder
+        r2Contexts.push(`rounds=${ctx.rounds.length}`);
         return [{ role: "user" as const, content: "debate" }];
       }),
     });
 
     await deliberate(team, input, deps, config);
 
-    // Round 1: normal builder (no debate call)
-    // Round 2: debate builder called per-worker (2 workers), each sees 1 previous round
-    // Round 3: debate builder called per-worker (2 workers), each sees 2 previous rounds
-    expect(debateContexts).toEqual(["rounds=1", "rounds=1", "rounds=2", "rounds=2"]);
+    // Round 1: R1 builder (no R2 call)
+    // Round 2: R2 builder called per-worker (2 workers), each sees 1 previous round
+    // Round 3: R2 builder called per-worker (2 workers), each sees 2 previous rounds
+    expect(r2Contexts).toEqual(["rounds=1", "rounds=1", "rounds=2", "rounds=2"]);
   });
 
-  it("should fall back to normal builder when buildDebateWorkerMessages is not provided", async () => {
+  it("should fall back to R1 builder when buildR2Messages is not provided", async () => {
     const team = makeTeam(1);
-    const input = makeInput();
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+    const input = makeInput({ protocol: "adversarial_debate" });
+    const config = makeConfig({ maxRounds: 2, protocol: "adversarial_debate" });
 
-    let normalCalls = 0;
+    let r1Calls = 0;
     const deps = makeDeps({
       chat: mock(async () => chatResult(validWorkerContent("response"))),
-      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any) => {
-        normalCalls++;
+      buildR1Messages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any) => {
+        r1Calls++;
         return [{ role: "user" as const, content: "normal" }];
       }),
-      // No buildDebateWorkerMessages
+      // No buildR2Messages
     });
 
     await deliberate(team, input, deps, config);
 
-    // Both rounds should use normal builder as fallback
-    expect(normalCalls).toBe(2);
+    // Both rounds should use R1 builder as fallback
+    expect(r1Calls).toBe(2);
   });
 });
 
@@ -779,24 +780,24 @@ describe("GenerationParams forwarding", () => {
 // session continuation — R2+ uses accumulated history
 // ================================================================
 
-describe("session continuation in debate R2+", () => {
+describe("session continuation in R2+", () => {
   it("should use accumulated history + follow-up instead of full rebuild in R2", async () => {
     let followUpCallCount = 0;
     const allMessages: ChatMessage[][] = [];
 
-    const followUpMock = mock((_ctx: any, _others: any, _round?: any, _instructions?: any) => {
+    const followUpMock = mock((_ctx: any, _others: any, _instructions?: any, _roundInfo?: any) => {
       followUpCallCount++;
       return { role: "user" as const, content: "follow-up-other-positions" };
     });
 
     const deps = makeDeps({
-      buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
+      buildR2Messages: mock((_ctx: any, _others?: any, _own?: any, _inst?: any, _round?: any, _idx?: any) => {
         return [
-          { role: "system" as const, content: "debate-system" },
-          { role: "user" as const, content: "debate-user" },
+          { role: "system" as const, content: "r2-system" },
+          { role: "user" as const, content: "r2-user" },
         ];
       }),
-      buildDebateFollowUp: followUpMock,
+      buildFollowUp: followUpMock,
     });
 
     // Intercept chat to record message arrays
@@ -807,8 +808,8 @@ describe("session continuation in debate R2+", () => {
     };
 
     const team = makeTeam(2);
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
-    const output = await deliberate(team, makeInput(), deps, config);
+    const config = makeConfig({ maxRounds: 2, protocol: "adversarial_debate" });
+    const output = await deliberate(team, makeInput({ protocol: "adversarial_debate" }), deps, config);
 
     expect(output.roundsExecuted).toBe(2);
     // Follow-up builder should have been called for R2 workers that have history
@@ -819,31 +820,31 @@ describe("session continuation in debate R2+", () => {
     );
     expect(r2Messages.length).toBeGreaterThan(0);
     // R2 messages should be longer than R1 (accumulated history + follow-up)
-    const r1Len = allMessages[0]!.length; // R1: just buildWorkerMessages output
+    const r1Len = allMessages[0]!.length; // R1: just buildR1Messages output
     const r2Len = r2Messages[0]!.length; // R2: history + follow-up
     expect(r2Len).toBeGreaterThan(r1Len);
   });
 
-  it("should fall back to full debate builder when no follow-up builder is provided", async () => {
-    let debateBuilderCalled = false;
+  it("should fall back to full R2 builder when no follow-up builder is provided", async () => {
+    let r2BuilderCalled = false;
 
     const deps = makeDeps({
-      buildDebateWorkerMessages: mock((_ctx: any) => {
-        debateBuilderCalled = true;
+      buildR2Messages: mock((_ctx: any, _others?: any, _own?: any, _inst?: any, _round?: any, _idx?: any) => {
+        r2BuilderCalled = true;
         return [
           { role: "system" as const, content: "full-rebuild" },
           { role: "user" as const, content: "full-rebuild-user" },
         ];
       }),
-      // NO buildDebateFollowUp — should fall back to full builder
+      // NO buildFollowUp — should fall back to full R2 builder
     });
 
     const team = makeTeam(2);
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
-    const output = await deliberate(team, makeInput(), deps, config);
+    const config = makeConfig({ maxRounds: 2, protocol: "adversarial_debate" });
+    const output = await deliberate(team, makeInput({ protocol: "adversarial_debate" }), deps, config);
 
     expect(output.roundsExecuted).toBe(2);
-    expect(debateBuilderCalled).toBe(true);
+    expect(r2BuilderCalled).toBe(true);
   });
 });
 
@@ -855,9 +856,9 @@ describe("session invalidation on model swap in R2+", () => {
   it("should invalidate session and use cold join when model is swapped in R2 (error)", async () => {
     // R1: worker-0 succeeds with model-0 → history stored
     // R2: model-0 fails → fallback to fallback-d
-    // fallback-d should NOT get model-0's session history → should use debate builder (cold join)
+    // fallback-d should NOT get model-0's session history → should use R2 builder (cold join)
     let followUpUsed = false;
-    let debateBuilderUsed = false;
+    let r2BuilderUsed = false;
     let round = 1;
 
     const deps = makeDeps({
@@ -868,14 +869,14 @@ describe("session invalidation on model swap in R2+", () => {
         }
         return chatResult(validWorkerContent(`response-from-${model}`));
       }),
-      buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
-        debateBuilderUsed = true;
+      buildR2Messages: mock((_ctx: any, _others?: any, _own?: any, _inst?: any, _round?: any, _idx?: any) => {
+        r2BuilderUsed = true;
         return [
           { role: "system" as const, content: "cold-join-rebuild" },
           { role: "user" as const, content: "cold-join-user" },
         ];
       }),
-      buildDebateFollowUp: mock((_ctx: any, _others: any, _round?: any, _instructions?: any) => {
+      buildFollowUp: mock((_ctx: any, _others: any, _instructions?: any, _roundInfo?: any) => {
         followUpUsed = true;
         return { role: "user" as const, content: "follow-up" };
       }),
@@ -884,7 +885,7 @@ describe("session invalidation on model swap in R2+", () => {
     const team = makeTeam(2);
     const cooldown = createCooldownManager();
     const pool = createFallbackPool([makeModelInfo("prov-z/fallback-d")], cooldown);
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+    const config = makeConfig({ maxRounds: 2, protocol: "adversarial_debate" });
 
     const origChat = deps.chat;
     let callCount = 0;
@@ -894,11 +895,11 @@ describe("session invalidation on model swap in R2+", () => {
       return origChat(model, messages, params);
     };
 
-    const output = await deliberate(team, makeInput(), deps, config, { pool });
+    const output = await deliberate(team, makeInput({ protocol: "adversarial_debate" }), deps, config, { pool });
 
     expect(output.roundsExecuted).toBe(2);
-    // fallback-d should use debate builder (cold join), NOT session continuation
-    expect(debateBuilderUsed).toBe(true);
+    // fallback-d should use R2 builder (cold join), NOT session continuation
+    expect(r2BuilderUsed).toBe(true);
     // worker-1 (no swap) should use follow-up (session continuation)
     expect(followUpUsed).toBe(true);
     expect(output.modelSwaps!.some(s => s.replacement === "prov-z/fallback-d")).toBe(true);
@@ -907,7 +908,6 @@ describe("session invalidation on model swap in R2+", () => {
   it("should invalidate session on cooldown skip in R2", async () => {
     // R1: model-0 fails with rate_limit → prov-a cooled → fallback-c succeeds
     // R2: fallback-c is on team. model-0 still cooled (not on team anymore due to R1 swap).
-    //     But if a DIFFERENT worker gets cooled in R2, test the invalidation.
     let round = 1;
 
     const deps = makeDeps({
@@ -918,13 +918,13 @@ describe("session invalidation on model swap in R2+", () => {
         }
         return chatResult(validWorkerContent(`response-from-${model}`));
       }),
-      buildDebateWorkerMessages: mock((_ctx: any) => {
+      buildR2Messages: mock((_ctx: any, _others?: any, _own?: any, _inst?: any, _round?: any, _idx?: any) => {
         return [
           { role: "system" as const, content: "rebuild" },
           { role: "user" as const, content: "rebuild-user" },
         ];
       }),
-      buildDebateFollowUp: mock((_ctx: any, _others: any, _round?: any, _instructions?: any) => {
+      buildFollowUp: mock((_ctx: any, _others: any, _instructions?: any, _roundInfo?: any) => {
         return { role: "user" as const, content: "follow-up" };
       }),
     });
@@ -932,7 +932,7 @@ describe("session invalidation on model swap in R2+", () => {
     const team = makeTeam(2);
     const cooldown = createCooldownManager();
     const pool = createFallbackPool([makeModelInfo("prov-c/fallback-c")], cooldown);
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+    const config = makeConfig({ maxRounds: 2, protocol: "adversarial_debate" });
 
     const origChat = deps.chat;
     let callCount = 0;
@@ -942,7 +942,7 @@ describe("session invalidation on model swap in R2+", () => {
       return origChat(model, messages, params);
     };
 
-    const output = await deliberate(team, makeInput(), deps, config, { pool });
+    const output = await deliberate(team, makeInput({ protocol: "adversarial_debate" }), deps, config, { pool });
 
     expect(output.roundsExecuted).toBe(2);
     // R1: model-0 swapped to fallback-c. Team updated.
@@ -957,11 +957,11 @@ describe("session invalidation on model swap in R2+", () => {
 // debate fallback — cold join + swap tracking
 // ================================================================
 
-describe("debate fallback (cold join auto-detected by debate builder)", () => {
-  it("should use debate builder for replacement worker in R2+ (cold join auto-detected)", async () => {
+describe("R2+ fallback (cold join auto-detected by R2 builder)", () => {
+  it("should use R2 builder for replacement worker in R2+ (cold join auto-detected)", async () => {
     // 2 workers, 2 rounds. Worker-1 fails in R2 → fallback/d replaces
-    // Debate builder auto-detects cold join via missing participation in last round
-    let debateBuilderCallCount = 0;
+    // R2 builder auto-detects cold join via missing participation in last round
+    let r2BuilderCallCount = 0;
     let round = 0;
     const deps = makeDeps({
       chat: mock(async (model: string) => {
@@ -970,16 +970,16 @@ describe("debate fallback (cold join auto-detected by debate builder)", () => {
         }
         return chatResult(validWorkerContent(`response-from-${model}`));
       }),
-      buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
-        debateBuilderCallCount++;
-        return [{ role: "user" as const, content: "debate" }];
+      buildR2Messages: mock((_ctx: any, _others?: any, _own?: any, _inst?: any, _round?: any, _idx?: any) => {
+        r2BuilderCallCount++;
+        return [{ role: "user" as const, content: "r2" }];
       }),
     });
 
     const team = makeTeam(2);
     const cooldown = createCooldownManager();
     const pool = createFallbackPool([makeModelInfo("prov-z/fallback-d")], cooldown);
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+    const config = makeConfig({ maxRounds: 2, protocol: "adversarial_debate" });
 
     const origChat = deps.chat;
     let callCount = 0;
@@ -989,11 +989,11 @@ describe("debate fallback (cold join auto-detected by debate builder)", () => {
       return origChat(model, messages, params);
     };
 
-    const result = await deliberate(team, makeInput(), deps, config, { pool });
+    const result = await deliberate(team, makeInput({ protocol: "adversarial_debate" }), deps, config, { pool });
 
     expect(result.roundsExecuted).toBe(2);
-    // Debate builder handles both normal debate and cold join
-    expect(debateBuilderCallCount).toBeGreaterThan(0);
+    // R2 builder handles both normal R2 and cold join
+    expect(r2BuilderCallCount).toBeGreaterThan(0);
     expect(result.modelSwaps).toBeDefined();
     expect(result.modelSwaps!.some(s => s.replacement === "prov-z/fallback-d")).toBe(true);
   });
@@ -1009,13 +1009,13 @@ describe("debate fallback (cold join auto-detected by debate builder)", () => {
         if (round === 2) r2ChatModels.push(model);
         return chatResult(validWorkerContent(`response-from-${model}`));
       }),
-      buildDebateWorkerMessages: mock(() => [{ role: "user" as const, content: "debate" }]),
+      buildR2Messages: mock((_ctx: any, _others?: any, _own?: any, _inst?: any, _round?: any, _idx?: any) => [{ role: "user" as const, content: "r2" }]),
     });
 
     const team = makeTeam(2);
     const cooldown = createCooldownManager();
     const pool = createFallbackPool([makeModelInfo("prov-z/fallback-d")], cooldown);
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+    const config = makeConfig({ maxRounds: 2, protocol: "adversarial_debate" });
 
     const origChat = deps.chat;
     let callCount = 0;
@@ -1025,7 +1025,7 @@ describe("debate fallback (cold join auto-detected by debate builder)", () => {
       return origChat(model, messages, params);
     };
 
-    const result = await deliberate(team, makeInput(), deps, config, { pool });
+    const result = await deliberate(team, makeInput({ protocol: "adversarial_debate" }), deps, config, { pool });
 
     expect(r2ChatModels).toContain("prov-z/fallback-d");
     expect(result.roundsExecuted).toBe(2);
@@ -1175,11 +1175,11 @@ describe("multi-hop token accumulation", () => {
 });
 
 // =============================================================================
-// Diverge-synth uses worker builder (not debate builder) for fallback
+// Fallback uses R1 builder for single-round protocols
 // =============================================================================
 
-describe("diverge-synth fallback uses worker builder", () => {
-  it("should use buildWorkerMessages for replacement in diverge-synth mode", async () => {
+describe("fallback uses R1 builder for single-round protocols", () => {
+  it("should use buildR1Messages for replacement in shared_convergence mode", async () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model === "worker/model-0") throw new Error("failure");
@@ -1190,11 +1190,11 @@ describe("diverge-synth fallback uses worker builder", () => {
     const team = makeTeam(2);
     const cooldown = createCooldownManager();
     const pool = createFallbackPool([makeModelInfo("prov-z/fallback-d")], cooldown);
-    const config = makeConfig({ maxRounds: 1, protocol: "diverge-synth" });
+    const config = makeConfig({ maxRounds: 1, protocol: "shared_convergence" });
 
     const output = await deliberate(team, makeInput(), deps, config, { pool });
 
-    expect(deps.buildWorkerMessages).toHaveBeenCalled();
+    expect(deps.buildR1Messages).toHaveBeenCalled();
     expect(output.modelsUsed).toContain("prov-z/fallback-d");
   });
 });
@@ -1217,15 +1217,15 @@ describe("multi-round multi-swap context integrity", () => {
         }
         return chatResult(`Response from ${model} round ${round}: ${"r".repeat(round * 80)}`);
       }),
-      buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => {
-        return [{ role: "user" as const, content: "debate" }];
+      buildR2Messages: mock((_ctx: any, _others?: any, _own?: any, _inst?: any, _round?: any, _idx?: any) => {
+        return [{ role: "user" as const, content: "r2" }];
       }),
     });
 
     const team = makeTeam(2);
     const cooldown = createCooldownManager();
     const pool = createFallbackPool([makeModelInfo("prov-z/fallback-d")], cooldown);
-    const config = makeConfig({ maxRounds: 3, protocol: "debate" });
+    const config = makeConfig({ maxRounds: 3, protocol: "adversarial_debate" });
 
     // Track round number via chat interception
     const origChat = deps.chat;
@@ -1239,7 +1239,7 @@ describe("multi-round multi-swap context integrity", () => {
       return origChat(model, messages, params);
     };
 
-    const output = await deliberate(team, makeInput(), deps, config, { pool });
+    const output = await deliberate(team, makeInput({ protocol: "adversarial_debate" }), deps, config, { pool });
 
     expect(output.roundsExecuted).toBe(3);
     expect(output.modelsUsed).toContain("prov-z/fallback-d");
@@ -1310,8 +1310,8 @@ describe("multi-hop swap chain team update", () => {
         if (round === 2) r2Models.push(model);
         return chatResult(validWorkerContent(`response-from-${model}`));
       }),
-      buildDebateWorkerMessages: mock((_ctx: any, _inst?: any, _round?: any, _idx?: any) => [
-        { role: "user" as const, content: "debate" },
+      buildR2Messages: mock((_ctx: any, _others?: any, _own?: any, _inst?: any, _round?: any, _idx?: any) => [
+        { role: "user" as const, content: "r2" },
       ]),
     });
 
@@ -1321,7 +1321,7 @@ describe("multi-hop swap chain team update", () => {
       [makeModelInfo("prov-x/fallback-a"), makeModelInfo("prov-y/fallback-b")],
       cooldown,
     );
-    const config = makeConfig({ maxRounds: 2, protocol: "debate" });
+    const config = makeConfig({ maxRounds: 2, protocol: "adversarial_debate" });
 
     const origChat = deps.chat;
     let callCount = 0;
@@ -1333,7 +1333,7 @@ describe("multi-hop swap chain team update", () => {
       return origChat(model, messages, params);
     };
 
-    const output = await deliberate(team, makeInput(), deps, config, { pool });
+    const output = await deliberate(team, makeInput({ protocol: "adversarial_debate" }), deps, config, { pool });
 
     expect(output.roundsExecuted).toBe(2);
     // R2 should use fallback/b (final), NOT fallback/a (intermediate)
@@ -2129,84 +2129,6 @@ describe("levenshteinDistance", () => {
   });
 });
 
-// =============================================================================
-// Per-Round Technique
-// =============================================================================
-
-describe("per-round technique", () => {
-  it("should pass single technique to all rounds", async () => {
-    const team = makeTeam(1);
-    const input = makeInput({ technique: "challenge" });
-    const config = makeConfig({ maxRounds: 2 });
-
-    const techniques: (string | undefined)[] = [];
-    const deps = makeDeps({
-      chat: mock(async () => chatResult(validWorkerContent("resp" + Math.random()))),
-      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any, technique?: any) => {
-        techniques.push(technique);
-        return [{ role: "user" as const, content: "work" }];
-      }),
-    });
-
-    await deliberate(team, input, deps, config);
-    expect(techniques.every(t => t === "challenge")).toBe(true);
-  });
-
-  it("should pass per-round techniques from array", async () => {
-    const team = makeTeam(1);
-    const input = makeInput({ technique: ["propose", "challenge", "defend"] as any });
-    const config = makeConfig({ maxRounds: 3 });
-
-    const techniques: (string | undefined)[] = [];
-    let callCount = 0;
-    const deps = makeDeps({
-      chat: mock(async () => chatResult(`resp ${++callCount} ${"x".repeat(callCount * 50)}`)),
-      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any, technique?: any) => {
-        techniques.push(technique);
-        return [{ role: "user" as const, content: "work" }];
-      }),
-    });
-
-    await deliberate(team, input, deps, config);
-    expect(techniques).toEqual(["propose", "challenge", "defend"]);
-  });
-
-  it("should repeat last technique when array exhausted", async () => {
-    const team = makeTeam(1);
-    const input = makeInput({ technique: ["propose", "challenge"] as any });
-    const config = makeConfig({ maxRounds: 3 });
-
-    const techniques: (string | undefined)[] = [];
-    let callCount = 0;
-    const deps = makeDeps({
-      chat: mock(async () => chatResult(`resp ${++callCount} ${"x".repeat(callCount * 50)}`)),
-      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any, technique?: any) => {
-        techniques.push(technique);
-        return [{ role: "user" as const, content: "work" }];
-      }),
-    });
-
-    await deliberate(team, input, deps, config);
-    expect(techniques).toEqual(["propose", "challenge", "challenge"]);
-  });
-
-  it("should pass undefined technique for empty array", async () => {
-    const team = makeTeam(1);
-    const input = makeInput({ technique: [] as any });
-    const config = makeConfig({ maxRounds: 1 });
-
-    const techniques: (string | undefined)[] = [];
-    const deps = makeDeps({
-      buildWorkerMessages: mock((_ctx: any, _inst?: any, _ri?: any, _idx?: any, technique?: any) => {
-        techniques.push(technique);
-        return [{ role: "user" as const, content: "work" }];
-      }),
-    });
-
-    await deliberate(team, input, deps, config);
-    expect(techniques).toEqual([undefined]);
-  });
-});
 
 // =============================================================================
 // Convergence Detection
@@ -2242,19 +2164,6 @@ describe("convergence detection", () => {
     expect(output.roundsExecuted).toBe(3);
   });
 
-  it("should NOT apply convergence when per-round technique array is specified", async () => {
-    const team = makeTeam(1);
-    const input = makeInput({ technique: ["propose", "accept", "challenge"] as any });
-    const config = makeConfig({ maxRounds: 3 });
-
-    // Same content → would normally converge, but per-round array disables convergence
-    const deps = makeDeps({
-      chat: mock(async () => chatResult(validWorkerContent("same content every time"))),
-    });
-
-    const output = await deliberate(team, input, deps, config);
-    expect(output.roundsExecuted).toBe(3);
-  });
 });
 
 // =============================================================================

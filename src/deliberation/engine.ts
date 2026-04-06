@@ -18,8 +18,8 @@ import type {
   DeliberateOutput,
   FailedWorker,
   GenerationParams,
-  InteractionTechnique,
   ModelSwap,
+  Protocol,
   Round,
   SharedContext,
   TeamComposition,
@@ -128,28 +128,28 @@ export interface EngineDeps {
     messages: ChatMessage[],
     params?: GenerationParams,
   ) => Promise<ChatResult>;
-  readonly buildWorkerMessages: (
+  /** Build R1 messages for a protocol. */
+  readonly buildR1Messages: (
     ctx: SharedContext,
     instructions?: string,
     roundInfo?: RoundInfo,
     workerIndex?: number,
-    technique?: InteractionTechnique,
   ) => ChatMessage[];
-  /** Debate protocol: full rebuild for cold join or first debate round. */
-  readonly buildDebateWorkerMessages?: (
-    ctx: SharedContext,
-    instructions?: string,
-    roundInfo?: RoundInfo,
-    workerIndex?: number,
-    technique?: InteractionTechnique,
-  ) => ChatMessage[];
-  /** Debate follow-up: append-only user message for session continuation in R2+. */
-  readonly buildDebateFollowUp?: (
+  /** Build R2+ messages with other workers' responses (full rebuild). */
+  readonly buildR2Messages?: (
     ctx: SharedContext,
     otherResponses: readonly WorkerResponse[],
-    roundInfo?: RoundInfo,
+    ownPrevious: WorkerResponse | undefined,
     instructions?: string,
-    technique?: InteractionTechnique,
+    roundInfo?: RoundInfo,
+    workerIndex?: number,
+  ) => ChatMessage[];
+  /** Build follow-up message for session continuation in R2+. */
+  readonly buildFollowUp?: (
+    ctx: SharedContext,
+    otherResponses: readonly WorkerResponse[],
+    instructions?: string,
+    roundInfo?: RoundInfo,
   ) => ChatMessage;
 }
 
@@ -158,7 +158,7 @@ export interface EngineDeps {
  */
 export interface EngineConfig {
   readonly maxRounds: number;
-  readonly protocol?: "diverge-synth" | "debate";
+  readonly protocol: Protocol;
   /** Generation params for worker LLM calls. */
   readonly workerGenParams?: GenerationParams;
 }
@@ -168,6 +168,7 @@ const CONVERGENCE_THRESHOLD = 0.15;
 
 const DEFAULT_CONFIG: EngineConfig = {
   maxRounds: 1,
+  protocol: "shared_convergence",
 };
 
 // -- Confidence Parsing --
@@ -248,25 +249,6 @@ function checkConvergence(
     if (changeRate >= threshold) return false;
   }
   return currentRound.responses.length > 0;
-}
-
-// -- Per-Round Technique Resolution --
-
-/**
- * Resolve technique for a given round index.
- * Single value: same for all rounds. Array: per-round, last repeats on exhaustion.
- * Empty array or undefined: no technique.
- */
-function resolveTechnique(
-  technique: InteractionTechnique | readonly InteractionTechnique[] | undefined,
-  roundIndex: number,
-): InteractionTechnique | undefined {
-  if (!technique) return undefined;
-  if (typeof technique === "string") return technique;
-  if (technique.length === 0) return undefined;
-  return roundIndex < technique.length
-    ? technique[roundIndex]
-    : technique[technique.length - 1];
 }
 
 // -- FallbackPool Implementation --
@@ -392,11 +374,9 @@ async function callWithFallback(
   pool: FallbackPool | undefined,
   /** Previous message history for session continuation in R2+. */
   previousHistory?: ChatMessage[],
-  /** Technique for this round (resolved by caller). */
-  technique?: InteractionTechnique,
 ): Promise<WorkerCallResult> {
   const roundInfo: RoundInfo = { current: roundNumber, max: config.maxRounds };
-  const isDebateR2 = config.protocol === "debate" && roundNumber > 1;
+  const isR2Plus = roundNumber > 1;
   const swaps: ModelSwap[] = [];
   let totalInput = 0;
   let totalOutput = 0;
@@ -406,19 +386,26 @@ async function callWithFallback(
   // Build messages — session continuation if history exists and model unchanged, full rebuild otherwise
   const buildMessages = (): ChatMessage[] => {
     // Session continuation: append follow-up to existing history (only if same model)
-    if (isDebateR2 && activeHistory && deps.buildDebateFollowUp) {
+    if (isR2Plus && activeHistory && deps.buildFollowUp) {
       const lastRound = ctx.rounds[ctx.rounds.length - 1];
       const otherResponses = lastRound
         ? lastRound.responses.filter((r) => r.workerIndex !== workerIndex)
         : [];
-      const followUp = deps.buildDebateFollowUp(ctx, otherResponses, roundInfo, input.workerInstructions, technique);
+      const followUp = deps.buildFollowUp(ctx, otherResponses, input.workerInstructions, roundInfo);
       return [...activeHistory, followUp];
     }
-    // Full rebuild: cold join, model swapped, or no history available
-    if (isDebateR2 && deps.buildDebateWorkerMessages) {
-      return deps.buildDebateWorkerMessages(ctx, input.workerInstructions, roundInfo, workerIndex, technique);
+    // Full rebuild: cold join, model swapped, or R2+ without session
+    if (isR2Plus && deps.buildR2Messages) {
+      const lastRound = ctx.rounds[ctx.rounds.length - 1];
+      const otherResponses = lastRound
+        ? lastRound.responses.filter((r) => r.workerIndex !== workerIndex)
+        : [];
+      const ownPrevious = lastRound
+        ? lastRound.responses.find((r) => r.workerIndex === workerIndex)
+        : undefined;
+      return deps.buildR2Messages(ctx, otherResponses, ownPrevious, input.workerInstructions, roundInfo, workerIndex);
     }
-    return deps.buildWorkerMessages(ctx, input.workerInstructions, roundInfo, workerIndex, technique);
+    return deps.buildR1Messages(ctx, input.workerInstructions, roundInfo, workerIndex);
   };
 
   // Try original model
@@ -535,8 +522,6 @@ export async function executeRound(
   pool?: FallbackPool,
   /** Per-worker message histories from previous rounds for session continuation. */
   workerHistories?: ReadonlyMap<number, ChatMessage[]>,
-  /** Technique for this round (resolved by caller). */
-  technique?: InteractionTechnique,
 ): Promise<{ round: Round; tokens: TokenUsage; modelSwaps: ModelSwap[]; histories: Map<number, ChatMessage[]> }> {
   const divergeParticipants = [...ctx.team.workers];
 
@@ -544,7 +529,7 @@ export async function executeRound(
   const results = await Promise.allSettled(
     divergeParticipants.map((participant, index) =>
       callWithFallback(participant, index, ctx, roundNumber, deps, config, input, pool,
-        workerHistories?.get(index), technique),
+        workerHistories?.get(index)),
     ),
   );
 
@@ -637,17 +622,13 @@ export async function deliberate(
   const minViable = minViableTeamSize(originalTeamSize);
   let workerHistories: Map<number, ChatMessage[]> | undefined;
 
-  // Determine if convergence detection should be active
-  // Disabled when per-round technique array is specified (host's sequence is intentional)
-  const isPerRoundTechniqueArray = Array.isArray(input.technique) && input.technique.length > 0;
-  const convergenceEnabled = !isPerRoundTechniqueArray;
+  // Convergence detection: active for shared_convergence, disabled for others
+  const convergenceEnabled = cfg.protocol === "shared_convergence";
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
-    const roundTechnique = resolveTechnique(input.technique, i - 1);
-
     let roundResult = await executeRound(
       ctx, ctx.rounds.length + 1, deps, cfg, input, fallbackDeps?.pool,
-      workerHistories, roundTechnique,
+      workerHistories,
     );
     // Update worker histories for session continuation in next round
     workerHistories = roundResult.histories;
@@ -768,6 +749,7 @@ export async function deliberate(
     if (input.onRound) {
       input.onRound({
         number: i,
+        protocol: cfg.protocol,
         responses: roundWithConfidence.responses.map((resp) => ({
           model: resp.model,
           content: resp.content,
@@ -796,6 +778,7 @@ export async function deliberate(
   // -- Assemble output --
   const roundsSummary = allRounds.map((r, idx) => ({
     number: idx + 1,
+    protocol: cfg.protocol,
     responses: r.responses.map((resp) => ({
       model: resp.model,
       content: resp.content,
@@ -835,6 +818,7 @@ export async function deliberate(
     totalTokens: accTokens,
     totalLLMCalls: allLLMCalls,
     modelsUsed: usedModelsList,
+    protocol: cfg.protocol,
     rounds: roundsSummary,
     ...(allModelSwaps.length > 0 ? { modelSwaps: allModelSwaps } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),

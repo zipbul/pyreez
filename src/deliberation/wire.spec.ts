@@ -35,6 +35,7 @@ const mockDeliberate = mock<
 
 mock.module("./team-composer", () => ({
   composeTeam: (...args: any[]) => (mockComposeTeam as Function)(...args),
+  scoreModel: (_model: any) => 1,
 }));
 
 mock.module("./engine", () => ({
@@ -65,6 +66,7 @@ const STUB_DELIBERATE_OUTPUT: DeliberateOutput = {
   totalTokens: { input: 100, output: 200 },
   totalLLMCalls: 2,
   modelsUsed: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
+  protocol: "shared_convergence",
 };
 
 function makeModelInfo(id: string): ModelInfo {
@@ -288,7 +290,7 @@ describe("createDeliberateFn", () => {
     const deps = makeWireDeps();
     const deliberateFn = createDeliberateFn(deps);
 
-    await deliberateFn({ task: "Build a feature", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"] });
+    await deliberateFn({ task: "Build a feature", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "shared_convergence" });
 
     expect(mockComposeTeam).toHaveBeenCalledTimes(1);
     const [composeOpts] = mockComposeTeam.mock.calls[0]!;
@@ -304,6 +306,7 @@ describe("createDeliberateFn", () => {
     const input: DeliberateInput = {
       task: "Review this code",
       models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
+      protocol: "shared_convergence",
       workerInstructions: "Focus on security",
       maxRounds: 2,
     };
@@ -315,7 +318,7 @@ describe("createDeliberateFn", () => {
     expect(team).toEqual(STUB_TEAM);
     expect(passedInput).toEqual(input);
     expect(typeof engineDeps.chat).toBe("function");
-    expect(typeof engineDeps.buildWorkerMessages).toBe("function");
+    expect(typeof engineDeps.buildR1Messages).toBe("function");
     expect(config).toMatchObject({ maxRounds: 2 });
   });
 
@@ -325,7 +328,7 @@ describe("createDeliberateFn", () => {
     const deps = makeWireDeps();
     const deliberateFn = createDeliberateFn(deps);
 
-    const result = await deliberateFn({ task: "Build something", models: ["openai/gpt-4.1"] });
+    const result = await deliberateFn({ task: "Build something", models: ["openai/gpt-4.1"], protocol: "shared_convergence" });
 
     expect(result.roundsExecuted).toBe(1);
     expect(result.totalTokens).toEqual({ input: 100, output: 200 });
@@ -347,6 +350,7 @@ describe("createDeliberateFn", () => {
     await deliberateFn({
       task: "Test task",
       models: ["openai/gpt-4.1"],
+      protocol: "shared_convergence",
       workerInstructions: "worker instructions",
     });
 
@@ -373,7 +377,7 @@ describe("createDeliberateFn", () => {
     const deps = makeWireDeps();
     const deliberateFn = createDeliberateFn(deps);
 
-    await deliberateFn({ task: "Debate this", models: ["openai/gpt-4.1"], count: 3 });
+    await deliberateFn({ task: "Debate this", models: ["openai/gpt-4.1"], protocol: "shared_convergence", count: 3 });
 
     const [composeOpts] = mockComposeTeam.mock.calls[0]!;
     expect(composeOpts.modelIds).toEqual(["openai/gpt-4.1", "openai/gpt-4.1", "openai/gpt-4.1"]);
@@ -387,7 +391,7 @@ describe("createDeliberateFn", () => {
     const deps = makeWireDeps();
     const deliberateFn = createDeliberateFn(deps);
 
-    await deliberateFn({ task: "Debate", models: ["openai/gpt-4.1"], count: 20 });
+    await deliberateFn({ task: "Debate", models: ["openai/gpt-4.1"], protocol: "shared_convergence", count: 20 });
 
     const [composeOpts] = mockComposeTeam.mock.calls[0]!;
     expect(composeOpts.modelIds.length).toBe(7);
@@ -404,6 +408,7 @@ describe("createDeliberateFn", () => {
     await deliberateFn({
       task: "Debate",
       models: ["openai/gpt-4.1", "deepseek/deepseek-r1", "anthropic/claude-sonnet-4.6"],
+      protocol: "shared_convergence",
       count: 2,
     });
 
@@ -416,7 +421,7 @@ describe("createDeliberateFn", () => {
     const deliberateFn = createDeliberateFn(deps);
 
     await expect(
-      deliberateFn({ task: "task", models: ["nonexistent/model"] }),
+      deliberateFn({ task: "task", models: ["nonexistent/model"], protocol: "shared_convergence" }),
     ).rejects.toThrow(/Unknown model.*Available/);
   });
 
@@ -431,6 +436,7 @@ describe("createDeliberateFn", () => {
     await deliberateFn({
       task: "task",
       models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
+      protocol: "shared_convergence",
     });
 
     const [composeOpts] = mockComposeTeam.mock.calls[0]!;
@@ -442,7 +448,7 @@ describe("createDeliberateFn", () => {
     const deliberateFn = createDeliberateFn(deps);
 
     await expect(
-      deliberateFn({ task: "task", models: [] }),
+      deliberateFn({ task: "task", models: [], protocol: "shared_convergence" }),
     ).rejects.toThrow("models is required");
   });
 });

@@ -18,7 +18,7 @@ export interface DeliberationRecord {
   readonly totalLLMCalls: number;
   readonly totalTokens?: TokenUsage;
   readonly workerInstructions?: string;
-  readonly protocol?: "diverge-synth" | "debate";
+  readonly protocol?: "shared_convergence" | "adversarial_debate" | "host_interrogation" | "sequential_refinement" | "evaluation_scoring" | "red_team";
   /** Full round-by-round log (worker responses). */
   readonly rounds?: readonly Round[];
   /** Lightweight round summaries (number only). */

@@ -196,9 +196,6 @@ async function main(): Promise<void> {
         worker_instructions: workerInstructions,
         max_rounds: flags["max-rounds"] !== undefined ? Number(flags["max-rounds"]) : undefined,
         protocol: flags["protocol"],
-        technique: flags["technique"]?.includes(",")
-          ? flags["technique"].split(",").map((s) => s.trim())
-          : flags["technique"],
         onRound: (round) => {
           const models = round.responses.map((r) => r.model).join(", ");
           const failed = round.failedWorkers?.length ?? 0;

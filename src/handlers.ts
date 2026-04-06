@@ -85,8 +85,12 @@ export async function handleDeliberate(
     worker_instructions?: string;
     max_rounds?: number;
     protocol?: string;
-    technique?: string | string[];
     onRound?: DeliberateInput["onRound"];
+    // Protocol-specific fields
+    questions?: string[];
+    criteria?: string;
+    subject?: string;
+    aggregation?: string;
   },
 ): Promise<HandlerResult> {
   return logRun(config, "deliberate", async () => {
@@ -101,7 +105,10 @@ export async function handleDeliberate(
     }
 
     try {
-      const userProtocol = args.protocol === "debate" ? "debate" as const : args.protocol === "diverge-synth" ? "diverge-synth" as const : undefined;
+      const VALID_PROTOCOLS = new Set(["shared_convergence", "adversarial_debate", "host_interrogation", "sequential_refinement", "evaluation_scoring", "red_team"]);
+      const protocol = (args.protocol && VALID_PROTOCOLS.has(args.protocol)
+        ? args.protocol
+        : "shared_convergence") as DeliberateInput["protocol"];
 
       const input: DeliberateInput = {
         task: args.task,
@@ -109,8 +116,11 @@ export async function handleDeliberate(
         count: args.count,
         workerInstructions: args.worker_instructions,
         maxRounds: args.max_rounds,
-        protocol: userProtocol,
-        ...(args.technique ? { technique: args.technique as DeliberateInput["technique"] } : {}),
+        protocol,
+        ...(args.questions ? { questions: args.questions } : {}),
+        ...(args.criteria ? { criteria: args.criteria } : {}),
+        ...(args.subject ? { subject: args.subject } : {}),
+        ...(args.aggregation ? { aggregation: args.aggregation as DeliberateInput["aggregation"] } : {}),
         ...(args.onRound ? { onRound: args.onRound } : {}),
       };
 

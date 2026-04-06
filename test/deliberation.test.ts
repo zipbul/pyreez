@@ -86,7 +86,8 @@ describe("Deliberation E2E", () => {
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
     const input: DeliberateInput = {
       task: "Write a Hello World function",
-      models: FIXTURE_MODEL_IDS,
+      models: FIXTURE_MODEL_IDS, protocol: "shared_convergence" as const,
+      maxRounds: 1,
     };
 
     // Act
@@ -112,7 +113,7 @@ describe("Deliberation E2E", () => {
     // Act
     const result = await fn({
       task: "Implement error handler",
-      models: FIXTURE_MODEL_IDS,
+      models: FIXTURE_MODEL_IDS, protocol: "shared_convergence" as const,
       maxRounds: 3,
     });
 
@@ -135,7 +136,7 @@ describe("Deliberation E2E", () => {
     // Act
     const result = await fn({
       task: "Hard problem",
-      models: FIXTURE_MODEL_IDS,
+      models: FIXTURE_MODEL_IDS, protocol: "shared_convergence" as const,
       maxRounds: 3,
     });
 
@@ -160,7 +161,7 @@ describe("Deliberation E2E", () => {
     // Act
     await fn({
       task: "Instruction test",
-      models: FIXTURE_MODEL_IDS,
+      models: FIXTURE_MODEL_IDS, protocol: "shared_convergence" as const,
       workerInstructions: "Use TypeScript strictly",
     });
 
@@ -190,7 +191,7 @@ describe("Deliberation E2E", () => {
     // Act
     const result = await fn({
       task: "Partial failure test",
-      models: FIXTURE_MODEL_IDS,
+      models: FIXTURE_MODEL_IDS, protocol: "shared_convergence" as const,
     });
 
     // Assert — deliberation should still complete with partial worker responses
@@ -207,7 +208,7 @@ describe("Deliberation E2E", () => {
 
     // Act & Assert
     expect(
-      fn({ task: "", models: FIXTURE_MODEL_IDS }),
+      fn({ task: "", models: FIXTURE_MODEL_IDS, protocol: "shared_convergence" }),
     ).rejects.toThrow("Task description must be a non-empty string");
   });
 
@@ -225,7 +226,8 @@ describe("Deliberation E2E", () => {
     // Act
     const result = await fn({
       task: "Output field test",
-      models: FIXTURE_MODEL_IDS,
+      models: FIXTURE_MODEL_IDS, protocol: "shared_convergence" as const,
+      maxRounds: 1,
     });
 
     // Assert — every field in DeliberateOutput
@@ -256,8 +258,8 @@ describe("Deliberation E2E", () => {
     const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
 
     // Act
-    const result1 = await fn({ task: "Call 1", models: FIXTURE_MODEL_IDS });
-    const result2 = await fn({ task: "Call 2", models: FIXTURE_MODEL_IDS });
+    const result1 = await fn({ task: "Call 1", models: FIXTURE_MODEL_IDS, protocol: "shared_convergence", maxRounds: 1 });
+    const result2 = await fn({ task: "Call 2", models: FIXTURE_MODEL_IDS, protocol: "shared_convergence", maxRounds: 1 });
 
     // Assert — different tasks, different contexts
     // Round counts are independent
@@ -280,7 +282,7 @@ describe("Deliberation E2E", () => {
     // Act
     const result = await fn({
       task: "Token accumulation test",
-      models: FIXTURE_MODEL_IDS,
+      models: FIXTURE_MODEL_IDS, protocol: "shared_convergence" as const,
       maxRounds: 3,
     });
 

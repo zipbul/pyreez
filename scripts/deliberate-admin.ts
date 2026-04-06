@@ -77,11 +77,11 @@ async function main() {
   console.log(`\nDeliberation with ${MODELS.length} models: ${MODELS.join(", ")}\n`);
   console.log("Task:", TASK.slice(0, 100) + "...\n");
 
-  const protocol = process.argv.includes("--debate") ? "debate" as const : undefined;
+  const protocol = process.argv.includes("--debate") ? "adversarial_debate" as const : "shared_convergence" as const;
   const roundsArg = process.argv.find(a => a.startsWith("--rounds="));
-  const maxRounds = roundsArg ? parseInt(roundsArg.split("=")[1]!, 10) : (protocol === "debate" ? 3 : 1);
+  const maxRounds = roundsArg ? parseInt(roundsArg.split("=")[1]!, 10) : (protocol === "adversarial_debate" ? 3 : 1);
 
-  console.log(`Protocol: ${protocol ?? "diverge-synth"}, Max rounds: ${maxRounds}\n`);
+  console.log(`Protocol: ${protocol}, Max rounds: ${maxRounds}\n`);
 
   const start = Date.now();
   const result = await deliberateFn({

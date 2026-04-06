@@ -1,20 +1,24 @@
 /**
- * Unit tests for prompts.ts — deliberation prompt builders.
+ * Unit tests for prompts.ts — deliberation prompt builders (6 protocols).
  */
 
 import { describe, it, expect } from "bun:test";
 import {
-  buildWorkerMessages,
-  buildDebateWorkerMessages,
-  buildDebateFollowUp,
+  buildSharedConvergenceR1,
+  buildSharedConvergenceR2,
+  buildSharedConvergenceFollowUp,
+  buildAdversarialDebateR1,
+  buildAdversarialDebateR2,
+  buildAdversarialDebateFollowUp,
+  buildHostInterrogationMessages,
+  buildSequentialRefinementMessages,
+  buildEvaluationScoringMessages,
+  buildRedTeamGeneratorMessages,
+  buildRedTeamAttackerMessages,
   buildAcceptanceMessages,
   extractDebateDigest,
-  TECHNIQUE_INSTRUCTIONS,
-  ANTI_CONFORMITY,
-  ANTI_CONFORMITY_ACCEPT,
-  CONFIDENCE_AND_UNCERTAINTY,
+  getR1Builder,
 } from "./prompts";
-import type { InteractionTechnique } from "./types";
 import type {
   SharedContext,
   Round,
@@ -36,14 +40,12 @@ function makeTeam(): TeamComposition {
 function makeCtx(
   rounds: readonly Round[] = [],
   taskNature?: "artifact" | "critique",
-  domain?: string,
 ): SharedContext {
   return {
     task: "Write a sorting function",
     team: makeTeam(),
     rounds,
     ...(taskNature ? { taskNature } : {}),
-    ...(domain ? { domain } : {}),
   };
 }
 
@@ -62,276 +64,680 @@ function makeRound(number: number, options?: { responses?: WorkerResponse[] }): 
 }
 
 // ================================================================
-// buildWorkerMessages — all workers get identical prompts
+// 1. Shared Convergence
 // ================================================================
 
-describe("buildWorkerMessages", () => {
-  it("should return system + user with depth instructions", () => {
-    const messages = buildWorkerMessages(makeCtx());
-    expect(messages).toHaveLength(2);
-    expect(messages[0]!.role).toBe("system");
-    expect(messages[0]!.content).toContain("Think deeply");
-    expect(messages[0]!.content).toContain("fundamental problem");
-    expect(messages[1]!.role).toBe("user");
-    expect(messages[1]!.content).toContain("Write a sorting function");
+describe("buildSharedConvergenceR1", () => {
+  it("should return system + user messages", () => {
+    const msgs = buildSharedConvergenceR1(makeCtx());
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]!.role).toBe("system");
+    expect(msgs[1]!.role).toBe("user");
   });
 
-  it("should NOT contain roles, output-structure, or rules", () => {
-    const sys = buildWorkerMessages(makeCtx())[0]!.content;
-    expect(sys).not.toContain("advocate");
-    expect(sys).not.toContain("critic");
-    expect(sys).not.toContain("wildcard");
-    expect(sys).not.toContain("<output-structure>");
-    expect(sys).not.toContain("<rules>");
-    expect(sys).not.toContain("200 characters");
-    expect(sys).not.toContain("600 words");
-  });
-
-  it("should include depth techniques: self-questioning, verification, evidence grounding", () => {
-    const sys = buildWorkerMessages(makeCtx())[0]!.content;
+  it("should include depth instructions in system", () => {
+    const sys = buildSharedConvergenceR1(makeCtx())[0]!.content!;
     expect(sys).toContain("strongest possible argument against");
     expect(sys).toContain("verify your key claims");
     expect(sys).toContain("Ground factual claims");
-    expect(sys).toContain("speculative ideas, state the reasoning");
   });
 
-  it("should NOT include domain hints (removed — models interpret evidence naturally)", () => {
-    const messages = buildWorkerMessages(makeCtx([], undefined, "CODING"));
-    expect(messages[0]!.content).not.toContain("<domain>");
+  it("should include role tag in system", () => {
+    const sys = buildSharedConvergenceR1(makeCtx())[0]!.content!;
+    expect(sys).toContain("<role>");
+    expect(sys).toContain("Think deeply");
   });
 
-  it("should include multi-perspective instruction", () => {
-    const sys = buildWorkerMessages(makeCtx([], "critique"))[0]!.content;
-    expect(sys).toContain("identify the different perspectives");
+  it("should use critique depth by default", () => {
+    const sys = buildSharedConvergenceR1(makeCtx())[0]!.content!;
+    expect(sys).toContain("it can be analyzed");
+    expect(sys).not.toContain("it can be approached");
   });
 
-  it("should produce identical prompts for different workerIndex values", () => {
-    const ctx = makeCtx();
-    const m0 = buildWorkerMessages(ctx, undefined, undefined, 0);
-    const m1 = buildWorkerMessages(ctx, undefined, undefined, 1);
-    const m2 = buildWorkerMessages(ctx, undefined, undefined, 2);
-    expect(m0).toEqual(m1);
-    expect(m1).toEqual(m2);
+  it("should use artifact depth for artifact taskNature", () => {
+    const sys = buildSharedConvergenceR1(makeCtx([], "artifact"))[0]!.content!;
+    expect(sys).toContain("it can be approached");
+    expect(sys).not.toContain("it can be analyzed");
   });
 
-  it("should include host instructions in user message", () => {
-    const user = buildWorkerMessages(makeCtx(), "Use TypeScript strict mode")[1]!.content;
-    expect(user).toContain("<host-instructions>Use TypeScript strict mode</host-instructions>");
+  it("should include confidence instructions in user message", () => {
+    const user = buildSharedConvergenceR1(makeCtx())[1]!.content!;
+    expect(user).toContain("HIGH:");
+    expect(user).toContain("MEDIUM:");
+    expect(user).toContain("LOW:");
   });
 
-  it("should NOT include host instructions in system message", () => {
-    const sys = buildWorkerMessages(makeCtx(), "Use TypeScript strict mode")[0]!.content;
+  it("should NOT include confidence in system message", () => {
+    const sys = buildSharedConvergenceR1(makeCtx())[0]!.content!;
+    expect(sys).not.toContain("HIGH:");
+    expect(sys).not.toContain("confidence");
+  });
+
+  it("should place task at end of user message", () => {
+    const user = buildSharedConvergenceR1(makeCtx())[1]!.content!;
+    expect(user).toMatch(/<task>Write a sorting function<\/task>$/);
+  });
+
+  it("should include host-instructions in user message when provided", () => {
+    const user = buildSharedConvergenceR1(makeCtx(), "Use TypeScript")[1]!.content!;
+    expect(user).toContain("<host-instructions>Use TypeScript</host-instructions>");
+  });
+
+  it("should NOT include host-instructions in system message", () => {
+    const sys = buildSharedConvergenceR1(makeCtx(), "Use TypeScript")[0]!.content!;
     expect(sys).not.toContain("host-instructions");
   });
 
+  it("should omit host-instructions when undefined", () => {
+    const user = buildSharedConvergenceR1(makeCtx())[1]!.content!;
+    expect(user).not.toContain("host-instructions");
+  });
+
   it("should include diverge strategy on R1 of multi-round", () => {
-    const user = buildWorkerMessages(makeCtx(), undefined, { current: 1, max: 3 })[1]!.content!;
+    const user = buildSharedConvergenceR1(makeCtx(), undefined, { current: 1, max: 3 })[1]!.content!;
     expect(user).toContain("Explore broadly");
   });
 
   it("should NOT include diverge strategy on single-round", () => {
-    const user = buildWorkerMessages(makeCtx(), undefined, { current: 1, max: 1 })[1]!.content!;
+    const user = buildSharedConvergenceR1(makeCtx(), undefined, { current: 1, max: 1 })[1]!.content!;
     expect(user).not.toContain("Explore broadly");
   });
 
-  it("should include commit strategy on final round", () => {
-    const user = buildWorkerMessages(makeCtx(), undefined, { current: 3, max: 3 })[1]!.content!;
-    expect(user).toMatch(/final.*commit/i);
-  });
-
-  it("should place task at end of user message", () => {
-    const user = buildWorkerMessages(makeCtx(), undefined, { current: 1, max: 3 })[1]!.content!;
-    expect(user).toMatch(/## Task\nWrite a sorting function$/);
+  it("should NOT include anti-conformity (no other responses in R1)", () => {
+    const user = buildSharedConvergenceR1(makeCtx())[1]!.content!;
+    expect(user).not.toContain("<constraints>");
+    expect(user).not.toContain("conformity");
   });
 });
 
-// ================================================================
-// buildDebateWorkerMessages — with cold join auto-detection
-// ================================================================
+describe("buildSharedConvergenceR2", () => {
+  const otherResponses = [makeResponse("worker/b", "Use mergesort", 1)];
+  const ownPrevious = makeResponse("worker/a", "Use quicksort", 0);
 
-describe("buildDebateWorkerMessages", () => {
-  it("should present other workers in 3rd person", () => {
-    const round1 = makeRound(1, {
-      responses: [makeResponse("worker/a", "Answer A", 0), makeResponse("worker/b", "Answer B", 1)],
-    });
-    const ctx = makeCtx([round1]);
-    const user = buildDebateWorkerMessages(ctx, undefined, undefined, 0)[1]!.content!;
-
-    expect(user).toContain("One analyst argues");
-    expect(user).not.toContain('role="');
+  it("should return system + user messages", () => {
+    const msgs = buildSharedConvergenceR2(makeCtx(), otherResponses, ownPrevious);
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]!.role).toBe("system");
+    expect(msgs[1]!.role).toBe("user");
   });
 
-  it("should include own previous response when worker participated", () => {
-    const round1 = makeRound(1, {
-      responses: [makeResponse("worker/a", "My quicksort analysis", 0), makeResponse("worker/b", "My mergesort analysis", 1)],
-    });
-    const ctx = makeCtx([round1]);
-    const user = buildDebateWorkerMessages(ctx, undefined, undefined, 0)[1]!.content!;
-
-    expect(user).toContain("Your Previous Response");
-    expect(user).toContain("My quicksort analysis");
+  it("should include anti-conformity constraints", () => {
+    const user = buildSharedConvergenceR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toContain("<constraints>");
+    expect(user).toContain("discrepancies");
+    expect(user).toContain("Do not rely on conformity");
   });
 
-  it("should show full transcript as cold join when worker has no previous response", () => {
-    const round1 = makeRound(1, {
-      responses: [makeResponse("worker/a", "R1 Answer A", 0), makeResponse("worker/b", "R1 Answer B", 1)],
-    });
-    const round2 = makeRound(2, {
-      responses: [makeResponse("worker/a", "R2 Answer A", 0), makeResponse("worker/b", "R2 Answer B", 1)],
-    });
+  it("should use general anti-conformity, NOT adversarial", () => {
+    const user = buildSharedConvergenceR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).not.toContain("steelman");
+    expect(user).not.toContain("Do not agree to reach consensus");
+  });
+
+  it("should present other positions in 3rd person", () => {
+    const user = buildSharedConvergenceR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toContain("One analyst argues:");
+    expect(user).toContain("<other-positions>");
+  });
+
+  it("should include own previous response", () => {
+    const user = buildSharedConvergenceR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toContain("<your-previous>");
+    expect(user).toContain("Use quicksort");
+  });
+
+  it("should show full transcript as cold join when no ownPrevious", () => {
+    const round1 = makeRound(1);
+    const round2 = makeRound(2);
     const ctx = makeCtx([round1, round2]);
+    const user = buildSharedConvergenceR2(ctx, otherResponses, undefined)[1]!.content!;
 
-    // Worker index 5 never participated — cold join
-    const user = buildDebateWorkerMessages(ctx, undefined, undefined, 5)[1]!.content!;
-
-    expect(user).toContain("## Debate So Far");
+    expect(user).toContain("<debate-so-far>");
     expect(user).toContain("### Round 1");
     expect(user).toContain("### Round 2");
-    expect(user).not.toContain("Your Previous Response");
+    expect(user).not.toContain("<your-previous>");
   });
 
-  it("should include depth techniques in system prompt", () => {
-    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[0]!.content!;
-    expect(sys).toContain("Think deeply");
-    expect(sys).toContain("strongest possible argument against");
-    expect(sys).toContain("verify your key claims");
+  it("should NOT show debate-so-far when ownPrevious is provided", () => {
+    const ctx = makeCtx([makeRound(1)]);
+    const user = buildSharedConvergenceR2(ctx, otherResponses, ownPrevious)[1]!.content!;
+    expect(user).not.toContain("<debate-so-far>");
   });
 
-  it("should NOT include hardcoded rules — interaction style is host-controlled via worker_instructions", () => {
-    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[0]!.content!;
-    expect(sys).not.toContain("<rules>");
-    expect(sys).not.toContain("Respond to each analyst");
-    expect(sys).not.toContain("position changed");
+  it("should NOT show debate-so-far when no ownPrevious AND no rounds", () => {
+    const ctx = makeCtx([]);
+    const user = buildSharedConvergenceR2(ctx, otherResponses, undefined)[1]!.content!;
+    expect(user).not.toContain("<debate-so-far>");
   });
 
-  it("should include worker_instructions as host-instructions in user message", () => {
-    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), "Build on strongest elements")[1]!.content!;
-    expect(user).toContain("<host-instructions>Build on strongest elements</host-instructions>");
-  });
-
-  it("should NOT include host-instructions in system message", () => {
-    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]), "Build on strongest elements")[0]!.content!;
-    expect(sys).not.toContain("host-instructions");
-  });
-
-  it("should NOT include domain hints in debate", () => {
-    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)], undefined, "ARCHITECTURE"))[0]!.content!;
-    expect(sys).not.toContain("<domain>");
-  });
-
-  it("should include host instructions in user message", () => {
-    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), "Focus on performance")[1]!.content!;
-    expect(user).toContain("Focus on performance");
+  it("should include confidence instructions", () => {
+    const user = buildSharedConvergenceR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toContain("HIGH:");
   });
 
   it("should include final round commitment", () => {
-    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, { current: 3, max: 3 })[1]!.content!;
-    expect(user).toMatch(/final.*commit/i);
+    const user = buildSharedConvergenceR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 3, max: 3 },
+    )[1]!.content!;
+    expect(user).toMatch(/final round.*Commit/i);
   });
 
-  it("should place task at end of user message", () => {
-    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, undefined, 0)[1]!.content!;
-    expect(user).toMatch(/## Task\nWrite a sorting function$/);
+  it("should NOT include final round commitment on non-final round", () => {
+    const user = buildSharedConvergenceR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 2, max: 3 },
+    )[1]!.content!;
+    expect(user).not.toContain("final round");
   });
 
-  it("should handle 4+ workers", () => {
-    const round1 = makeRound(1, {
-      responses: [
-        makeResponse("worker/a", "A response", 0),
-        makeResponse("worker/b", "B response", 1),
-        makeResponse("worker/c", "C response", 2),
-        makeResponse("worker/d", "D response", 3),
-      ],
-    });
-    const ctx = makeCtx([round1]);
-    const user = buildDebateWorkerMessages(ctx, undefined, undefined, 0)[1]!.content!;
-
-    expect(user).toContain("Your Previous Response");
-    expect((user.match(/One analyst argues/g) ?? []).length).toBe(3);
-  });
-
-  it("should NOT contain output-structure", () => {
-    const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[0]!.content!;
-    expect(sys).not.toContain("<output-structure>");
-    expect(sys).not.toContain("<position>");
-  });
-
-  it("should escape XML in worker responses", () => {
-    const round1 = makeRound(1, {
-      responses: [makeResponse("worker/a", "Use <script> for injection", 0)],
-    });
-    const ctx = makeCtx([round1]);
-    // Worker index 1 sees worker 0's response
-    const user = buildDebateWorkerMessages(ctx, undefined, undefined, 1)[1]!.content!;
-    expect(user).not.toContain("<script>");
-    expect(user).toContain("&lt;script&gt;");
-  });
-});
-
-// ================================================================
-// buildAcceptanceMessages
-// ================================================================
-
-// ================================================================
-// buildDebateFollowUp — session continuation message
-// ================================================================
-
-describe("buildDebateFollowUp", () => {
-  it("should produce a single user message with other positions", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const others = [makeResponse("worker/b", "I think Redis is better", 1)];
-    const msg = buildDebateFollowUp(ctx, others);
-
-    expect(msg.role).toBe("user");
-    expect(msg.content).toContain("One analyst argues");
-    expect(msg.content).toContain("Redis");
-  });
-
-  it("should NOT include hardcoded engagement — interaction is host-controlled", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const msg = buildDebateFollowUp(ctx, [makeResponse("w/b", "position", 1)]);
-    expect(msg.content).not.toContain("Respond to each analyst");
-    expect(msg.content).not.toContain("position changed");
-  });
-
-  it("should include instructions when provided", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const msg = buildDebateFollowUp(ctx, [makeResponse("w/b", "position", 1)], undefined, "Build on strongest elements");
-    expect(msg.content).toContain("Build on strongest elements");
-  });
-
-  it("should include final round commitment", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const msg = buildDebateFollowUp(ctx, [], { current: 3, max: 3 });
-    expect(msg.content).toMatch(/final.*commit/i);
+  it("should NOT include final round on single round", () => {
+    const user = buildSharedConvergenceR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 1, max: 1 },
+    )[1]!.content!;
+    expect(user).not.toContain("final round");
   });
 
   it("should place task at end", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const msg = buildDebateFollowUp(ctx, []);
-    expect(msg.content!).toMatch(/## Task\nWrite a sorting function$/);
+    const user = buildSharedConvergenceR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toMatch(/<task>Write a sorting function<\/task>$/);
   });
 
-  it("should NOT include system prompt or depth instructions", () => {
-    const ctx = makeCtx([makeRound(1)], undefined, "CODING");
-    const msg = buildDebateFollowUp(ctx, []);
-    // Follow-up is just a user message — no system, no role, no domain tag
+  it("should escape XML in other responses", () => {
+    const responses = [makeResponse("w/b", "Use <script> injection", 1)];
+    const user = buildSharedConvergenceR2(makeCtx(), responses, ownPrevious)[1]!.content!;
+    expect(user).not.toContain("<script>");
+    expect(user).toContain("&lt;script&gt;");
+  });
+
+  it("should handle empty otherResponses", () => {
+    const user = buildSharedConvergenceR2(makeCtx(), [], ownPrevious)[1]!.content!;
+    expect(user).not.toContain("<other-positions>");
+  });
+
+  it("should handle 4+ other responses", () => {
+    const responses = [
+      makeResponse("w/a", "A resp", 0),
+      makeResponse("w/b", "B resp", 1),
+      makeResponse("w/c", "C resp", 2),
+      makeResponse("w/d", "D resp", 3),
+    ];
+    const user = buildSharedConvergenceR2(makeCtx(), responses, undefined)[1]!.content!;
+    expect((user.match(/One analyst argues/g) ?? []).length).toBe(4);
+  });
+
+  it("should use artifact system prompt for artifact taskNature", () => {
+    const sys = buildSharedConvergenceR2(
+      makeCtx([], "artifact"), otherResponses, ownPrevious,
+    )[0]!.content!;
+    expect(sys).toContain("it can be approached");
+  });
+});
+
+describe("buildSharedConvergenceFollowUp", () => {
+  it("should produce a single user message", () => {
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), []);
+    expect(msg.role).toBe("user");
+  });
+
+  it("should include anti-conformity constraints", () => {
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), []);
+    expect(msg.content).toContain("<constraints>");
+    expect(msg.content).toContain("Do not rely on conformity");
+  });
+
+  it("should include other positions in 3rd person", () => {
+    const others = [makeResponse("w/b", "Redis is better", 1)];
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), others);
+    expect(msg.content).toContain("One analyst argues");
+    expect(msg.content).toContain("Redis is better");
+  });
+
+  it("should include host-instructions when provided", () => {
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), [], "Focus on perf");
+    expect(msg.content).toContain("<host-instructions>Focus on perf</host-instructions>");
+  });
+
+  it("should include confidence instructions", () => {
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), []);
+    expect(msg.content).toContain("HIGH:");
+  });
+
+  it("should include final round commitment", () => {
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), [], undefined, { current: 3, max: 3 });
+    expect(msg.content).toMatch(/final round.*Commit/i);
+  });
+
+  it("should place task at end", () => {
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), []);
+    expect(msg.content).toMatch(/<task>Write a sorting function<\/task>$/);
+  });
+
+  it("should NOT include system prompt content", () => {
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), []);
     expect(msg.content).not.toContain("<role>");
-    expect(msg.content).not.toContain("<domain>");
     expect(msg.content).not.toContain("Think deeply");
   });
 
   it("should escape XML in other responses", () => {
-    const ctx = makeCtx([makeRound(1)]);
-    const others = [makeResponse("w/a", "Use <script> injection", 0)];
-    const msg = buildDebateFollowUp(ctx, others);
-    expect(msg.content).not.toContain("<script>");
-    expect(msg.content).toContain("&lt;script&gt;");
+    const others = [makeResponse("w/a", "Use <img> tag", 0)];
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), others);
+    expect(msg.content).not.toContain("<img>");
+    expect(msg.content).toContain("&lt;img&gt;");
   });
 });
 
 // ================================================================
-// buildAcceptanceMessages
+// 2. Adversarial Debate
+// ================================================================
+
+describe("buildAdversarialDebateR1", () => {
+  it("should delegate to buildSharedConvergenceR1", () => {
+    const ctx = makeCtx();
+    const r1 = buildAdversarialDebateR1(ctx, "inst", { current: 1, max: 3 });
+    const convergence = buildSharedConvergenceR1(ctx, "inst", { current: 1, max: 3 });
+    expect(r1).toEqual(convergence);
+  });
+});
+
+describe("buildAdversarialDebateR2", () => {
+  const otherResponses = [makeResponse("worker/b", "Use mergesort", 1)];
+  const ownPrevious = makeResponse("worker/a", "Use quicksort", 0);
+
+  it("should return system + user messages", () => {
+    const msgs = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious);
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]!.role).toBe("system");
+    expect(msgs[1]!.role).toBe("user");
+  });
+
+  it("should use adversarial system prompt (find weaknesses)", () => {
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    expect(sys).toContain("find weaknesses");
+  });
+
+  it("should use steelman-specific anti-conformity", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toContain("steelman");
+    expect(user).toContain("Do not agree to reach consensus");
+    expect(user).toContain("Do not soften criticism");
+  });
+
+  it("should NOT use general anti-conformity", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).not.toContain("Do not rely on conformity, consensus, or social pressure");
+  });
+
+  it("should use positions-to-challenge tag instead of other-positions", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toContain("<positions-to-challenge>");
+    expect(user).not.toContain("<other-positions>");
+  });
+
+  it("should present in 3rd person", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toContain("One analyst argues:");
+  });
+
+  it("should include own previous response", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toContain("<your-previous>");
+    expect(user).toContain("Use quicksort");
+  });
+
+  it("should show full transcript as cold join when no ownPrevious", () => {
+    const ctx = makeCtx([makeRound(1), makeRound(2)]);
+    const user = buildAdversarialDebateR2(ctx, otherResponses, undefined)[1]!.content!;
+    expect(user).toContain("<debate-so-far>");
+    expect(user).toContain("### Round 1");
+    expect(user).toContain("### Round 2");
+  });
+
+  it("should include confidence instructions", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toContain("HIGH:");
+  });
+
+  it("should place task at end", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toMatch(/<task>Write a sorting function<\/task>$/);
+  });
+
+  it("should NOT include final round commitment (adversarial ignores roundInfo)", () => {
+    // _roundInfo is unused in adversarial R2
+    const user = buildAdversarialDebateR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 3, max: 3 },
+    )[1]!.content!;
+    expect(user).not.toContain("final round");
+  });
+
+  it("should use artifact system prompt for artifact taskNature", () => {
+    const sys = buildAdversarialDebateR2(
+      makeCtx([], "artifact"), otherResponses, ownPrevious,
+    )[0]!.content!;
+    expect(sys).toContain("it can be approached");
+  });
+
+  it("should escape XML in other responses", () => {
+    const responses = [makeResponse("w/b", "<script>alert(1)</script>", 1)];
+    const user = buildAdversarialDebateR2(makeCtx(), responses, ownPrevious)[1]!.content!;
+    expect(user).not.toContain("<script>");
+    expect(user).toContain("&lt;script&gt;");
+  });
+
+  it("should handle empty otherResponses", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), [], ownPrevious)[1]!.content!;
+    expect(user).not.toContain("<positions-to-challenge>");
+  });
+});
+
+describe("buildAdversarialDebateFollowUp", () => {
+  it("should produce a single user message", () => {
+    const msg = buildAdversarialDebateFollowUp(makeCtx(), []);
+    expect(msg.role).toBe("user");
+  });
+
+  it("should use adversarial anti-conformity", () => {
+    const msg = buildAdversarialDebateFollowUp(makeCtx(), []);
+    expect(msg.content).toContain("steelman");
+    expect(msg.content).toContain("Do not soften criticism");
+  });
+
+  it("should use positions-to-challenge tag", () => {
+    const others = [makeResponse("w/b", "Redis", 1)];
+    const msg = buildAdversarialDebateFollowUp(makeCtx(), others);
+    expect(msg.content).toContain("<positions-to-challenge>");
+    expect(msg.content).not.toContain("<other-positions>");
+  });
+
+  it("should include host-instructions when provided", () => {
+    const msg = buildAdversarialDebateFollowUp(makeCtx(), [], "Focus on security");
+    expect(msg.content).toContain("<host-instructions>Focus on security</host-instructions>");
+  });
+
+  it("should include confidence instructions", () => {
+    const msg = buildAdversarialDebateFollowUp(makeCtx(), []);
+    expect(msg.content).toContain("HIGH:");
+  });
+
+  it("should place task at end", () => {
+    const msg = buildAdversarialDebateFollowUp(makeCtx(), []);
+    expect(msg.content).toMatch(/<task>Write a sorting function<\/task>$/);
+  });
+
+  it("should NOT include system prompt content", () => {
+    const msg = buildAdversarialDebateFollowUp(makeCtx(), []);
+    expect(msg.content).not.toContain("<role>");
+    expect(msg.content).not.toContain("find weaknesses");
+  });
+});
+
+// ================================================================
+// 3. Host Interrogation
+// ================================================================
+
+describe("buildHostInterrogationMessages", () => {
+  it("should return system + user messages", () => {
+    const msgs = buildHostInterrogationMessages("task", "question");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]!.role).toBe("system");
+    expect(msgs[1]!.role).toBe("user");
+  });
+
+  it("should include question in user message", () => {
+    const user = buildHostInterrogationMessages("task", "Why Redis?")[1]!.content!;
+    expect(user).toContain("<question>Why Redis?</question>");
+  });
+
+  it("should include task as context at end", () => {
+    const user = buildHostInterrogationMessages("Pick a DB", "Why?")[1]!.content!;
+    expect(user).toMatch(/<context>Pick a DB<\/context>$/);
+  });
+
+  it("should include constraints in system prompt", () => {
+    const sys = buildHostInterrogationMessages("task", "q")[0]!.content!;
+    expect(sys).toContain("<constraints>");
+    expect(sys).toContain("Answer only what is asked");
+    expect(sys).toContain("false premise");
+  });
+
+  it("should handle no previous exchanges", () => {
+    const user = buildHostInterrogationMessages("task", "q")[1]!.content!;
+    expect(user).not.toContain("<previous-exchange>");
+  });
+
+  it("should include previous exchanges when provided", () => {
+    const exchanges = [
+      { question: "Why Redis?", answer: "Because fast" },
+      { question: "Cost?", answer: "Free" },
+    ];
+    const user = buildHostInterrogationMessages("task", "Next Q?", exchanges)[1]!.content!;
+    expect(user).toContain("<previous-exchange>");
+    expect(user).toContain("<question>Why Redis?</question>");
+    expect(user).toContain("<your-answer>Because fast</your-answer>");
+    expect(user).toContain("<question>Cost?</question>");
+    expect(user).toContain("<your-answer>Free</your-answer>");
+  });
+
+  it("should place previous exchanges before current question", () => {
+    const exchanges = [{ question: "First?", answer: "Yes" }];
+    const user = buildHostInterrogationMessages("task", "Second?", exchanges)[1]!.content!;
+    const prevIdx = user.indexOf("<previous-exchange>");
+    const questionIdx = user.indexOf("<question>Second?</question>");
+    expect(prevIdx).toBeLessThan(questionIdx);
+  });
+
+  it("should handle empty previous exchanges array", () => {
+    const user = buildHostInterrogationMessages("task", "q", [])[1]!.content!;
+    expect(user).not.toContain("<previous-exchange>");
+  });
+});
+
+// ================================================================
+// 4. Sequential Refinement
+// ================================================================
+
+describe("buildSequentialRefinementMessages", () => {
+  it("should use R1-style prompt when no previous output (first worker)", () => {
+    const msgs = buildSequentialRefinementMessages(makeCtx(), undefined);
+    // Should delegate to buildSharedConvergenceR1
+    const r1 = buildSharedConvergenceR1(makeCtx());
+    expect(msgs).toEqual(r1);
+  });
+
+  it("should use R1-style with instructions when no previous output", () => {
+    const msgs = buildSequentialRefinementMessages(makeCtx(), undefined, "Be concise");
+    const r1 = buildSharedConvergenceR1(makeCtx(), "Be concise");
+    expect(msgs).toEqual(r1);
+  });
+
+  it("should return system + user when previous output provided", () => {
+    const msgs = buildSequentialRefinementMessages(makeCtx(), "Previous answer");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]!.role).toBe("system");
+    expect(msgs[1]!.role).toBe("user");
+  });
+
+  it("should include refinement-specific system prompt", () => {
+    const sys = buildSequentialRefinementMessages(makeCtx(), "Prev")[0]!.content!;
+    expect(sys).toContain("Improve the given work");
+    expect(sys).toContain("Preserve what works");
+    expect(sys).toContain("Do not rewrite from scratch");
+  });
+
+  it("should include previous output in user message", () => {
+    const user = buildSequentialRefinementMessages(makeCtx(), "Previous work here")[1]!.content!;
+    expect(user).toContain("<previous-version>");
+    expect(user).toContain("Previous work here");
+  });
+
+  it("should include host-instructions when provided", () => {
+    const user = buildSequentialRefinementMessages(makeCtx(), "Prev", "Focus on perf")[1]!.content!;
+    expect(user).toContain("<host-instructions>Focus on perf</host-instructions>");
+  });
+
+  it("should place task at end", () => {
+    const user = buildSequentialRefinementMessages(makeCtx(), "Prev")[1]!.content!;
+    expect(user).toMatch(/<task>Write a sorting function<\/task>$/);
+  });
+
+  it("should include constraints about incremental improvement", () => {
+    const sys = buildSequentialRefinementMessages(makeCtx(), "Prev")[0]!.content!;
+    expect(sys).toContain("state what was wrong");
+    expect(sys).toContain("leave it unchanged");
+  });
+});
+
+// ================================================================
+// 5. Evaluation Scoring
+// ================================================================
+
+describe("buildEvaluationScoringMessages", () => {
+  it("should return system + user messages", () => {
+    const msgs = buildEvaluationScoringMessages("task", "criteria", "subject");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]!.role).toBe("system");
+    expect(msgs[1]!.role).toBe("user");
+  });
+
+  it("should include evaluation-specific system prompt", () => {
+    const sys = buildEvaluationScoringMessages("t", "c", "s")[0]!.content!;
+    expect(sys).toContain("Evaluate independently");
+    expect(sys).toContain("Do not invent additional criteria");
+    expect(sys).toContain("Judge independently");
+  });
+
+  it("should include criteria in user message", () => {
+    const user = buildEvaluationScoringMessages("t", "Speed and reliability", "s")[1]!.content!;
+    expect(user).toContain("<evaluation-criteria>");
+    expect(user).toContain("Speed and reliability");
+  });
+
+  it("should include subject in user message", () => {
+    const user = buildEvaluationScoringMessages("t", "c", "My implementation")[1]!.content!;
+    expect(user).toContain("<subject>");
+    expect(user).toContain("My implementation");
+  });
+
+  it("should include host-instructions when provided", () => {
+    const user = buildEvaluationScoringMessages("t", "c", "s", "Be strict")[1]!.content!;
+    expect(user).toContain("<host-instructions>Be strict</host-instructions>");
+  });
+
+  it("should omit host-instructions when undefined", () => {
+    const user = buildEvaluationScoringMessages("t", "c", "s")[1]!.content!;
+    expect(user).not.toContain("host-instructions");
+  });
+
+  it("should place task at end", () => {
+    const user = buildEvaluationScoringMessages("Eval task", "c", "s")[1]!.content!;
+    expect(user).toMatch(/<task>Eval task<\/task>$/);
+  });
+
+  it("should include insufficient evidence handling", () => {
+    const sys = buildEvaluationScoringMessages("t", "c", "s")[0]!.content!;
+    expect(sys).toContain("insufficient evidence");
+  });
+});
+
+// ================================================================
+// 6. Red Team
+// ================================================================
+
+describe("buildRedTeamGeneratorMessages", () => {
+  it("should return system + user messages", () => {
+    const msgs = buildRedTeamGeneratorMessages("task");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]!.role).toBe("system");
+    expect(msgs[1]!.role).toBe("user");
+  });
+
+  it("should include generator-specific system prompt", () => {
+    const sys = buildRedTeamGeneratorMessages("t")[0]!.content!;
+    expect(sys).toContain("Produce the requested output");
+    expect(sys).toContain("edge cases");
+    expect(sys).toContain("adversarial inputs");
+  });
+
+  it("should place task at end", () => {
+    const user = buildRedTeamGeneratorMessages("Gen task")[1]!.content!;
+    expect(user).toMatch(/<task>Gen task<\/task>$/);
+  });
+
+  it("should include host-instructions when provided", () => {
+    const user = buildRedTeamGeneratorMessages("t", "Make it robust")[1]!.content!;
+    expect(user).toContain("<host-instructions>Make it robust</host-instructions>");
+  });
+
+  it("should omit host-instructions when undefined", () => {
+    const user = buildRedTeamGeneratorMessages("t")[1]!.content!;
+    expect(user).not.toContain("host-instructions");
+  });
+
+  it("should include previous attack results when provided", () => {
+    const user = buildRedTeamGeneratorMessages("t", undefined, "Found SQL injection")[1]!.content!;
+    expect(user).toContain("<attack-results>");
+    expect(user).toContain("Found SQL injection");
+  });
+
+  it("should omit attack results when undefined", () => {
+    const user = buildRedTeamGeneratorMessages("t")[1]!.content!;
+    expect(user).not.toContain("<attack-results>");
+  });
+
+  it("should place attack results before task", () => {
+    const user = buildRedTeamGeneratorMessages("t", undefined, "vuln found")[1]!.content!;
+    const attackIdx = user.indexOf("<attack-results>");
+    const taskIdx = user.indexOf("<task>");
+    expect(attackIdx).toBeLessThan(taskIdx);
+  });
+});
+
+describe("buildRedTeamAttackerMessages", () => {
+  it("should return system + user messages", () => {
+    const msgs = buildRedTeamAttackerMessages("task", ["output1"]);
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]!.role).toBe("system");
+    expect(msgs[1]!.role).toBe("user");
+  });
+
+  it("should include attacker-specific system prompt", () => {
+    const sys = buildRedTeamAttackerMessages("t", ["o"])[0]!.content!;
+    expect(sys).toContain("Find vulnerabilities");
+    expect(sys).toContain("exploitable weaknesses");
+    expect(sys).toContain("Rank findings by severity");
+  });
+
+  it("should include target outputs in user message", () => {
+    const user = buildRedTeamAttackerMessages("t", ["output A", "output B"])[1]!.content!;
+    expect(user).toContain("<target-output>");
+    expect(user).toContain("output A");
+    expect(user).toContain("output B");
+    expect((user.match(/<target-output>/g) ?? []).length).toBe(2);
+  });
+
+  it("should include host-instructions when provided", () => {
+    const user = buildRedTeamAttackerMessages("t", ["o"], "Focus on auth")[1]!.content!;
+    expect(user).toContain("<host-instructions>Focus on auth</host-instructions>");
+  });
+
+  it("should place task at end", () => {
+    const user = buildRedTeamAttackerMessages("Attack task", ["o"])[1]!.content!;
+    expect(user).toMatch(/<task>Attack task<\/task>$/);
+  });
+
+  it("should include constraint about not fabricating vulnerabilities", () => {
+    const sys = buildRedTeamAttackerMessages("t", ["o"])[0]!.content!;
+    expect(sys).toContain("Do not fabricate vulnerabilities");
+  });
+
+  it("should handle single target output", () => {
+    const user = buildRedTeamAttackerMessages("t", ["single"])[1]!.content!;
+    expect((user.match(/<target-output>/g) ?? []).length).toBe(1);
+    expect(user).toContain("single");
+  });
+});
+
+// ================================================================
+// Acceptance (unchanged)
 // ================================================================
 
 describe("buildAcceptanceMessages", () => {
@@ -359,12 +765,6 @@ describe("buildAcceptanceMessages", () => {
     const user = buildAcceptanceMessages("S", "P", "My task")[1]!.content!;
     expect(user).toMatch(/## Task\nMy task$/);
   });
-
-  it("should NOT be over-prompting", () => {
-    const sys = buildAcceptanceMessages("S", "P", "T")[0]!.content!;
-    expect(sys).not.toContain("Actively search");
-    expect(sys).not.toContain("ONLY if you genuinely");
-  });
 });
 
 // ================================================================
@@ -372,18 +772,17 @@ describe("buildAcceptanceMessages", () => {
 // ================================================================
 
 describe("extractDebateDigest", () => {
-  it("should extract position and evidence tags (backward compat)", () => {
-    const content = `<position>Quicksort is optimal</position>\n<evidence>O(n log n) average</evidence>\n<concerns>Worst case</concerns>`;
+  it("should extract position and evidence tags", () => {
+    const content = `<position>Quicksort is optimal</position>\n<evidence>O(n log n) average</evidence>`;
     const digest = extractDebateDigest(content);
     expect(digest).toContain("Position: Quicksort is optimal");
     expect(digest).toContain("Evidence: O(n log n) average");
-    expect(digest).not.toContain("concerns");
   });
 
   it("should extract alternatives tag", () => {
-    const content = `<position>Use Redis</position>\n<evidence>Fast</evidence>\n<alternatives>Use Memcached</alternatives>`;
+    const content = `<position>Redis</position>\n<evidence>Fast</evidence>\n<alternatives>Memcached</alternatives>`;
     const digest = extractDebateDigest(content);
-    expect(digest).toContain("Alternatives: Use Memcached");
+    expect(digest).toContain("Alternatives: Memcached");
   });
 
   it("should fall back to first 3 lines for short content", () => {
@@ -401,193 +800,157 @@ describe("extractDebateDigest", () => {
     expect(digest).toContain("Position: spaced");
     expect(digest).toContain("Evidence: indented");
   });
+
+  it("should fall back to first 3 lines when last line is code block", () => {
+    const content = "L1.\nL2.\nL3.\nL4.\n```code";
+    const digest = extractDebateDigest(content);
+    expect(digest).toBe("L1.\nL2.\nL3.");
+  });
+
+  it("should fall back to first 3 lines when last line is too short", () => {
+    const content = "L1.\nL2.\nL3.\nL4.\nOk.";
+    const digest = extractDebateDigest(content);
+    expect(digest).toBe("L1.\nL2.\nL3.");
+  });
 });
 
 // ================================================================
-// Cross-function
+// getR1Builder (Protocol Dispatcher)
 // ================================================================
 
-describe("cross-function", () => {
-  it("should always return 2 messages", () => {
-    for (const ctx of [makeCtx(), makeCtx([makeRound(1)])]) {
-      const msgs = buildWorkerMessages(ctx);
-      expect(msgs).toHaveLength(2);
-      expect(msgs[0]!.role).toBe("system");
-      expect(msgs[1]!.role).toBe("user");
+describe("getR1Builder", () => {
+  it("should return buildSharedConvergenceR1 for shared_convergence", () => {
+    const builder = getR1Builder("shared_convergence");
+    const ctx = makeCtx();
+    expect(builder(ctx)).toEqual(buildSharedConvergenceR1(ctx));
+  });
+
+  it("should return buildAdversarialDebateR1 for adversarial_debate", () => {
+    const builder = getR1Builder("adversarial_debate");
+    const ctx = makeCtx();
+    expect(builder(ctx)).toEqual(buildAdversarialDebateR1(ctx));
+  });
+
+  it("should return sequential_refinement R1 (no previous) for sequential_refinement", () => {
+    const builder = getR1Builder("sequential_refinement");
+    const ctx = makeCtx();
+    expect(builder(ctx, "inst")).toEqual(buildSequentialRefinementMessages(ctx, undefined, "inst"));
+  });
+
+  it("should return fallback for evaluation_scoring", () => {
+    const builder = getR1Builder("evaluation_scoring");
+    const ctx = makeCtx();
+    expect(builder(ctx)).toEqual(buildSharedConvergenceR1(ctx));
+  });
+
+  it("should return fallback for host_interrogation", () => {
+    const builder = getR1Builder("host_interrogation");
+    const ctx = makeCtx();
+    expect(builder(ctx)).toEqual(buildSharedConvergenceR1(ctx));
+  });
+
+  it("should return fallback for red_team", () => {
+    const builder = getR1Builder("red_team");
+    const ctx = makeCtx();
+    expect(builder(ctx)).toEqual(buildSharedConvergenceR1(ctx));
+  });
+});
+
+// ================================================================
+// Cross-protocol design principles
+// ================================================================
+
+describe("cross-protocol design principles", () => {
+  it("task always at end of user message (Lost-in-the-Middle)", () => {
+    // R1
+    expect(buildSharedConvergenceR1(makeCtx())[1]!.content).toMatch(/<task>.*<\/task>$/);
+    // R2
+    expect(buildSharedConvergenceR2(
+      makeCtx(), [makeResponse("w/b", "x", 1)], makeResponse("w/a", "y", 0),
+    )[1]!.content).toMatch(/<task>.*<\/task>$/);
+    // Interrogation
+    expect(buildHostInterrogationMessages("t", "q")[1]!.content).toMatch(/<context>.*<\/context>$/);
+    // Sequential
+    expect(buildSequentialRefinementMessages(makeCtx(), "prev")[1]!.content).toMatch(/<task>.*<\/task>$/);
+    // Evaluation
+    expect(buildEvaluationScoringMessages("t", "c", "s")[1]!.content).toMatch(/<task>.*<\/task>$/);
+    // Red team generator
+    expect(buildRedTeamGeneratorMessages("t")[1]!.content).toMatch(/<task>.*<\/task>$/);
+    // Red team attacker
+    expect(buildRedTeamAttackerMessages("t", ["o"])[1]!.content).toMatch(/<task>.*<\/task>$/);
+  });
+
+  it("3rd person for other positions (sycophancy reduction)", () => {
+    const others = [makeResponse("w/b", "Some position", 1)];
+    const scR2 = buildSharedConvergenceR2(makeCtx(), others, undefined)[1]!.content!;
+    const adR2 = buildAdversarialDebateR2(makeCtx(), others, undefined)[1]!.content!;
+    const scFollow = buildSharedConvergenceFollowUp(makeCtx(), others).content;
+    const adFollow = buildAdversarialDebateFollowUp(makeCtx(), others).content;
+
+    for (const content of [scR2, adR2, scFollow, adFollow]) {
+      expect(content).toContain("One analyst argues:");
+      expect(content).not.toContain("Worker ");
+      expect(content).not.toContain("Model ");
     }
+  });
+
+  it("XML tags for structure across all protocols", () => {
+    const r1 = buildSharedConvergenceR1(makeCtx())[0]!.content!;
+    expect(r1).toContain("<role>");
+
+    const r2 = buildSharedConvergenceR2(
+      makeCtx(), [makeResponse("w/b", "x", 1)], makeResponse("w/a", "y", 0),
+    )[1]!.content!;
+    expect(r2).toContain("<constraints>");
+    expect(r2).toContain("<other-positions>");
+    expect(r2).toContain("<your-previous>");
+    expect(r2).toContain("<task>");
+
+    const interr = buildHostInterrogationMessages("t", "q")[0]!.content!;
+    expect(interr).toContain("<role>");
+    expect(interr).toContain("<constraints>");
+  });
+
+  it("confidence instructions present in all deliberation builders", () => {
+    // R1
+    expect(buildSharedConvergenceR1(makeCtx())[1]!.content).toContain("HIGH:");
+    // R2
+    expect(buildSharedConvergenceR2(
+      makeCtx(), [], undefined,
+    )[1]!.content).toContain("HIGH:");
+    // FollowUp
+    expect(buildSharedConvergenceFollowUp(makeCtx(), []).content).toContain("HIGH:");
+    // Adversarial R2
+    expect(buildAdversarialDebateR2(
+      makeCtx(), [], undefined,
+    )[1]!.content).toContain("HIGH:");
+    // Adversarial FollowUp
+    expect(buildAdversarialDebateFollowUp(makeCtx(), []).content).toContain("HIGH:");
+  });
+
+  it("system = fixed (caching), user = variable", () => {
+    // Same system for different instructions
+    const sys1 = buildSharedConvergenceR1(makeCtx(), "inst1")[0]!.content!;
+    const sys2 = buildSharedConvergenceR1(makeCtx(), "inst2")[0]!.content!;
+    expect(sys1).toBe(sys2);
+
+    // Different user for different instructions
+    const user1 = buildSharedConvergenceR1(makeCtx(), "inst1")[1]!.content!;
+    const user2 = buildSharedConvergenceR1(makeCtx(), "inst2")[1]!.content!;
+    expect(user1).not.toBe(user2);
   });
 
   it("should be idempotent", () => {
     const ctx = makeCtx([makeRound(1)]);
-    expect(buildWorkerMessages(ctx, "inst")).toEqual(buildWorkerMessages(ctx, "inst"));
-  });
+    const others = [makeResponse("w/b", "x", 1)];
+    const own = makeResponse("w/a", "y", 0);
 
-  it("should handle empty responses", () => {
-    expect(buildWorkerMessages(makeCtx([{ number: 1, responses: [] }]))).toHaveLength(2);
-  });
-});
-
-// ================================================================
-// Artifact prompts
-// ================================================================
-
-describe("artifact prompts", () => {
-  it("should use artifact depth for artifact taskNature", () => {
-    const sys = buildWorkerMessages(makeCtx([], "artifact"))[0]!.content;
-    expect(sys).toContain("identify the different perspectives");
-    expect(sys).toContain("it can be approached");
-  });
-
-  it("should use critique depth for critique taskNature", () => {
-    const sys = buildWorkerMessages(makeCtx([], "critique"))[0]!.content;
-    expect(sys).toContain("identify the different perspectives");
-    expect(sys).toContain("it can be analyzed");
-  });
-});
-
-// ================================================================
-// Full response sharing in debate (not digest)
-// ================================================================
-
-describe("debate full response sharing", () => {
-  it("should share full response content in 3rd person format", () => {
-    const responses = [
-      { model: "a/m1", content: "Use A because it's fast and scalable. Cost is a concern.", workerIndex: 0 },
-      { model: "b/m2", content: "Use B because it's cheap and reliable. Slow under load.", workerIndex: 1 },
-    ];
-    const ctx: SharedContext = {
-      task: "Pick DB", team: { workers: [makeWorker("a/m1"), makeWorker("b/m2")] },
-      rounds: [{ number: 1, responses }],
-    };
-    const user = buildDebateWorkerMessages(ctx, undefined, { current: 2, max: 3 }, 0)[1]!.content!;
-
-    expect(user).toContain("One analyst argues");
-    // Full content, not just digest
-    expect(user).toContain("cheap and reliable");
-    expect(user).toContain("Slow under load");
-  });
-});
-
-// ================================================================
-// Interaction Technique Tests
-// ================================================================
-
-describe("technique instructions", () => {
-  const ALL_TECHNIQUES: InteractionTechnique[] = [
-    "challenge", "defend", "accept", "probe", "propose", "extend", "transform",
-  ];
-
-  describe("buildWorkerMessages", () => {
-    for (const t of ALL_TECHNIQUES) {
-      it(`should include ${t} instruction in user message`, () => {
-        const user = buildWorkerMessages(makeCtx(), undefined, undefined, undefined, t)[1]!.content!;
-        expect(user).toContain(TECHNIQUE_INSTRUCTIONS[t]);
-      });
-    }
-
-    it("should NOT include technique in system message", () => {
-      const sys = buildWorkerMessages(makeCtx(), undefined, undefined, undefined, "challenge")[0]!.content!;
-      expect(sys).not.toContain("Focus on identifying weaknesses");
-    });
-
-    it("should NOT include technique when undefined", () => {
-      const user = buildWorkerMessages(makeCtx())[1]!.content!;
-      expect(user).not.toContain("Focus on identifying");
-      expect(user).not.toContain("Focus on defending");
-      expect(user).not.toContain("Focus on offering");
-    });
-
-    it("should combine technique + workerInstructions", () => {
-      const user = buildWorkerMessages(makeCtx(), "Custom instructions", undefined, undefined, "probe")[1]!.content!;
-      expect(user).toContain("Custom instructions");
-      expect(user).toContain(TECHNIQUE_INSTRUCTIONS.probe);
-    });
-  });
-
-  describe("buildDebateWorkerMessages", () => {
-    for (const t of ALL_TECHNIQUES) {
-      it(`should include ${t} instruction in user message`, () => {
-        const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, undefined, 0, t)[1]!.content!;
-        expect(user).toContain(TECHNIQUE_INSTRUCTIONS[t]);
-      });
-    }
-
-    it("should NOT include technique in system message", () => {
-      const sys = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, undefined, 0, "propose")[0]!.content!;
-      expect(sys).not.toContain("Focus on offering");
-    });
-  });
-
-  describe("buildDebateFollowUp", () => {
-    for (const t of ALL_TECHNIQUES) {
-      it(`should include ${t} instruction`, () => {
-        const msg = buildDebateFollowUp(makeCtx([makeRound(1)]), [], undefined, undefined, t);
-        expect(msg.content).toContain(TECHNIQUE_INSTRUCTIONS[t]);
-      });
-    }
-  });
-
-  it("transform should include scope restriction", () => {
-    expect(TECHNIQUE_INSTRUCTIONS.transform).toContain("within the scope of the original question");
-  });
-});
-
-// ================================================================
-// Anti-Conformity Tests
-// ================================================================
-
-describe("anti-conformity", () => {
-  it("should include basic anti-conformity in debate when not accept", () => {
-    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, undefined, 0, "challenge")[1]!.content!;
-    expect(user).toContain(ANTI_CONFORMITY);
-    expect(user).not.toContain(ANTI_CONFORMITY_ACCEPT);
-  });
-
-  it("should include accept variant when technique=accept", () => {
-    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]), undefined, undefined, 0, "accept")[1]!.content!;
-    expect(user).toContain(ANTI_CONFORMITY_ACCEPT);
-    expect(user).not.toContain("You may not rely on the principle of conformity");
-  });
-
-  it("should include anti-conformity in follow-up (default)", () => {
-    const msg = buildDebateFollowUp(makeCtx([makeRound(1)]), []);
-    expect(msg.content).toContain(ANTI_CONFORMITY);
-  });
-
-  it("should include accept variant in follow-up when technique=accept", () => {
-    const msg = buildDebateFollowUp(makeCtx([makeRound(1)]), [], undefined, undefined, "accept");
-    expect(msg.content).toContain(ANTI_CONFORMITY_ACCEPT);
-  });
-
-  it("should NOT include anti-conformity in R1 (no other responses shared)", () => {
-    const user = buildWorkerMessages(makeCtx(), undefined, undefined, undefined, "challenge")[1]!.content!;
-    expect(user).not.toContain("conformity");
-    expect(user).not.toContain("discrepancies");
-  });
-});
-
-// ================================================================
-// Confidence & Uncertainty Tests
-// ================================================================
-
-describe("confidence and uncertainty", () => {
-  it("should include confidence instruction in buildWorkerMessages", () => {
-    const user = buildWorkerMessages(makeCtx())[1]!.content!;
-    expect(user).toContain(CONFIDENCE_AND_UNCERTAINTY);
-  });
-
-  it("should include confidence instruction in buildDebateWorkerMessages", () => {
-    const user = buildDebateWorkerMessages(makeCtx([makeRound(1)]))[1]!.content!;
-    expect(user).toContain(CONFIDENCE_AND_UNCERTAINTY);
-  });
-
-  it("should include confidence instruction in buildDebateFollowUp", () => {
-    const msg = buildDebateFollowUp(makeCtx([makeRound(1)]), []);
-    expect(msg.content).toContain(CONFIDENCE_AND_UNCERTAINTY);
-  });
-
-  it("should NOT include confidence in system message", () => {
-    const sys = buildWorkerMessages(makeCtx())[0]!.content!;
-    expect(sys).not.toContain("confidence");
+    expect(buildSharedConvergenceR1(ctx, "inst")).toEqual(buildSharedConvergenceR1(ctx, "inst"));
+    expect(buildSharedConvergenceR2(ctx, others, own, "inst")).toEqual(
+      buildSharedConvergenceR2(ctx, others, own, "inst"),
+    );
+    expect(buildAdversarialDebateR2(ctx, others, own)).toEqual(
+      buildAdversarialDebateR2(ctx, others, own),
+    );
   });
 });

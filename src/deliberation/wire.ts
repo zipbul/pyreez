@@ -12,7 +12,7 @@
 
 import type { ChatMessage, ChatCompletionResponse } from "../llm/types";
 import type { ModelInfo } from "../model/types";
-import type { DeliberateInput, DeliberateOutput, GenerationParams } from "./types";
+import type { DeliberateInput, DeliberateOutput, GenerationParams, Protocol } from "./types";
 import type { ChatResult, EngineDeps, EngineConfig, FallbackDeps } from "./engine";
 import { createFallbackPool } from "./engine";
 import type { DeliberationStore } from "./store-types";
@@ -20,9 +20,12 @@ import { composeTeam } from "./team-composer";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
 import {
-  buildWorkerMessages,
-  buildDebateWorkerMessages,
-  buildDebateFollowUp,
+  buildSharedConvergenceR1,
+  buildSharedConvergenceR2,
+  buildSharedConvergenceFollowUp,
+  buildAdversarialDebateR1,
+  buildAdversarialDebateR2,
+  buildAdversarialDebateFollowUp,
 } from "./prompts";
 
 // -- Public types --
@@ -95,16 +98,80 @@ export function createChatAdapter(
   };
 }
 
+// -- Protocol-specific EngineDeps builders --
+
+/**
+ * Create EngineDeps for a given protocol.
+ * Each protocol wires its own prompt builders.
+ */
+function createEngineDepsForProtocol(
+  protocol: Protocol,
+  chatFn: (model: string, messages: import("../llm/types").ChatMessage[], params?: GenerationParams) => Promise<ChatResult>,
+): EngineDeps {
+  switch (protocol) {
+    case "shared_convergence":
+      return {
+        chat: chatFn,
+        buildR1Messages: (ctx, instructions, roundInfo) =>
+          buildSharedConvergenceR1(ctx, instructions, roundInfo),
+        buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo) =>
+          buildSharedConvergenceR2(ctx, otherResponses, ownPrevious, instructions, roundInfo),
+        buildFollowUp: (ctx, otherResponses, instructions, roundInfo) =>
+          buildSharedConvergenceFollowUp(ctx, otherResponses, instructions, roundInfo),
+      };
+    case "adversarial_debate":
+      return {
+        chat: chatFn,
+        buildR1Messages: (ctx, instructions, roundInfo) =>
+          buildAdversarialDebateR1(ctx, instructions, roundInfo),
+        buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo) =>
+          buildAdversarialDebateR2(ctx, otherResponses, ownPrevious, instructions, roundInfo),
+        buildFollowUp: (ctx, otherResponses, instructions, roundInfo) =>
+          buildAdversarialDebateFollowUp(ctx, otherResponses, instructions, roundInfo),
+      };
+    case "host_interrogation":
+    case "sequential_refinement":
+    case "evaluation_scoring":
+    case "red_team":
+      // These protocols use specialized execution paths — R1 builder as default
+      return {
+        chat: chatFn,
+        buildR1Messages: (ctx, instructions, roundInfo) =>
+          buildSharedConvergenceR1(ctx, instructions, roundInfo),
+      };
+    default:
+      return {
+        chat: chatFn,
+        buildR1Messages: (ctx, instructions, roundInfo) =>
+          buildSharedConvergenceR1(ctx, instructions, roundInfo),
+      };
+  }
+}
+
+// -- Default rounds per protocol --
+
+function defaultMaxRounds(protocol: Protocol): number {
+  switch (protocol) {
+    case "shared_convergence": return 3;
+    case "adversarial_debate": return 3;
+    case "host_interrogation": return 1;
+    case "sequential_refinement": return 1;
+    case "evaluation_scoring": return 1;
+    case "red_team": return 2;
+    default: return 1;
+  }
+}
+
 // -- Deliberate Factory --
 
 /** Hard cap on worker count to prevent cost explosion. */
 const MAX_WORKERS = 7;
 
 /**
- * Create a fully-wired `deliberateFn` that can be passed to PyreezMcpServer.
+ * Create a fully-wired `deliberateFn` that can be passed to handlers.
  *
- * Host provides models (required) and optional count.
- * Wires: composeTeam + prompt builders + engine.deliberate + chat adapter.
+ * Host provides models (required) and protocol (required).
+ * Wires: composeTeam + protocol-specific prompt builders + engine.deliberate + chat adapter.
  */
 export function createDeliberateFn(
   deps: WireDeps,
@@ -149,28 +216,22 @@ export function createDeliberateFn(
       },
     );
 
-    // 5. Assemble engine deps (no role ordering — diversity comes from heterogeneous models)
-    const engineDeps: EngineDeps = {
-      chat: deps.chat,
-      buildWorkerMessages,
-      buildDebateWorkerMessages,
-      buildDebateFollowUp,
-    };
+    // 5. Assemble engine deps (protocol-specific prompt builders)
+    const protocol = input.protocol;
+    const engineDeps = createEngineDepsForProtocol(protocol, deps.chat);
 
-    // 7. Build engine config
-    const isDebate = input.protocol === "debate";
-    const effectiveMaxRounds = input.maxRounds ?? (isDebate ? 3 : 1);
+    // 6. Build engine config
+    const effectiveMaxRounds = input.maxRounds ?? defaultMaxRounds(protocol);
     const workerGenParams: GenerationParams = {
       temperature: 1.0,
     };
     const config: EngineConfig = {
       maxRounds: effectiveMaxRounds,
-      protocol: input.protocol,
+      protocol,
       workerGenParams,
     };
 
-    // 8. Build fallback pool + replenishment
-    //    Fallback: benchmark score descending, cost as tiebreaker
+    // 7. Build fallback pool + replenishment
     const { scoreModel } = await import("./team-composer");
     const allAvailable = deps.registry.getAvailable();
     const sortedByScore = [...allAvailable].sort(
@@ -182,7 +243,6 @@ export function createDeliberateFn(
     const fallbackDeps: FallbackDeps = {
       pool,
       replenish(aliveProviders, emptySlots, respondedModels) {
-        // Select replacement models from alive providers, score descending
         const candidates = sortedByScore.filter(
           (m: ModelInfo) => aliveProviders.has(m.provider) && !teamModelIds.has(m.id)
             && !cooldown.isOnCooldown(m.id) && !respondedModels.has(m.id),
@@ -196,10 +256,10 @@ export function createDeliberateFn(
       },
     };
 
-    // 9. Run deliberation
+    // 8. Run deliberation
     let result = await deliberate(team, input, engineDeps, config, fallbackDeps);
 
-    // 10. Auto-save to store (best-effort)
+    // 9. Auto-save to store (best-effort)
     if (deps.store) {
       try {
         await deps.store.save({
@@ -211,7 +271,7 @@ export function createDeliberateFn(
           totalLLMCalls: result.totalLLMCalls,
           totalTokens: result.totalTokens,
           workerInstructions: input.workerInstructions,
-          protocol: input.protocol,
+          protocol,
           ...(result.rounds ? { roundsSummary: result.rounds.map(r => ({ number: r.number })) } : {}),
           ...(result.modelSwaps?.length ? { modelSwaps: result.modelSwaps } : {}),
         });

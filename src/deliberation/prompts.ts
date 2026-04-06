@@ -1,28 +1,23 @@
 /**
- * Deliberation prompt builders — multi-model deliberation.
+ * Deliberation prompt builders — heterogeneous multi-model deliberation.
  *
  * Design principles (2025-2026 research-backed):
- *   - No role differentiation: diversity comes from heterogeneous models, not assigned roles
- *     (Jekyll & Hyde, ICLR 2025: fixed personas hurt; model diversity is the real value)
+ *   - Responsibility separation: pyreez owns harness (anti-conformity, steelmanning,
+ *     formatting, sharing). Host owns semantic payload (task, workerInstructions).
+ *   - No role differentiation: diversity from heterogeneous models, not assigned roles
  *   - Over-prompting hurts on latest models (Anthropic/OpenAI/Google consensus)
- *   - "Think thoroughly" > prescriptive steps (Anthropic official)
- *   - Depth techniques as general instructions:
- *     · Fundamental problem + multi-perspective identification (Five Whys + Multi-Perspective Probing, arXiv 2025)
- *     · Steelman solitaire with root-cause tracing (Steelman + Five Whys + Knowledge Boundary Probing, NeurIPS 2025)
- *     · Self-verification before finishing (Anthropic official; OPENDEV self-critique)
- *     · Ground facts in evidence, speculative ideas need reasoning chain (CoVe principle)
- *   - Structured output forced on reasoning hurts 10-15% (cross-verified)
- *   - Input XML tags help parsing (3-provider consensus); output XML removed
+ *   - XML tags for cross-model compatibility (3-provider consensus)
  *   - Task at end of user message (Lost-in-the-Middle, MIT 2025)
  *   - 3rd person for other positions reduces sycophancy (cross-verified)
- *   - Diverge R1 / Converge final round (CreativeDC, NeurIPS 2025)
- *   - Cold join merged into debate builder (auto-detected via participation history)
+ *   - CONSTRAINTS drive 42.7% of quality (sinc-LLM)
+ *   - Steelmanning + 3rd person for anti-sycophancy (63.8% improvement)
+ *   - System = fixed (caching), User = variable
  *
  * @module Deliberation Prompts
  */
 
 import type { ChatMessage } from "../llm/types";
-import type { InteractionTechnique, SharedContext, WorkerResponse } from "./types";
+import type { InterrogationExchange, Protocol, SharedContext, WorkerResponse } from "./types";
 
 // -- Types --
 
@@ -49,31 +44,20 @@ After your implementation, construct the strongest possible argument against you
 
 Before finishing, verify your key claims.`;
 
-// -- Interaction Technique Instructions --
+// -- Harness Fragments (pyreez-owned, host cannot override) --
 
-export const TECHNIQUE_INSTRUCTIONS: Record<InteractionTechnique, string> = {
-  challenge: "Focus on identifying weaknesses, counter-examples, and errors in these positions. Present specific evidence for each flaw. Include other relevant observations as they arise.",
-  defend: "Focus on defending your position against challenges raised. Strengthen your argument with additional evidence and address objections. Note where challenges have merit.",
-  accept: "Focus on identifying valid points from other positions. Modify your position where others present stronger evidence. State what changed and why.",
-  probe: "Focus on identifying unexamined assumptions, blind spots, and open questions. What hasn't been considered? What conditions haven't been tested? Note strong points as well.",
-  propose: "Focus on offering a new approach that differs from existing positions. Ground your proposal in specific evidence or reasoning. Acknowledge what existing approaches get right.",
-  extend: "Focus on building on the strongest ideas presented. Add depth, detail, or specificity. What concrete next steps or implications follow? Note limitations or risks as they arise.",
-  transform: "Focus on reshaping or combining existing ideas into a different framing, within the scope of the original question. What happens if we change the constraints, combine approaches, or shift the perspective? Note what works well in existing approaches.",
-};
+const ANTI_CONFORMITY = `Assess discrepancies between your analysis and others' using specific evidence.
+Change your position only when evidence against your analysis is clear.
+State what specific evidence or logic led you to agree or disagree.
+Do not rely on conformity, consensus, or social pressure.`;
 
-// -- Anti-Conformity --
+const ANTI_CONFORMITY_ADVERSARIAL = `For every position you encounter, identify its weakest point with specific evidence.
+Before criticizing, restate the opposing argument in its strongest form (steelman).
+Concede points where the opposing evidence is genuinely stronger than yours.
+State what you concede and why, with the specific evidence that convinced you.
+Do not agree to reach consensus. Do not soften criticism.`;
 
-export const ANTI_CONFORMITY = `Carefully assess the discrepancies between your analysis and others'.
-Change your position only if there is clear evidence that your own analysis is incorrect,
-not to reach consensus. You may not rely on the principle of conformity.`;
-
-export const ANTI_CONFORMITY_ACCEPT = `Seek valid points to incorporate. Confirm agreement with independent reasoning —
-state what specific evidence or logic led you to the same conclusion.
-Change your position where evidence is stronger. Maintain where yours holds.`;
-
-// -- Confidence & Uncertainty --
-
-export const CONFIDENCE_AND_UNCERTAINTY = `For each major claim, indicate your confidence:
+const CONFIDENCE_AND_UNCERTAINTY = `For each major claim, indicate your confidence:
 - HIGH: strong evidence or direct expertise
 - MEDIUM: reasonable inference but limited evidence
 - LOW: speculative or uncertain
@@ -86,15 +70,10 @@ function buildSystemPrompt(
   nature: "artifact" | "critique",
 ): string {
   const parts: string[] = [];
-
   parts.push(`<role>${roleDescription}</role>`);
-
   parts.push(nature === "artifact" ? DEPTH_INSTRUCTIONS_ARTIFACT : DEPTH_INSTRUCTIONS_CRITIQUE);
-
   return parts.join("\n\n");
 }
-
-// -- Debate Digest Helpers --
 
 /**
  * Escape XML special characters to prevent structure injection.
@@ -107,18 +86,26 @@ function escapeXmlContent(text: string): string {
 }
 
 /**
+ * Format other workers' responses in 3rd person (sycophancy reduction).
+ */
+function formatOtherPositions(responses: readonly WorkerResponse[], workerIndex?: number): string {
+  return responses
+    .filter((r) => workerIndex == null || r.workerIndex !== workerIndex)
+    .map((r) => `One analyst argues:\n${escapeXmlContent(r.content)}`)
+    .join("\n\n");
+}
+
+// -- Digest Helper (retained for external use) --
+
+/**
  * Extract debate-relevant digest from a worker response as plain text.
  *
  * Extraction priority:
- * 1. <position> and <evidence> tags (backward compat with old structured output)
+ * 1. <position> and <evidence> tags (backward compat)
  * 2. Last non-empty line as summary heuristic
  * 3. First 3 lines as fallback
- *
- * Note: debate builders now share full responses. This function is retained
- * for potential external use (e.g., acceptance round digest, host-side extraction).
  */
 export function extractDebateDigest(content: string): string {
-  // Try structured tags first (backward compat)
   const position = content.match(/<position>([\s\S]*?)<\/position>/);
   const evidence = content.match(/<evidence>([\s\S]*?)<\/evidence>/);
   const alternatives = content.match(/<alternatives>([\s\S]*?)<\/alternatives>/);
@@ -131,7 +118,6 @@ export function extractDebateDigest(content: string): string {
     return parts.join("\n");
   }
 
-  // Try last non-empty line as summary
   const lines = content.trim().split("\n").filter((l) => l.trim().length > 0);
   if (lines.length > 3) {
     const lastLine = lines[lines.length - 1]!.trim();
@@ -143,207 +129,397 @@ export function extractDebateDigest(content: string): string {
   return content.split("\n").slice(0, 3).join("\n").trim();
 }
 
-// -- Exported Builders --
+// ============================================================
+// Protocol-specific Builders
+// ============================================================
+
+// -- 1. Shared Convergence --
+
+const SHARED_CONVERGENCE_SYSTEM_CRITIQUE = buildSystemPrompt(
+  "Think deeply, present concisely. No preamble — lead with your position.",
+  "critique",
+);
+
+const SHARED_CONVERGENCE_SYSTEM_ARTIFACT = buildSystemPrompt(
+  "Think deeply, present concisely. No preamble — lead with your position.",
+  "artifact",
+);
 
 /**
- * Build messages for a worker LLM (R1 or diverge-synth).
- *
- * All workers receive identical prompts — diversity comes from heterogeneous models.
- * No role differentiation. Depth via general instructions (fundamental problem, multi-perspective, steelman solitaire).
+ * Build R1 messages for shared_convergence (independent analysis).
  */
-export function buildWorkerMessages(
+export function buildSharedConvergenceR1(
   ctx: SharedContext,
   instructions?: string,
   roundInfo?: RoundInfo,
-  _workerIndex?: number,
-  technique?: InteractionTechnique,
 ): ChatMessage[] {
-  const nature = ctx.taskNature ?? "critique";
-  const systemContent = buildSystemPrompt(
-    "Think deeply, present concisely. No preamble — lead with your position.",
-    nature,
-  );
+  const system = (ctx.taskNature ?? "critique") === "artifact"
+    ? SHARED_CONVERGENCE_SYSTEM_ARTIFACT
+    : SHARED_CONVERGENCE_SYSTEM_CRITIQUE;
 
   const userParts: string[] = [];
-
-  // Host instructions (in user message for prompt caching — system prefix stays constant)
-  if (instructions) {
-    userParts.push(`<host-instructions>${instructions}</host-instructions>`);
-  }
-
-  // Technique emphasis (user message)
-  if (technique) {
-    userParts.push(TECHNIQUE_INSTRUCTIONS[technique]);
-  }
-
-  // Confidence & uncertainty (always)
+  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
   userParts.push(CONFIDENCE_AND_UNCERTAINTY);
-
-  // Round strategy (CreativeDC: diverge R1, converge final)
   if (roundInfo && roundInfo.current === 1 && roundInfo.max > 1) {
     userParts.push("Explore broadly. Do not converge prematurely.");
   }
-  if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
-    userParts.push("This is the final round. Commit to your strongest position.");
-  }
-
-  // Task at end (Lost-in-the-Middle)
-  userParts.push(`## Task\n${ctx.task}`);
+  userParts.push(`<task>${ctx.task}</task>`);
 
   return [
-    { role: "system", content: systemContent },
+    { role: "system", content: system },
     { role: "user", content: userParts.join("\n\n") },
   ];
 }
 
 /**
- * Build messages for a worker in debate mode (round 2+).
- *
- * Cold join auto-detected: if workerIndex has no response in last round,
- * full transcript is shown instead of last-round-only digests.
- * Other positions presented in 3rd person (sycophancy reduction).
+ * Build R2+ messages for shared_convergence (with other positions, sparse).
  */
-export function buildDebateWorkerMessages(
-  ctx: SharedContext,
-  instructions?: string,
-  roundInfo?: RoundInfo,
-  workerIndex?: number,
-  technique?: InteractionTechnique,
-): ChatMessage[] {
-  const nature = ctx.taskNature ?? "critique";
-
-  // System: depth instructions only (constant for prompt caching)
-  const systemContent = buildSystemPrompt(
-    "Think deeply, present concisely. No preamble — lead with your position. You are seeing other analysts' positions.",
-    nature,
-  );
-
-  // User: instructions + technique + anti-conformity + context + task at end
-  const userParts: string[] = [];
-
-  // Host instructions (in user message for prompt caching)
-  if (instructions) {
-    userParts.push(`<host-instructions>${instructions}</host-instructions>`);
-  }
-
-  // Technique emphasis (user message)
-  if (technique) {
-    userParts.push(TECHNIQUE_INSTRUCTIONS[technique]);
-  }
-
-  // Anti-conformity (when other responses are shared)
-  const hasOtherResponses = ctx.rounds.length > 0;
-  if (hasOtherResponses) {
-    userParts.push(technique === "accept" ? ANTI_CONFORMITY_ACCEPT : ANTI_CONFORMITY);
-  }
-
-  // Confidence & uncertainty (always)
-  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
-
-  const lastRound = ctx.rounds[ctx.rounds.length - 1];
-
-  // Auto-detect cold join: check if this worker has a response in the last round
-  const ownPrevious = (workerIndex != null && lastRound)
-    ? lastRound.responses.find((r) => r.workerIndex === workerIndex)
-    : undefined;
-
-  if (ownPrevious) {
-    // Normal debate: show other workers' full responses + own previous
-    if (lastRound && lastRound.responses.length > 0) {
-      const others = lastRound.responses
-        .filter((r) => workerIndex == null || r.workerIndex !== workerIndex)
-        .map((r) => `One analyst argues:\n${escapeXmlContent(r.content)}`)
-        .join("\n\n");
-      if (others) {
-        userParts.push(`## Other Positions\n${others}`);
-      }
-    }
-    userParts.push(`## Your Previous Response\n${ownPrevious.content}`);
-  } else {
-    // Cold join: show full transcript (worker has no prior participation)
-    if (ctx.rounds.length > 0) {
-      const transcriptParts: string[] = [];
-      for (const round of ctx.rounds) {
-        const header = `### Round ${round.number}`;
-        const workers = round.responses
-          .map((r) => `One analyst argues:\n${escapeXmlContent(r.content)}`)
-          .join("\n\n");
-        transcriptParts.push(`${header}\n${workers}`);
-      }
-      userParts.push(`## Debate So Far\n${transcriptParts.join("\n\n")}`);
-    }
-  }
-
-  // Round strategy
-  if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
-    userParts.push("This is the final round. Commit to your strongest position.");
-  }
-
-  // Task at end
-  userParts.push(`## Task\n${ctx.task}`);
-
-  return [
-    { role: "system", content: systemContent },
-    { role: "user", content: userParts.join("\n\n") },
-  ];
-}
-
-// -- Debate Follow-Up (session continuation) --
-
-/**
- * Build a single user message to append to an existing worker session for R2+.
- *
- * Instead of rebuilding the entire prompt, this appends other workers' positions
- * to the existing conversation. The worker already has its full R1 reasoning
- * in the session — we only add what's new.
- *
- * Falls back to buildDebateWorkerMessages for cold join (no session history).
- */
-export function buildDebateFollowUp(
+export function buildSharedConvergenceR2(
   ctx: SharedContext,
   otherResponses: readonly WorkerResponse[],
-  roundInfo?: RoundInfo,
+  ownPrevious: WorkerResponse | undefined,
   instructions?: string,
-  technique?: InteractionTechnique,
+  roundInfo?: RoundInfo,
+): ChatMessage[] {
+  const system = (ctx.taskNature ?? "critique") === "artifact"
+    ? SHARED_CONVERGENCE_SYSTEM_ARTIFACT
+    : SHARED_CONVERGENCE_SYSTEM_CRITIQUE;
+
+  const userParts: string[] = [];
+  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+
+  // Anti-conformity harness
+  userParts.push(`<constraints>\n${ANTI_CONFORMITY}\n</constraints>`);
+  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
+
+  // Other positions (3rd person, sparse-selected)
+  if (otherResponses.length > 0) {
+    const others = formatOtherPositions(otherResponses);
+    if (others) userParts.push(`<other-positions>\n${others}\n</other-positions>`);
+  }
+
+  // Own previous
+  if (ownPrevious) {
+    userParts.push(`<your-previous>${ownPrevious.content}</your-previous>`);
+  } else if (ctx.rounds.length > 0) {
+    // Cold join: full transcript
+    const transcript = ctx.rounds.map((r) => {
+      const workers = r.responses
+        .map((resp) => `One analyst argues:\n${escapeXmlContent(resp.content)}`)
+        .join("\n\n");
+      return `### Round ${r.number}\n${workers}`;
+    }).join("\n\n");
+    userParts.push(`<debate-so-far>\n${transcript}\n</debate-so-far>`);
+  }
+
+  if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
+    userParts.push("This is the final round. Commit to your strongest position.");
+  }
+
+  userParts.push(`<task>${ctx.task}</task>`);
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: userParts.join("\n\n") },
+  ];
+}
+
+/**
+ * Build follow-up message for session continuation in shared_convergence.
+ */
+export function buildSharedConvergenceFollowUp(
+  ctx: SharedContext,
+  otherResponses: readonly WorkerResponse[],
+  instructions?: string,
+  roundInfo?: RoundInfo,
 ): ChatMessage {
   const parts: string[] = [];
-
-  // Host instructions
-  if (instructions) {
-    parts.push(`<host-instructions>${instructions}</host-instructions>`);
-  }
-
-  // Technique emphasis
-  if (technique) {
-    parts.push(TECHNIQUE_INSTRUCTIONS[technique]);
-  }
-
-  // Anti-conformity (follow-up always has other responses context)
-  parts.push(technique === "accept" ? ANTI_CONFORMITY_ACCEPT : ANTI_CONFORMITY);
-
-  // Confidence & uncertainty
+  if (instructions) parts.push(`<host-instructions>${instructions}</host-instructions>`);
+  parts.push(`<constraints>\n${ANTI_CONFORMITY}\n</constraints>`);
   parts.push(CONFIDENCE_AND_UNCERTAINTY);
 
-  // Other workers' full responses in 3rd person (sycophancy reduction + full context)
   if (otherResponses.length > 0) {
-    const others = otherResponses
-      .map((r) => `One analyst argues:\n${escapeXmlContent(r.content)}`)
-      .join("\n\n");
-    parts.push(`## Other Positions\n${others}`);
+    const others = formatOtherPositions(otherResponses);
+    if (others) parts.push(`<other-positions>\n${others}\n</other-positions>`);
   }
 
-  // Round strategy
   if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
     parts.push("This is the final round. Commit to your strongest position.");
   }
 
-  // Task reminder at end (Lost-in-the-Middle)
-  parts.push(`## Task\n${ctx.task}`);
-
+  parts.push(`<task>${ctx.task}</task>`);
   return { role: "user", content: parts.join("\n\n") };
 }
 
-// -- Acceptance Round --
+// -- 2. Adversarial Debate --
+
+const ADVERSARIAL_SYSTEM_CRITIQUE = buildSystemPrompt(
+  "Think deeply, present concisely. No preamble — lead with your position. You are seeing other analysts' positions. Your goal is to find weaknesses.",
+  "critique",
+);
+
+const ADVERSARIAL_SYSTEM_ARTIFACT = buildSystemPrompt(
+  "Think deeply, present concisely. No preamble — lead with your position. You are seeing other analysts' positions. Your goal is to find weaknesses.",
+  "artifact",
+);
+
+/**
+ * Build R1 for adversarial_debate (identical to shared_convergence R1).
+ */
+export function buildAdversarialDebateR1(
+  ctx: SharedContext,
+  instructions?: string,
+  roundInfo?: RoundInfo,
+): ChatMessage[] {
+  return buildSharedConvergenceR1(ctx, instructions, roundInfo);
+}
+
+/**
+ * Build R2+ for adversarial_debate (steelman + challenge).
+ */
+export function buildAdversarialDebateR2(
+  ctx: SharedContext,
+  otherResponses: readonly WorkerResponse[],
+  ownPrevious: WorkerResponse | undefined,
+  instructions?: string,
+  _roundInfo?: RoundInfo,
+): ChatMessage[] {
+  const system = (ctx.taskNature ?? "critique") === "artifact"
+    ? ADVERSARIAL_SYSTEM_ARTIFACT
+    : ADVERSARIAL_SYSTEM_CRITIQUE;
+
+  const userParts: string[] = [];
+  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+
+  // Adversarial anti-conformity harness (steelman + challenge)
+  userParts.push(`<constraints>\n${ANTI_CONFORMITY_ADVERSARIAL}\n</constraints>`);
+  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
+
+  if (otherResponses.length > 0) {
+    const others = formatOtherPositions(otherResponses);
+    if (others) userParts.push(`<positions-to-challenge>\n${others}\n</positions-to-challenge>`);
+  }
+
+  if (ownPrevious) {
+    userParts.push(`<your-previous>${ownPrevious.content}</your-previous>`);
+  } else if (ctx.rounds.length > 0) {
+    const transcript = ctx.rounds.map((r) => {
+      const workers = r.responses
+        .map((resp) => `One analyst argues:\n${escapeXmlContent(resp.content)}`)
+        .join("\n\n");
+      return `### Round ${r.number}\n${workers}`;
+    }).join("\n\n");
+    userParts.push(`<debate-so-far>\n${transcript}\n</debate-so-far>`);
+  }
+
+  userParts.push(`<task>${ctx.task}</task>`);
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: userParts.join("\n\n") },
+  ];
+}
+
+/**
+ * Build follow-up for adversarial_debate session continuation.
+ */
+export function buildAdversarialDebateFollowUp(
+  ctx: SharedContext,
+  otherResponses: readonly WorkerResponse[],
+  instructions?: string,
+  _roundInfo?: RoundInfo, // eslint-disable-line @typescript-eslint/no-unused-vars
+): ChatMessage {
+  const parts: string[] = [];
+  if (instructions) parts.push(`<host-instructions>${instructions}</host-instructions>`);
+  parts.push(`<constraints>\n${ANTI_CONFORMITY_ADVERSARIAL}\n</constraints>`);
+  parts.push(CONFIDENCE_AND_UNCERTAINTY);
+
+  if (otherResponses.length > 0) {
+    const others = formatOtherPositions(otherResponses);
+    if (others) parts.push(`<positions-to-challenge>\n${others}\n</positions-to-challenge>`);
+  }
+
+  parts.push(`<task>${ctx.task}</task>`);
+  return { role: "user", content: parts.join("\n\n") };
+}
+
+// -- 3. Host Interrogation --
+
+const HOST_INTERROGATION_SYSTEM = `<role>Answer the question directly and thoroughly. No preamble.</role>
+
+Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
+If the question challenges your previous answer, address the challenge with evidence — do not simply reaffirm.
+
+<constraints>
+Answer only what is asked. Do not volunteer unrelated analysis.
+If you do not know, say so. Do not speculate without labeling it.
+If the question contains a false premise, identify it before answering.
+If genuinely uncertain, say so.
+</constraints>`;
+
+/**
+ * Build messages for host_interrogation.
+ */
+export function buildHostInterrogationMessages(
+  task: string,
+  question: string,
+  previousExchanges?: readonly InterrogationExchange[],
+): ChatMessage[] {
+  const userParts: string[] = [];
+
+  if (previousExchanges && previousExchanges.length > 0) {
+    const exchanges = previousExchanges.map((ex) =>
+      `<question>${ex.question}</question>\n<your-answer>${ex.answer}</your-answer>`
+    ).join("\n\n");
+    userParts.push(`<previous-exchange>\n${exchanges}\n</previous-exchange>`);
+  }
+
+  userParts.push(`<question>${question}</question>`);
+  userParts.push(`<context>${task}</context>`);
+
+  return [
+    { role: "system", content: HOST_INTERROGATION_SYSTEM },
+    { role: "user", content: userParts.join("\n\n") },
+  ];
+}
+
+// -- 4. Sequential Refinement --
+
+const SEQUENTIAL_REFINEMENT_SYSTEM = `<role>Improve the given work. Preserve what works, fix what doesn't, add what's missing. No preamble — lead with the improved version.</role>
+
+Before modifying, identify what the previous version does well and must be preserved.
+Then identify gaps, errors, or weaknesses. Improve only those areas.
+Ground changes in specific reasoning.
+
+<constraints>
+Do not rewrite from scratch. Build on the previous version.
+For every change, state what was wrong and why your version is better.
+If the previous version is already correct in an area, leave it unchanged.
+If genuinely uncertain about a change, flag it.
+</constraints>`;
+
+/**
+ * Build messages for sequential_refinement.
+ * First worker gets R1-style prompt; subsequent workers get previous output.
+ */
+export function buildSequentialRefinementMessages(
+  ctx: SharedContext,
+  previousWorkerOutput: string | undefined,
+  instructions?: string,
+): ChatMessage[] {
+  // First worker in chain — no previous output, use R1-style
+  if (!previousWorkerOutput) {
+    return buildSharedConvergenceR1(ctx, instructions);
+  }
+
+  const userParts: string[] = [];
+  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  userParts.push(`<previous-version>\n${previousWorkerOutput}\n</previous-version>`);
+  userParts.push(`<task>${ctx.task}</task>`);
+
+  return [
+    { role: "system", content: SEQUENTIAL_REFINEMENT_SYSTEM },
+    { role: "user", content: userParts.join("\n\n") },
+  ];
+}
+
+// -- 5. Evaluation Scoring --
+
+const EVALUATION_SCORING_SYSTEM = `<role>Evaluate independently. No preamble — lead with your verdict.</role>
+
+<constraints>
+Evaluate against the provided criteria only. Do not invent additional criteria.
+For each criterion, provide a score and specific evidence from the subject.
+If evidence is insufficient to judge a criterion, score it as "insufficient evidence."
+Do not consider how other evaluators might score. Judge independently.
+If genuinely uncertain, say so.
+</constraints>`;
+
+/**
+ * Build messages for evaluation_scoring.
+ */
+export function buildEvaluationScoringMessages(
+  task: string,
+  criteria: string,
+  subject: string,
+  instructions?: string,
+): ChatMessage[] {
+  const userParts: string[] = [];
+  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  userParts.push(`<evaluation-criteria>\n${criteria}\n</evaluation-criteria>`);
+  userParts.push(`<subject>\n${subject}\n</subject>`);
+  userParts.push(`<task>${task}</task>`);
+
+  return [
+    { role: "system", content: EVALUATION_SCORING_SYSTEM },
+    { role: "user", content: userParts.join("\n\n") },
+  ];
+}
+
+// -- 6. Red Team --
+
+const RED_TEAM_GENERATOR_SYSTEM = `<role>Produce the requested output. No preamble.</role>
+
+Think through edge cases, failure modes, and adversarial inputs.
+Anticipate how your output could be attacked or misused.
+
+<constraints>
+Produce the strongest version you can.
+If you are aware of a weakness, address it proactively.
+</constraints>`;
+
+const RED_TEAM_ATTACKER_SYSTEM = `<role>Find vulnerabilities in the given output. No preamble — lead with the most critical finding.</role>
+
+<constraints>
+Find concrete, exploitable weaknesses — not theoretical concerns.
+For each vulnerability, provide a specific attack scenario or proof.
+Rank findings by severity (critical > high > medium > low).
+If the output is robust against your analysis, say so.
+Do not fabricate vulnerabilities.
+</constraints>`;
+
+/**
+ * Build messages for red_team generator.
+ */
+export function buildRedTeamGeneratorMessages(
+  task: string,
+  instructions?: string,
+  previousAttackResults?: string,
+): ChatMessage[] {
+  const userParts: string[] = [];
+  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  if (previousAttackResults) {
+    userParts.push(`<attack-results>\n${previousAttackResults}\n</attack-results>`);
+  }
+  userParts.push(`<task>${task}</task>`);
+
+  return [
+    { role: "system", content: RED_TEAM_GENERATOR_SYSTEM },
+    { role: "user", content: userParts.join("\n\n") },
+  ];
+}
+
+/**
+ * Build messages for red_team attacker.
+ */
+export function buildRedTeamAttackerMessages(
+  task: string,
+  targetOutputs: readonly string[],
+  instructions?: string,
+): ChatMessage[] {
+  const userParts: string[] = [];
+  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  const targets = targetOutputs.map((o) => `<target-output>\n${o}\n</target-output>`).join("\n\n");
+  userParts.push(targets);
+  userParts.push(`<task>${task}</task>`);
+
+  return [
+    { role: "system", content: RED_TEAM_ATTACKER_SYSTEM },
+    { role: "user", content: userParts.join("\n\n") },
+  ];
+}
+
+// -- Acceptance Round (unchanged) --
 
 /**
  * Build messages for an acceptance round worker.
@@ -371,4 +547,31 @@ Respond with ONLY the following XML structure:
     { role: "system", content: system },
     { role: "user", content: user },
   ];
+}
+
+// -- Protocol Dispatcher --
+
+/**
+ * Get the appropriate R1 builder for a protocol.
+ */
+export function getR1Builder(protocol: Protocol): (
+  ctx: SharedContext,
+  instructions?: string,
+  roundInfo?: RoundInfo,
+) => ChatMessage[] {
+  switch (protocol) {
+    case "shared_convergence":
+      return buildSharedConvergenceR1;
+    case "adversarial_debate":
+      return buildAdversarialDebateR1;
+    case "sequential_refinement":
+      return (ctx, instructions) => buildSequentialRefinementMessages(ctx, undefined, instructions);
+    case "evaluation_scoring":
+    case "host_interrogation":
+    case "red_team":
+      // These protocols have specialized input — handled directly by engine
+      return buildSharedConvergenceR1;
+    default:
+      return buildSharedConvergenceR1;
+  }
 }

@@ -1,23 +1,35 @@
 /**
- * Deliberation types — multi-model deliberation.
+ * Deliberation types — heterogeneous multi-model deliberation.
  *
  * Workers respond independently (diverge), Host synthesizes.
- * Host provides all role prompts; pyreez provides infrastructure only.
+ * pyreez owns the deliberation harness (anti-conformity, steelmanning,
+ * formatting, sharing structure). Host owns the semantic payload
+ * (task, workerInstructions, protocol selection).
  *
  * @module Deliberation Types
  */
 
 import type { TaskNature } from "./task-nature";
 
-// -- Interaction Technique --
+// -- Protocol --
 
 /**
- * Interaction techniques for multi-round deliberation.
- * Emphasis, not constraint — workers may include other observations.
+ * Deliberation protocols — each defines a distinct communication structure.
+ *
+ * - shared_convergence: workers share positions (sparse), converge toward consensus
+ * - adversarial_debate: workers share positions + must challenge, no convergence
+ * - host_interrogation: workers isolated, host asks 1:1 questions
+ * - sequential_refinement: workers chain A→B→C, each improves previous
+ * - evaluation_scoring: workers isolated, independent scoring + aggregation
+ * - red_team: asymmetric roles (generator vs attacker)
  */
-export type InteractionTechnique =
-  | "challenge" | "defend" | "accept" | "probe"
-  | "propose" | "extend" | "transform";
+export type Protocol =
+  | "shared_convergence"
+  | "adversarial_debate"
+  | "host_interrogation"
+  | "sequential_refinement"
+  | "evaluation_scoring"
+  | "red_team";
 
 // -- Generation Parameters --
 
@@ -33,9 +45,10 @@ export interface GenerationParams {
 // -- Team Composition --
 
 /**
- * Role within a deliberation team. All members are workers.
+ * Role within a deliberation team.
+ * "worker" is standard. "generator"/"attacker" are used in red_team protocol.
  */
-export type TeamRole = "worker";
+export type TeamRole = "worker" | "generator" | "attacker";
 
 /**
  * A single team member assignment.
@@ -89,6 +102,8 @@ export interface Round {
   readonly responses: readonly WorkerResponse[];
   /** Workers that failed during this round (partial failure tracking). */
   readonly failedWorkers?: readonly FailedWorker[];
+  /** Protocol used for this round. */
+  readonly protocol?: Protocol;
 }
 
 // -- SharedContext --
@@ -134,6 +149,23 @@ export interface ModelSwap {
   readonly retryable?: boolean;
 }
 
+// -- Host Interrogation --
+
+/**
+ * A single question-answer exchange in host interrogation.
+ */
+export interface InterrogationExchange {
+  readonly question: string;
+  readonly answer: string;
+}
+
+// -- Evaluation Scoring --
+
+/**
+ * Aggregation method for evaluation scoring.
+ */
+export type AggregationMethod = "voting" | "consensus" | "confidence_weighted";
+
 // -- Deliberate Tool I/O --
 
 /**
@@ -144,20 +176,35 @@ export interface DeliberateInput {
   readonly task: string;
   readonly workerInstructions?: string;
   readonly maxRounds?: number;
-  /** Deliberation protocol. Default: "diverge-synth". */
-  readonly protocol?: "diverge-synth" | "debate";
+  /** Deliberation protocol. Required. */
+  readonly protocol: Protocol;
   /** Model IDs to use as workers. Required (min 1). */
   readonly models: readonly string[];
   /** Number of workers. Default = models.length. Upper bound 7, lower bound 1. */
   readonly count?: number;
   /** Task nature for prompt selection. Artifact = deliverable output, Critique = analysis. */
   readonly taskNature?: TaskNature;
-  /**
-   * Interaction technique. Emphasis, not constraint.
-   * Single value: all rounds. Array: per-round (last repeats on exhaustion).
-   * Empty array or undefined: no technique (existing behavior).
-   */
-  readonly technique?: InteractionTechnique | readonly InteractionTechnique[];
+
+  // -- Protocol-specific fields --
+
+  /** Host interrogation: questions to ask each worker. */
+  readonly questions?: readonly string[];
+  /** Host interrogation: previous exchanges for session continuation. */
+  readonly previousExchanges?: ReadonlyMap<number, readonly InterrogationExchange[]>;
+
+  /** Evaluation scoring: criteria for evaluation. */
+  readonly criteria?: string;
+  /** Evaluation scoring: subject to evaluate. */
+  readonly subject?: string;
+  /** Evaluation scoring: aggregation method. Default: "voting". */
+  readonly aggregation?: AggregationMethod;
+
+  /** Red team: role assignments per worker index. */
+  readonly roles?: ReadonlyMap<number, "generator" | "attacker">;
+
+  /** Sequential refinement: order of worker indices. */
+  readonly workerOrder?: readonly number[];
+
   /**
    * Optional callback invoked after each round completes.
    * Enables streaming output in CLI mode. Not serializable — runtime only.
@@ -166,6 +213,7 @@ export interface DeliberateInput {
     number: number;
     responses: readonly { model: string; content: string; confidence?: "high" | "medium" | "low" }[];
     failedWorkers?: readonly FailedWorker[];
+    protocol: Protocol;
   }) => void;
 }
 
@@ -184,9 +232,12 @@ export interface DeliberateOutput {
   readonly totalTokens: TokenUsage;
   readonly totalLLMCalls: number;
   readonly modelsUsed: readonly string[];
+  /** Protocol used. */
+  readonly protocol: Protocol;
   /** Per-round details for diagnostics. */
   readonly rounds?: readonly {
     number: number;
+    protocol: Protocol;
     responses?: readonly { model: string; content: string; confidence?: "high" | "medium" | "low" }[];
     failedWorkers?: readonly FailedWorker[];
   }[];
@@ -196,4 +247,9 @@ export interface DeliberateOutput {
   readonly modelSwaps?: readonly ModelSwap[];
   /** Team degradation info — present when team shrank below requested size. */
   readonly degradation?: Degradation;
+  /** Aggregation results for evaluation_scoring protocol. */
+  readonly aggregation?: {
+    readonly method: AggregationMethod;
+    readonly results: readonly { model: string; score?: number; verdict?: string }[];
+  };
 }
