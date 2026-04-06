@@ -673,14 +673,14 @@ async function executeRedTeamRound(
   const lastRound = ctx.rounds[ctx.rounds.length - 1];
 
   if (!isAttackRound || !lastRound) {
-    // Generator round: generators produce with fallback, attackers skip after R1
+    // Generator round: only generators produce, attackers always skip
     const previousAttack = lastRound
       ? lastRound.responses.filter((r) => getRole(r.workerIndex) === "attacker").map((r) => r.content).join("\n\n---\n\n")
       : undefined;
 
     const results = await Promise.allSettled(
       participants.map((participant, index) => {
-        if (getRole(index) === "attacker" && lastRound) {
+        if (getRole(index) === "attacker") {
           return Promise.resolve({ response: undefined, failed: false, swaps: [] as ModelSwap[], tokens: { input: 0, output: 0 } } as WorkerCallResult);
         }
         const genDeps: EngineDeps = {
@@ -747,7 +747,9 @@ function aggregateEvaluationResults(
   method: import("./types").AggregationMethod,
 ) {
   const parsed = responses.map((r) => {
-    const scoreMatch = r.content.match(/(?:score|rating|점수)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+    const scoreMatch = r.content.match(/(?:score|rating|점수|overall)\s*[:=]?\s*(\d+(?:\.\d+)?)/i)
+      ?? r.content.match(/(\d+(?:\.\d+)?)\s*(?:\/\s*10|out of 10)/i)
+      ?? r.content.match(/\*\*(\d+(?:\.\d+)?)\*\*\s*\/\s*10/i);
     const verdictMatch = r.content.match(/(?:verdict|결론|판정)\s*[:=]?\s*(.+?)(?:\n|$)/i);
     const confidence = parseConfidence(r.content);
     return {
