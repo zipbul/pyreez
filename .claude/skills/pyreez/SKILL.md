@@ -71,15 +71,15 @@ CLI: `bun run src/cli.ts <subcommand> [flags]`.
 - Use Evaluate/Create level questions, not "list pros/cons".
 - Commit to a position. If genuinely uncertain, state what evidence would resolve it.
 
-**technique**: Emphasis, not constraint. Choose by what output you need.
-- challenge / defend / accept / probe / propose / extend / transform
-- Per-round array: `--technique "propose,challenge,defend"`
-- Single: `--technique challenge`
-- Omit for free response.
+**protocol**: Choose by communication structure needed.
+- `shared_convergence` — workers share positions (sparse), converge toward consensus (default for multi-round)
+- `adversarial_debate` — workers share + must challenge, no convergence
+- `host_interrogation` — workers isolated, host asks 1:1 questions
+- `sequential_refinement` — workers chain A→B→C, each improves previous
+- `evaluation_scoring` — workers isolated, independent scoring + aggregation
+- `red_team` — asymmetric roles (generator vs attacker)
 
-**protocol**: `debate` (multi-round, workers see each other) or `diverge-synth` (single-round, default).
-
-**deliberate**: Run `deliberate --task "..." --models "model1,model2,model3" [--protocol debate] [--technique "..."] [--max-rounds N] [--worker-instructions "..."]`. Use `--task -` for long tasks via stdin.
+**deliberate**: Run `deliberate --task "..." --models "model1,model2,model3" --protocol shared_convergence [--max-rounds N] [--worker-instructions "..."]`. Use `--task -` for long tasks via stdin.
 </workflow>
 
 <synthesis-phases>

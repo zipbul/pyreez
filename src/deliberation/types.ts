@@ -189,8 +189,8 @@ export interface DeliberateInput {
 
   /** Host interrogation: questions to ask each worker. */
   readonly questions?: readonly string[];
-  /** Host interrogation: previous exchanges for session continuation. */
-  readonly previousExchanges?: ReadonlyMap<number, readonly InterrogationExchange[]>;
+  /** Host interrogation: previous exchanges for session continuation. Keyed by workerIndex. */
+  readonly previousExchanges?: Readonly<Record<number, readonly InterrogationExchange[]>>;
 
   /** Evaluation scoring: criteria for evaluation. */
   readonly criteria?: string;
@@ -200,7 +200,7 @@ export interface DeliberateInput {
   readonly aggregation?: AggregationMethod;
 
   /** Red team: role assignments per worker index. */
-  readonly roles?: ReadonlyMap<number, "generator" | "attacker">;
+  readonly roles?: Readonly<Record<number, "generator" | "attacker">>;
 
   /** Sequential refinement: order of worker indices. */
   readonly workerOrder?: readonly number[];
@@ -250,6 +250,14 @@ export interface DeliberateOutput {
   /** Aggregation results for evaluation_scoring protocol. */
   readonly aggregation?: {
     readonly method: AggregationMethod;
-    readonly results: readonly { model: string; score?: number; verdict?: string }[];
+    readonly results: readonly { model: string; score?: number; verdict?: string; confidence?: "high" | "medium" | "low" }[];
+    /** Confidence-weighted average score (confidence_weighted method). */
+    readonly weightedScore?: number;
+    /** Majority verdict (voting method). */
+    readonly majorityVerdict?: string;
+    /** Vote count for majority verdict (voting method). */
+    readonly voteCount?: number;
+    /** Consensus verdict if all agree (consensus method). */
+    readonly consensus?: string;
   };
 }

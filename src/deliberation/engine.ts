@@ -606,7 +606,7 @@ async function executeInterrogationRound(
   const results = await Promise.allSettled(
     participants.map(async (participant, index) => {
       const question = questions[index % Math.max(questions.length, 1)] ?? input.task;
-      const prevExchanges = input.previousExchanges?.get(index);
+      const prevExchanges = input.previousExchanges?.[index];
       const messages = buildHostInterrogationMessages(ctx.task, question, prevExchanges);
 
       const result = await deps.chat(participant.model, messages, config.workerGenParams);
@@ -738,7 +738,7 @@ async function executeRedTeamRound(
 
   // Determine role for each worker
   const getRole = (idx: number): "generator" | "attacker" => {
-    if (roles?.get(idx)) return roles.get(idx)!;
+    if (roles?.[idx]) return roles[idx]!;
     // Default: first half generators, second half attackers
     return idx < Math.ceil(participants.length / 2) ? "generator" : "attacker";
   };
@@ -855,19 +855,100 @@ function sparseSelect(
 function aggregateEvaluationResults(
   responses: readonly WorkerResponse[],
   method: import("./types").AggregationMethod,
-): { method: import("./types").AggregationMethod; results: { model: string; score?: number; verdict?: string }[] } {
-  const results = responses.map((r) => {
-    // Try to extract a numeric score from the response
+) {
+  const parsed = responses.map((r) => {
     const scoreMatch = r.content.match(/(?:score|rating|점수)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
     const verdictMatch = r.content.match(/(?:verdict|결론|판정)\s*[:=]?\s*(.+?)(?:\n|$)/i);
+    const confidence = parseConfidence(r.content);
     return {
       model: r.model,
-      ...(scoreMatch ? { score: parseFloat(scoreMatch[1]!) } : {}),
-      ...(verdictMatch ? { verdict: verdictMatch[1]!.trim() } : {}),
+      score: scoreMatch ? parseFloat(scoreMatch[1]!) : undefined,
+      verdict: verdictMatch ? verdictMatch[1]!.trim() : undefined,
+      confidence,
     };
   });
 
-  return { method, results };
+  switch (method) {
+    case "confidence_weighted": {
+      // Weight scores by confidence level: HIGH=1.0, MEDIUM=0.6, LOW=0.3
+      const weights: Record<string, number> = { high: 1.0, medium: 0.6, low: 0.3 };
+      const withScores = parsed.filter((p) => p.score != null);
+      if (withScores.length > 0) {
+        const weightedSum = withScores.reduce((sum, p) => {
+          const w = weights[p.confidence ?? "medium"] ?? 0.6;
+          return sum + p.score! * w;
+        }, 0);
+        const totalWeight = withScores.reduce((sum, p) => {
+          return sum + (weights[p.confidence ?? "medium"] ?? 0.6);
+        }, 0);
+        const weightedAvg = totalWeight > 0 ? weightedSum / totalWeight : 0;
+        return {
+          method,
+          results: parsed.map((p) => ({
+            model: p.model,
+            ...(p.score != null ? { score: p.score } : {}),
+            ...(p.verdict ? { verdict: p.verdict } : {}),
+            ...(p.confidence ? { confidence: p.confidence } : {}),
+          })),
+          weightedScore: Math.round(weightedAvg * 100) / 100,
+        };
+      }
+      break;
+    }
+    case "consensus": {
+      // Check if all verdicts agree
+      const verdicts = parsed.filter((p) => p.verdict).map((p) => p.verdict!.toLowerCase());
+      const unique = new Set(verdicts);
+      const consensusReached = unique.size === 1 && verdicts.length > 0;
+      return {
+        method,
+        results: parsed.map((p) => ({
+          model: p.model,
+          ...(p.score != null ? { score: p.score } : {}),
+          ...(p.verdict ? { verdict: p.verdict } : {}),
+          ...(p.confidence ? { confidence: p.confidence } : {}),
+        })),
+        ...(consensusReached ? { consensus: verdicts[0] } : { consensus: undefined }),
+      };
+    }
+    case "voting":
+    default: {
+      // Majority voting on verdicts
+      const verdictCounts = new Map<string, number>();
+      for (const p of parsed) {
+        if (p.verdict) {
+          const v = p.verdict.toLowerCase();
+          verdictCounts.set(v, (verdictCounts.get(v) ?? 0) + 1);
+        }
+      }
+      let topVerdict: string | undefined;
+      let topCount = 0;
+      for (const [v, c] of verdictCounts) {
+        if (c > topCount) { topVerdict = v; topCount = c; }
+      }
+      return {
+        method,
+        results: parsed.map((p) => ({
+          model: p.model,
+          ...(p.score != null ? { score: p.score } : {}),
+          ...(p.verdict ? { verdict: p.verdict } : {}),
+          ...(p.confidence ? { confidence: p.confidence } : {}),
+        })),
+        ...(topVerdict ? { majorityVerdict: topVerdict, voteCount: topCount } : {}),
+      };
+    }
+  }
+
+  // Fallback (shouldn't reach here)
+  return {
+    method,
+    results: parsed.map((p) => ({
+      model: p.model,
+      ...(p.score != null ? { score: p.score } : {}),
+      ...(p.verdict ? { verdict: p.verdict } : {}),
+      ...(p.confidence ? { confidence: p.confidence } : {}),
+    })),
+  };
 }
 
 // -- Standard Round Execution --
