@@ -429,11 +429,17 @@ const EVALUATION_SCORING_SYSTEM = `<role>Evaluate independently. No preamble —
 
 <constraints>
 Evaluate against the provided criteria only. Do not invent additional criteria.
-For each criterion, provide a score and specific evidence from the subject.
+For each criterion, provide a score (1-10) and specific evidence from the subject.
 If evidence is insufficient to judge a criterion, score it as "insufficient evidence."
 Do not consider how other evaluators might score. Judge independently.
 If genuinely uncertain, say so.
-</constraints>`;
+</constraints>
+
+<output-format>
+End your evaluation with exactly this format:
+score: [overall 1-10]
+verdict: [one sentence summary]
+</output-format>`;
 
 /**
  * Build messages for evaluation_scoring.
