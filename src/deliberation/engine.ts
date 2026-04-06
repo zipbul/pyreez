@@ -179,12 +179,13 @@ const DEFAULT_CONFIG: EngineConfig = {
  */
 export function parseConfidence(text: string): "high" | "medium" | "low" | undefined {
   const normalized = text.toLowerCase();
-  // Match patterns: "HIGH confidence", "confidence: HIGH", "HIGH:", "[HIGH]"
-  const pattern = /\b(high|medium|low)\s*(?:confidence|:)|\bconfidence\s*:\s*(high|medium|low)\b|\[(high|medium|low)\]/gi;
+  // Match patterns: "HIGH confidence", "confidence: HIGH", "HIGH:", "[HIGH]", "**HIGH**",
+  // Korean labels: "신뢰도: HIGH" (confidence-related Korean labels only)
+  const pattern = /\b(high|medium|low)\s*(?:confidence|:)|\bconfidence\s*:\s*(high|medium|low)\b|\[(high|medium|low)\]|\*\*(high|medium|low)\*\*|신뢰도\s*:\s*(high|medium|low)\b/gi;
   const counts = { high: 0, medium: 0, low: 0 };
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(normalized)) !== null) {
-    const level = (match[1] ?? match[2] ?? match[3])!.toLowerCase() as "high" | "medium" | "low";
+    const level = (match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5])!.toLowerCase() as "high" | "medium" | "low";
     counts[level]++;
   }
   const total = counts.high + counts.medium + counts.low;

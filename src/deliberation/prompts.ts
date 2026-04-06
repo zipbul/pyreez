@@ -145,13 +145,27 @@ const SHARED_CONVERGENCE_SYSTEM_ARTIFACT = buildSystemPrompt(
   "artifact",
 );
 
+// -- R1 Diversity Lenses (DMAD-inspired: diverse reasoning per worker) --
+
+const DIVERSITY_LENSES = [
+  "Prioritize practical constraints: cost, timeline, team capability, migration effort. What looks good on paper but fails in practice?",
+  "Prioritize long-term consequences: maintenance burden, scalability ceiling, ecosystem trajectory, lock-in risk. What decision will you regret in 2 years?",
+  "Prioritize risk and failure modes: what can go wrong, what are the hidden assumptions, what happens under adversarial conditions? Steelman the weakest option.",
+  "Prioritize the contrarian view: argue for the less obvious choice. What is everyone else missing? What evidence contradicts the popular opinion?",
+  "Prioritize first principles: strip away convention and trend. What does the fundamental problem actually require? Rebuild the analysis from constraints alone.",
+  "Prioritize human factors: developer experience, onboarding, cognitive load, error-proneness. The best architecture that nobody can use correctly is the worst architecture.",
+  "Prioritize empirical evidence: cite specific benchmarks, case studies, production incidents, or measured data. Reject claims without evidence.",
+];
+
 /**
  * Build R1 messages for shared_convergence (independent analysis).
+ * Each worker gets a different analysis lens (DMAD-inspired diversity).
  */
 export function buildSharedConvergenceR1(
   ctx: SharedContext,
   instructions?: string,
   roundInfo?: RoundInfo,
+  workerIndex?: number,
 ): ChatMessage[] {
   const system = (ctx.taskNature ?? "critique") === "artifact"
     ? SHARED_CONVERGENCE_SYSTEM_ARTIFACT
@@ -159,6 +173,13 @@ export function buildSharedConvergenceR1(
 
   const userParts: string[] = [];
   if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+
+  // Assign diversity lens per worker (DMAD: diverse reasoning methods prevent mental set)
+  if (workerIndex != null && roundInfo && roundInfo.max > 1) {
+    const lens = DIVERSITY_LENSES[workerIndex % DIVERSITY_LENSES.length]!;
+    userParts.push(`<analysis-lens>${lens}</analysis-lens>`);
+  }
+
   userParts.push(CONFIDENCE_AND_UNCERTAINTY);
   if (roundInfo && roundInfo.current === 1 && roundInfo.max > 1) {
     userParts.push("Explore broadly. Do not converge prematurely.");
@@ -263,15 +284,48 @@ const ADVERSARIAL_SYSTEM_ARTIFACT = buildSystemPrompt(
   "artifact",
 );
 
+// -- Adversarial Position Lenses (force opposing stances in R1) --
+
+const ADVERSARIAL_LENSES = [
+  "Argue FOR the most obvious/popular answer. Build the strongest possible case for the default choice. Make it so convincing that alternatives seem unreasonable.",
+  "Argue AGAINST the most obvious/popular answer. Find fatal flaws in the default choice. Present a compelling case for the less popular alternative.",
+  "Reject the framing of the question entirely. The real problem is not what's being asked — redefine it and argue for a solution nobody proposed.",
+  "Argue that all presented options are inadequate. The correct answer is something not yet considered. Propose it and defend it.",
+  "Argue from the perspective of someone who will maintain this decision for 5 years. What choice minimizes long-term regret regardless of short-term tradeoffs?",
+  "Argue from the perspective of someone who needs results in 2 weeks. What choice maximizes immediate value regardless of long-term consequences?",
+  "Take the position that the question itself reveals a deeper architectural problem. Diagnose what's actually broken and argue that fixing the root cause makes the surface question irrelevant.",
+];
+
 /**
- * Build R1 for adversarial_debate (identical to shared_convergence R1).
+ * Build R1 for adversarial_debate (forces opposing positions via adversarial lenses).
+ * Unlike shared_convergence, each worker is assigned a STANCE, not just an analysis angle.
  */
 export function buildAdversarialDebateR1(
   ctx: SharedContext,
   instructions?: string,
-  roundInfo?: RoundInfo,
+  _roundInfo?: RoundInfo,
+  workerIndex?: number,
 ): ChatMessage[] {
-  return buildSharedConvergenceR1(ctx, instructions, roundInfo);
+  const system = (ctx.taskNature ?? "critique") === "artifact"
+    ? ADVERSARIAL_SYSTEM_ARTIFACT
+    : ADVERSARIAL_SYSTEM_CRITIQUE;
+
+  const userParts: string[] = [];
+  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+
+  // Assign adversarial stance (not just analysis angle — forces opposing positions)
+  if (workerIndex != null) {
+    const lens = ADVERSARIAL_LENSES[workerIndex % ADVERSARIAL_LENSES.length]!;
+    userParts.push(`<assigned-stance>${lens}</assigned-stance>`);
+  }
+
+  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
+  userParts.push(`<task>${ctx.task}</task>`);
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: userParts.join("\n\n") },
+  ];
 }
 
 /**
@@ -396,6 +450,7 @@ Do not rewrite from scratch. Build on the previous version.
 For every change, state what was wrong and why your version is better.
 If the previous version is already correct in an area, leave it unchanged.
 If genuinely uncertain about a change, flag it.
+Your output must be at least as complete as the previous version. Do not remove content, detail, or explanations unless they are factually wrong. Shortening is not improving.
 </constraints>`;
 
 /**
@@ -428,17 +483,16 @@ export function buildSequentialRefinementMessages(
 const EVALUATION_SCORING_SYSTEM = `<role>Evaluate independently. No preamble — lead with your analysis.</role>
 
 <constraints>
-Evaluate against the provided criteria only. Do not invent additional criteria.
-For each criterion, provide specific evidence from the subject.
-If evidence is insufficient to judge a criterion, state "insufficient evidence."
+Evaluate the subject against the provided criteria. Do not invent additional criteria.
+For each criterion, provide your own analysis and reasoning about the subject.
 Do not consider how other evaluators might score. Judge independently.
-If genuinely uncertain, say so.
 </constraints>
 
 <output-format>
-1. Analyze each criterion with evidence.
-2. Write your verdict (one sentence overall judgment).
-3. Based on your verdict, assign a score.
+1. Analyze each criterion with your reasoning.
+2. For each major claim, indicate your confidence (e.g., **HIGH**, [MEDIUM], confidence: LOW).
+3. Write your verdict (one sentence overall judgment).
+4. Based on your verdict, assign a score.
 
 End with exactly this format:
 verdict: [one sentence — must be consistent with your analysis above]
@@ -540,14 +594,20 @@ export function buildAcceptanceMessages(
   originalPosition: string,
   task: string,
 ): ChatMessage[] {
-  const system = `<role>You are reviewing whether this synthesis accurately represents your position.</role>
+  const system = `<role>You are reviewing whether this synthesis accurately represents your position and is factually grounded.</role>
+
+<instructions>
+1. Check if your position is accurately represented — not distorted, softened, or exaggerated.
+2. Check if critical issues from your position are addressed — not ignored.
+3. Check if factual claims in the synthesis are grounded — reject claims presented as facts without evidence or verification. Code/architecture claims must match actual code. External claims (benchmarks, statistics) must cite sources or be labeled uncertain.
+</instructions>
 
 <output-format>
 Respond with ONLY the following XML structure:
 <acceptance>
   <verdict>accept, partial, or reject</verdict>
   <misrepresented>What was distorted. "None." if accept.</misrepresented>
-  <unresolved>Critical issues ignored. "None." if accept.</unresolved>
+  <unresolved>Critical issues ignored OR ungrounded factual claims. "None." if accept.</unresolved>
 </acceptance>
 </output-format>`;
 
@@ -568,6 +628,7 @@ export function getR1Builder(protocol: Protocol): (
   ctx: SharedContext,
   instructions?: string,
   roundInfo?: RoundInfo,
+  workerIndex?: number,
 ) => ChatMessage[] {
   switch (protocol) {
     case "shared_convergence":

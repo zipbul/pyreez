@@ -97,8 +97,9 @@ For each worker, fill all three fields:
 **Phase 2 — Evaluate and ground**
 
 Apply claim-protocol to every claim in the synthesis draft:
-- Factual claims (numbers, dates, events, benchmarks): verify via WebSearch (2+ sources). If unverifiable → remove or flag "확인할 수 없습니다".
+- Factual claims (numbers, dates, events, benchmarks): verify using the most appropriate source for the claim type. Code/architecture claims → read the actual code. External facts (benchmarks, statistics, API behavior) → WebSearch (2+ sources). Project-internal facts → git log, file inspection. User-provided data → treat as given, do not re-verify. If unverifiable → remove or flag "확인할 수 없습니다".
 - Analytical/creative claims: keep if reasoning chain exists. Amplify creative proposals that have reasoning chains — do not dismiss them for lacking citations.
+- If no factual claims require verification (e.g., pure design/tradeoff analysis), skip verification and state why.
 
 **Phase 3 — Self-critique**
 

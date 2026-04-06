@@ -60,13 +60,18 @@ export class CodexCliProvider implements LLMProvider {
       "-m", modelId,
       "--full-auto",
       "--skip-git-repo-check",
-      prompt,
     ];
+
+    if (request.fileAccess) {
+      args.push("--sandbox", "read-only");  // read-only file access
+    }
+
+    args.push(prompt);
 
     try {
       const { stdout, stderr, exitCode } = await spawnWithIdleTimeout(
         ["codex", ...args],
-        { cwd: "/tmp" },
+        { cwd: request.fileAccess ? process.cwd() : "/tmp" },
         { idleMs: IDLE_TIMEOUT_MS },
       );
 

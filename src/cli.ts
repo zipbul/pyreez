@@ -200,6 +200,7 @@ async function main(): Promise<void> {
         criteria: flags["criteria"],
         subject: flags["subject"],
         aggregation: flags["aggregation"],
+        file_access: flags["file-access"] === "true" ? true : undefined,
         onRound: (round) => {
           const models = round.responses.map((r) => r.model).join(", ");
           const failed = round.failedWorkers?.length ?? 0;

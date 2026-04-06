@@ -2108,6 +2108,31 @@ describe("parseConfidence", () => {
   it("should be case insensitive", () => {
     expect(parseConfidence("high confidence in this claim")).toBe("high");
   });
+
+  it("should parse markdown bold '**HIGH**'", () => {
+    expect(parseConfidence("This claim **HIGH** is important")).toBe("high");
+  });
+
+  it("should parse markdown bold '**MEDIUM**' and '**LOW**'", () => {
+    expect(parseConfidence("Claim A **MEDIUM**. Claim B **LOW**. Claim C **LOW**.")).toBe("low");
+  });
+
+  it("should parse '[HIGH]' bracket format", () => {
+    expect(parseConfidence("This is certain [HIGH]")).toBe("high");
+  });
+
+  it("should parse Korean label '신뢰도: HIGH'", () => {
+    expect(parseConfidence("신뢰도: HIGH")).toBe("high");
+  });
+
+  it("should not parse non-confidence Korean labels", () => {
+    expect(parseConfidence("구체성: MEDIUM")).toBeUndefined();
+    expect(parseConfidence("방어력: LOW")).toBeUndefined();
+  });
+
+  it("should parse 신뢰도 label and ignore non-confidence labels", () => {
+    expect(parseConfidence("신뢰도: HIGH. 구체성: HIGH. 방어력: LOW.")).toBe("high");
+  });
 });
 
 // =============================================================================

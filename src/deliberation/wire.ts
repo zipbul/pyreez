@@ -66,7 +66,7 @@ export function stripThinkTags(text: string): string {
 // -- Chat Adapter --
 
 type RawChatFn = (
-  request: { model: string; messages: ChatMessage[]; temperature?: number; top_p?: number },
+  request: { model: string; messages: ChatMessage[]; temperature?: number; top_p?: number; fileAccess?: boolean },
 ) => Promise<ChatCompletionResponse>;
 
 /**
@@ -85,6 +85,7 @@ export function createChatAdapter(
       messages,
       ...(params?.temperature != null ? { temperature: params.temperature } : {}),
       ...(params?.top_p != null ? { top_p: params.top_p } : {}),
+      ...(params?.fileAccess ? { fileAccess: true } : {}),
     });
     const choice = response.choices[0];
     const raw = choice?.message?.content ?? "";
@@ -112,8 +113,8 @@ function createEngineDepsForProtocol(
     case "shared_convergence":
       return {
         chat: chatFn,
-        buildR1Messages: (ctx, instructions, roundInfo) =>
-          buildSharedConvergenceR1(ctx, instructions, roundInfo),
+        buildR1Messages: (ctx, instructions, roundInfo, workerIndex) =>
+          buildSharedConvergenceR1(ctx, instructions, roundInfo, workerIndex),
         buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo) =>
           buildSharedConvergenceR2(ctx, otherResponses, ownPrevious, instructions, roundInfo),
         buildFollowUp: (ctx, otherResponses, instructions, roundInfo) =>
@@ -122,8 +123,8 @@ function createEngineDepsForProtocol(
     case "adversarial_debate":
       return {
         chat: chatFn,
-        buildR1Messages: (ctx, instructions, roundInfo) =>
-          buildAdversarialDebateR1(ctx, instructions, roundInfo),
+        buildR1Messages: (ctx, instructions, roundInfo, workerIndex) =>
+          buildAdversarialDebateR1(ctx, instructions, roundInfo, workerIndex),
         buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo) =>
           buildAdversarialDebateR2(ctx, otherResponses, ownPrevious, instructions, roundInfo),
         buildFollowUp: (ctx, otherResponses, instructions, roundInfo) =>
@@ -195,6 +196,9 @@ export function createDeliberateFn(
     if (input.protocol === "red_team" && input.models.length < 2) {
       throw new Error("red_team protocol requires at least 2 models (generator + attacker)");
     }
+    if (input.protocol === "adversarial_debate" && input.models.length < 2) {
+      throw new Error("adversarial_debate protocol requires at least 2 models for meaningful opposition");
+    }
 
     // 3. Determine effective count: clamp to [1, MAX_WORKERS]
     const effectiveCount = Math.min(
@@ -229,6 +233,7 @@ export function createDeliberateFn(
     const effectiveMaxRounds = input.maxRounds ?? defaultMaxRounds(protocol);
     const workerGenParams: GenerationParams = {
       temperature: 1.0,
+      ...(input.fileAccess ? { fileAccess: true } : {}),
     };
     const config: EngineConfig = {
       maxRounds: effectiveMaxRounds,

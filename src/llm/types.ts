@@ -49,6 +49,10 @@ export interface ChatCompletionRequest {
   response_format?: { type: "text" | "json_object" };
   seed?: number;
   stop?: string[];
+  /** Enable read-only file access tools for this request.
+   * CLI providers: switch to read-only tool mode.
+   * API providers: include file-access tool definitions. */
+  fileAccess?: boolean;
 }
 
 // --- Response Types ---

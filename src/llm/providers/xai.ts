@@ -24,6 +24,7 @@ function stripPrefix(modelId: string): string {
 /** Abort xAI HTTP request after 5 minutes of no response. */
 const REQUEST_TIMEOUT_MS = 300_000;
 
+
 export class XaiProvider implements LLMProvider {
   readonly name = "xai" as const;
   private readonly client: ReturnType<typeof createXai>;
@@ -48,6 +49,9 @@ export class XaiProvider implements LLMProvider {
         temperature: request.temperature,
         topP: request.top_p,
         abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        // Note: xAI tool use via Vercel AI SDK currently returns Bad Request.
+        // fileAccess is not supported for xai provider until SDK compatibility is resolved.
+        // Workers will receive the task without file access tools.
       });
 
       // Normalize to ChatCompletionResponse format

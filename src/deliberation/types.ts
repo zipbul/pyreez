@@ -40,6 +40,7 @@ export type Protocol =
 export interface GenerationParams {
   readonly temperature?: number;
   readonly top_p?: number;
+  readonly fileAccess?: boolean;
 }
 
 // -- Team Composition --
@@ -204,6 +205,11 @@ export interface DeliberateInput {
 
   /** Sequential refinement: order of worker indices. */
   readonly workerOrder?: readonly number[];
+
+  /** Enable read-only file access for workers during deliberation.
+   * CLI providers: enables file read tools + sets cwd to project directory.
+   * API providers: enables function calling with read-only file tools. */
+  readonly fileAccess?: boolean;
 
   /**
    * Optional callback invoked after each round completes.

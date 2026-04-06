@@ -91,6 +91,7 @@ export async function handleDeliberate(
     criteria?: string;
     subject?: string;
     aggregation?: string;
+    file_access?: boolean;
   },
 ): Promise<HandlerResult> {
   return logRun(config, "deliberate", async () => {
@@ -110,6 +111,14 @@ export async function handleDeliberate(
         ? args.protocol
         : "shared_convergence") as DeliberateInput["protocol"];
 
+      // Protocol-specific required field validation
+      if (protocol === "host_interrogation" && !args.questions?.length) {
+        return { error: "Error: --questions is required for host_interrogation protocol" };
+      }
+      if (protocol === "evaluation_scoring" && !args.criteria) {
+        return { error: "Error: --criteria is required for evaluation_scoring protocol" };
+      }
+
       const input: DeliberateInput = {
         task: args.task,
         models: args.models,
@@ -122,6 +131,7 @@ export async function handleDeliberate(
         ...(args.subject ? { subject: args.subject } : {}),
         ...(args.aggregation ? { aggregation: args.aggregation as DeliberateInput["aggregation"] } : {}),
         ...(args.onRound ? { onRound: args.onRound } : {}),
+        ...(args.file_access ? { fileAccess: true } : {}),
       };
 
       const result = await config.deliberateFn(input);
@@ -198,7 +208,8 @@ export async function handleAcceptance(
         totalInput += result.inputTokens;
         totalOutput += result.outputTokens;
 
-        const verdict = result.content.match(/<verdict>([\s\S]*?)<\/verdict>/)?.[1]?.trim()?.toLowerCase() ?? "accept";
+        const verdictRaw = result.content.match(/<verdict>([\s\S]*?)<\/verdict>/)?.[1]?.trim()?.toLowerCase();
+        const verdict = verdictRaw ?? "reject"; // default to reject if format not followed — fail-safe
         const misrepresented = result.content.match(/<misrepresented>([\s\S]*?)<\/misrepresented>/)?.[1]?.trim();
         const unresolved = result.content.match(/<unresolved>([\s\S]*?)<\/unresolved>/)?.[1]?.trim();
 

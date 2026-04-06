@@ -69,13 +69,20 @@ export class GeminiCliProvider implements LLMProvider {
       "-p", fullPrompt,
       "--model", modelId,
       "-o", "json",
-      "-y",  // auto-approve — pyreez needs raw LLM inference, not agent behavior
     ];
+
+    if (request.fileAccess) {
+      // Read-only mode: auto-approve reads, plan mode prevents writes
+      args.push("-y");
+    } else {
+      args.push("-y");  // auto-approve — raw LLM inference only
+      args.push("--sandbox");  // sandbox to prevent tool use
+    }
 
     try {
       const { stdout, stderr, exitCode } = await spawnWithIdleTimeout(
         ["gemini", ...args],
-        { cwd: "/tmp" },
+        { cwd: request.fileAccess ? process.cwd() : "/tmp" },
         { idleMs: IDLE_TIMEOUT_MS },
       );
 

@@ -73,8 +73,14 @@ export class ClaudeCliProvider implements LLMProvider {
       "--model", modelId,
       "--output-format", "json",
       "--system-prompt", systemPrompt,
-      "--tools", "",  // Disable tools — pyreez needs raw LLM inference, not agent behavior
     ];
+
+    if (request.fileAccess) {
+      // Read-only tools for file access during deliberation
+      args.push("--tools", "Read,Glob,Grep,Bash(git:*)");
+    } else {
+      args.push("--tools", "");  // Disable tools — raw LLM inference only
+    }
 
     try {
       // Strip CLAUDECODE env var to allow spawning from within a Claude Code session
@@ -86,9 +92,9 @@ export class ClaudeCliProvider implements LLMProvider {
         {
           stdin: new Blob([prompt]),
           env,
-          // Run from /tmp to prevent Claude Code from loading CLAUDE.md
-          // and project context (~18K tokens overhead per call)
-          cwd: "/tmp",
+          // fileAccess: run from project dir so workers can read files
+          // otherwise: run from /tmp to prevent loading CLAUDE.md (~18K tokens overhead)
+          cwd: request.fileAccess ? process.cwd() : "/tmp",
         },
         { idleMs: IDLE_TIMEOUT_MS },
       );

@@ -330,11 +330,27 @@ describe("buildSharedConvergenceFollowUp", () => {
 // ================================================================
 
 describe("buildAdversarialDebateR1", () => {
-  it("should delegate to buildSharedConvergenceR1", () => {
+  it("should include assigned-stance for adversarial position forcing", () => {
     const ctx = makeCtx();
-    const r1 = buildAdversarialDebateR1(ctx, "inst", { current: 1, max: 3 });
-    const convergence = buildSharedConvergenceR1(ctx, "inst", { current: 1, max: 3 });
-    expect(r1).toEqual(convergence);
+    const r1 = buildAdversarialDebateR1(ctx, "inst", { current: 1, max: 3 }, 0);
+    const user = r1[1]!.content!;
+    expect(user).toContain("<assigned-stance>");
+    expect(user).toContain("Argue FOR");
+  });
+
+  it("should assign different stances per workerIndex", () => {
+    const ctx = makeCtx();
+    const r1w0 = buildAdversarialDebateR1(ctx, undefined, undefined, 0);
+    const r1w1 = buildAdversarialDebateR1(ctx, undefined, undefined, 1);
+    const stance0 = r1w0[1]!.content!.match(/<assigned-stance>([\s\S]*?)<\/assigned-stance>/)?.[1];
+    const stance1 = r1w1[1]!.content!.match(/<assigned-stance>([\s\S]*?)<\/assigned-stance>/)?.[1];
+    expect(stance0).not.toEqual(stance1);
+  });
+
+  it("should not include assigned-stance without workerIndex", () => {
+    const ctx = makeCtx();
+    const r1 = buildAdversarialDebateR1(ctx);
+    expect(r1[1]!.content!).not.toContain("<assigned-stance>");
   });
 });
 
@@ -632,9 +648,10 @@ describe("buildEvaluationScoringMessages", () => {
     expect(user).toMatch(/<task>Eval task<\/task>$/);
   });
 
-  it("should include insufficient evidence handling", () => {
+  it("should include confidence markers instruction", () => {
     const sys = buildEvaluationScoringMessages("t", "c", "s")[0]!.content!;
-    expect(sys).toContain("insufficient evidence");
+    expect(sys).toContain("confidence");
+    expect(sys).toContain("HIGH");
   });
 });
 
