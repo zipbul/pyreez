@@ -1056,10 +1056,11 @@ export async function deliberate(
     allModelSwaps.push(...roundResult.modelSwaps);
 
     // Replenishment: if slots are empty and replenish callback exists, fill from alive providers.
+    // Skip for red_team — intentional partial participation per round.
     const activeCount = roundResult.round.responses.length;
     const emptySlots = originalTeamSize - activeCount;
     let replenishedResponses: WorkerResponse[] = [];
-    if (emptySlots > 0 && fallbackDeps?.replenish && i === 1) {
+    if (cfg.protocol !== "red_team" && emptySlots > 0 && fallbackDeps?.replenish && i === 1) {
       const aliveProviders = new Set(
         roundResult.round.responses.map((r) => extractProvider(r.model)),
       );
