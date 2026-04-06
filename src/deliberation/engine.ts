@@ -388,18 +388,16 @@ async function callWithFallback(
     // Session continuation: append follow-up to existing history (only if same model)
     if (isR2Plus && activeHistory && deps.buildFollowUp) {
       const lastRound = ctx.rounds[ctx.rounds.length - 1];
-      const otherResponses = lastRound
-        ? lastRound.responses.filter((r) => r.workerIndex !== workerIndex)
-        : [];
+      // Sparse sharing for session continuation
+      const otherResponses = sparseSelect(lastRound?.responses ?? [], workerIndex, 2);
       const followUp = deps.buildFollowUp(ctx, otherResponses, input.workerInstructions, roundInfo);
       return [...activeHistory, followUp];
     }
     // Full rebuild: cold join, model swapped, or R2+ without session
     if (isR2Plus && deps.buildR2Messages) {
       const lastRound = ctx.rounds[ctx.rounds.length - 1];
-      const otherResponses = lastRound
-        ? lastRound.responses.filter((r) => r.workerIndex !== workerIndex)
-        : [];
+      // Sparse sharing: each worker sees at most 2 others (GroupDebate-inspired)
+      const otherResponses = sparseSelect(lastRound?.responses ?? [], workerIndex, 2);
       const ownPrevious = lastRound
         ? lastRound.responses.find((r) => r.workerIndex === workerIndex)
         : undefined;
@@ -506,10 +504,376 @@ async function callWithFallback(
   }
 }
 
-// -- Round Execution --
+// -- Protocol-Specific Round Execution --
+
+type RoundResult = { round: Round; tokens: TokenUsage; modelSwaps: ModelSwap[]; histories: Map<number, ChatMessage[]> };
 
 /**
- * Execute a single deliberation round:
+ * Execute sequential refinement: workers run one at a time, each building on the previous.
+ * Worker order: input.workerOrder or default [0, 1, 2, ...].
+ */
+async function executeSequentialRound(
+  ctx: SharedContext,
+  roundNumber: number,
+  deps: EngineDeps,
+  config: EngineConfig,
+  input: DeliberateInput,
+  _pool?: FallbackPool,
+): Promise<RoundResult> {
+  const participants = [...ctx.team.workers];
+  const order = input.workerOrder ?? participants.map((_, i) => i);
+  const responses: WorkerResponse[] = [];
+  const failedWorkers: FailedWorker[] = [];
+  const allSwaps: ModelSwap[] = [];
+  const histories = new Map<number, ChatMessage[]>();
+  let totalInput = 0;
+  let totalOutput = 0;
+  let previousOutput: string | undefined;
+
+  for (const workerIdx of order) {
+    const participant = participants[workerIdx];
+    if (!participant) continue;
+
+    // Build sequential messages — first worker gets R1, subsequent get previous output
+    const { buildSequentialRefinementMessages } = await import("./prompts");
+    const messages = buildSequentialRefinementMessages(ctx, previousOutput, input.workerInstructions);
+
+    try {
+      const result = await deps.chat(participant.model, messages, config.workerGenParams);
+      totalInput += result.inputTokens;
+      totalOutput += result.outputTokens;
+      previousOutput = result.content;
+      const fullHistory = [...messages, { role: "assistant" as const, content: result.content }];
+      histories.set(workerIdx, fullHistory);
+      responses.push({
+        model: participant.model,
+        content: result.content,
+        workerIndex: workerIdx,
+      });
+    } catch (error) {
+      const rawMsg = error instanceof Error ? error.message : String(error);
+      failedWorkers.push({
+        model: participant.model,
+        error: normalizeErrorMessage(rawMsg),
+        errorCode: classifyError(error),
+        retryable: isRetryableError(classifyError(error)),
+      });
+      // Sequential: skip failed worker, next worker uses last successful output
+    }
+  }
+
+  if (responses.length === 0 && participants.length > 0) {
+    throw new RoundExecutionError(
+      "worker",
+      failedWorkers[0]?.model ?? participants[0]!.model,
+      new Error(`All ${participants.length} worker(s) failed in sequential refinement`),
+      { input: totalInput, output: totalOutput },
+      allSwaps,
+    );
+  }
+
+  return {
+    round: { number: roundNumber, responses, ...(failedWorkers.length > 0 ? { failedWorkers } : {}) },
+    tokens: { input: totalInput, output: totalOutput },
+    modelSwaps: allSwaps,
+    histories,
+  };
+}
+
+/**
+ * Execute host interrogation: each worker gets a different question, workers isolated.
+ */
+async function executeInterrogationRound(
+  ctx: SharedContext,
+  roundNumber: number,
+  deps: EngineDeps,
+  config: EngineConfig,
+  input: DeliberateInput,
+  _pool?: FallbackPool,
+): Promise<RoundResult> {
+  const participants = [...ctx.team.workers];
+  const questions = input.questions ?? [];
+  const responses: WorkerResponse[] = [];
+  const failedWorkers: FailedWorker[] = [];
+  const allSwaps: ModelSwap[] = [];
+  const histories = new Map<number, ChatMessage[]>();
+  let totalInput = 0;
+  let totalOutput = 0;
+
+  // Each worker gets a question (round-robin if fewer questions than workers)
+  const { buildHostInterrogationMessages } = await import("./prompts");
+
+  const results = await Promise.allSettled(
+    participants.map(async (participant, index) => {
+      const question = questions[index % Math.max(questions.length, 1)] ?? input.task;
+      const prevExchanges = input.previousExchanges?.get(index);
+      const messages = buildHostInterrogationMessages(ctx.task, question, prevExchanges);
+
+      const result = await deps.chat(participant.model, messages, config.workerGenParams);
+      return { result, messages, index, model: participant.model };
+    }),
+  );
+
+  for (let idx = 0; idx < results.length; idx++) {
+    const r = results[idx]!;
+    if (r.status === "fulfilled") {
+      const { result, messages, index, model } = r.value;
+      totalInput += result.inputTokens;
+      totalOutput += result.outputTokens;
+      const fullHistory = [...messages, { role: "assistant" as const, content: result.content }];
+      histories.set(index, fullHistory);
+      responses.push({ model, content: result.content, workerIndex: index });
+    } else {
+      const model = participants[idx]!.model;
+      const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      failedWorkers.push({ model, error: normalizeErrorMessage(reason) });
+    }
+  }
+
+  if (responses.length === 0 && participants.length > 0) {
+    throw new RoundExecutionError(
+      "worker",
+      failedWorkers[0]?.model ?? participants[0]!.model,
+      new Error(`All ${participants.length} worker(s) failed in interrogation`),
+      { input: totalInput, output: totalOutput },
+      allSwaps,
+    );
+  }
+
+  return {
+    round: { number: roundNumber, responses, ...(failedWorkers.length > 0 ? { failedWorkers } : {}) },
+    tokens: { input: totalInput, output: totalOutput },
+    modelSwaps: allSwaps,
+    histories,
+  };
+}
+
+/**
+ * Execute evaluation scoring: workers evaluate independently + aggregation.
+ */
+async function executeEvaluationRound(
+  ctx: SharedContext,
+  roundNumber: number,
+  deps: EngineDeps,
+  config: EngineConfig,
+  input: DeliberateInput,
+  _pool?: FallbackPool,
+): Promise<RoundResult> {
+  const participants = [...ctx.team.workers];
+  const criteria = input.criteria ?? "Evaluate the quality, correctness, and completeness.";
+  const subject = input.subject ?? ctx.task;
+  const responses: WorkerResponse[] = [];
+  const failedWorkers: FailedWorker[] = [];
+  const allSwaps: ModelSwap[] = [];
+  const histories = new Map<number, ChatMessage[]>();
+  let totalInput = 0;
+  let totalOutput = 0;
+
+  const { buildEvaluationScoringMessages } = await import("./prompts");
+
+  const results = await Promise.allSettled(
+    participants.map(async (participant, index) => {
+      const messages = buildEvaluationScoringMessages(ctx.task, criteria, subject, input.workerInstructions);
+      const result = await deps.chat(participant.model, messages, config.workerGenParams);
+      return { result, messages, index, model: participant.model };
+    }),
+  );
+
+  for (let idx = 0; idx < results.length; idx++) {
+    const r = results[idx]!;
+    if (r.status === "fulfilled") {
+      const { result, messages, index, model } = r.value;
+      totalInput += result.inputTokens;
+      totalOutput += result.outputTokens;
+      const fullHistory = [...messages, { role: "assistant" as const, content: result.content }];
+      histories.set(index, fullHistory);
+      responses.push({ model, content: result.content, workerIndex: index });
+    } else {
+      const model = participants[idx]!.model;
+      const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      failedWorkers.push({ model, error: normalizeErrorMessage(reason) });
+    }
+  }
+
+  if (responses.length === 0 && participants.length > 0) {
+    throw new RoundExecutionError(
+      "worker",
+      failedWorkers[0]?.model ?? participants[0]!.model,
+      new Error(`All ${participants.length} worker(s) failed in evaluation`),
+      { input: totalInput, output: totalOutput },
+      allSwaps,
+    );
+  }
+
+  return {
+    round: { number: roundNumber, responses, ...(failedWorkers.length > 0 ? { failedWorkers } : {}) },
+    tokens: { input: totalInput, output: totalOutput },
+    modelSwaps: allSwaps,
+    histories,
+  };
+}
+
+/**
+ * Execute red team: generators run first, then attackers receive generator outputs.
+ * Round 1: generators produce. Round 2: attackers attack. Round 3+: generators defend.
+ */
+async function executeRedTeamRound(
+  ctx: SharedContext,
+  roundNumber: number,
+  deps: EngineDeps,
+  config: EngineConfig,
+  input: DeliberateInput,
+  _pool?: FallbackPool,
+): Promise<RoundResult> {
+  const participants = [...ctx.team.workers];
+  const roles = input.roles;
+  const responses: WorkerResponse[] = [];
+  const failedWorkers: FailedWorker[] = [];
+  const allSwaps: ModelSwap[] = [];
+  const histories = new Map<number, ChatMessage[]>();
+  let totalInput = 0;
+  let totalOutput = 0;
+
+  const { buildRedTeamGeneratorMessages, buildRedTeamAttackerMessages } = await import("./prompts");
+
+  // Determine role for each worker
+  const getRole = (idx: number): "generator" | "attacker" => {
+    if (roles?.get(idx)) return roles.get(idx)!;
+    // Default: first half generators, second half attackers
+    return idx < Math.ceil(participants.length / 2) ? "generator" : "attacker";
+  };
+
+  const isAttackRound = roundNumber % 2 === 0; // odd = generate, even = attack
+  const lastRound = ctx.rounds[ctx.rounds.length - 1];
+
+  if (!isAttackRound || !lastRound) {
+    // Generator round (or first round): generators produce, attackers skip
+    const generatorResults = await Promise.allSettled(
+      participants.map(async (participant, index) => {
+        if (getRole(index) === "attacker" && lastRound) return null; // attackers skip generator rounds after R1
+
+        const previousAttack = lastRound
+          ? lastRound.responses.filter((r) => getRole(r.workerIndex) === "attacker").map((r) => r.content).join("\n\n---\n\n")
+          : undefined;
+        const messages = buildRedTeamGeneratorMessages(ctx.task, input.workerInstructions, previousAttack || undefined);
+        const result = await deps.chat(participant.model, messages, config.workerGenParams);
+        return { result, messages, index, model: participant.model };
+      }),
+    );
+
+    for (let idx = 0; idx < generatorResults.length; idx++) {
+      const r = generatorResults[idx]!;
+      if (r.status === "fulfilled" && r.value) {
+        const { result, messages, index, model } = r.value;
+        totalInput += result.inputTokens;
+        totalOutput += result.outputTokens;
+        histories.set(index, [...messages, { role: "assistant" as const, content: result.content }]);
+        responses.push({ model, content: result.content, workerIndex: index });
+      } else if (r.status === "rejected") {
+        const model = participants[idx]!.model;
+        const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        failedWorkers.push({ model, error: normalizeErrorMessage(reason) });
+      }
+    }
+  } else {
+    // Attack round: attackers analyze generator outputs
+    const generatorOutputs = lastRound.responses
+      .filter((r) => getRole(r.workerIndex) === "generator")
+      .map((r) => r.content);
+
+    const attackerResults = await Promise.allSettled(
+      participants.map(async (participant, index) => {
+        if (getRole(index) === "generator") return null; // generators skip attack rounds
+
+        const messages = buildRedTeamAttackerMessages(ctx.task, generatorOutputs, input.workerInstructions);
+        const result = await deps.chat(participant.model, messages, config.workerGenParams);
+        return { result, messages, index, model: participant.model };
+      }),
+    );
+
+    for (let idx = 0; idx < attackerResults.length; idx++) {
+      const r = attackerResults[idx]!;
+      if (r.status === "fulfilled" && r.value) {
+        const { result, messages, index, model } = r.value;
+        totalInput += result.inputTokens;
+        totalOutput += result.outputTokens;
+        histories.set(index, [...messages, { role: "assistant" as const, content: result.content }]);
+        responses.push({ model, content: result.content, workerIndex: index });
+      } else if (r.status === "rejected") {
+        const model = participants[idx]!.model;
+        const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        failedWorkers.push({ model, error: normalizeErrorMessage(reason) });
+      }
+    }
+  }
+
+  if (responses.length === 0 && participants.length > 0) {
+    throw new RoundExecutionError(
+      "worker",
+      failedWorkers[0]?.model ?? participants[0]!.model,
+      new Error(`All workers failed in red team round ${roundNumber}`),
+      { input: totalInput, output: totalOutput },
+      allSwaps,
+    );
+  }
+
+  return {
+    round: { number: roundNumber, responses, ...(failedWorkers.length > 0 ? { failedWorkers } : {}) },
+    tokens: { input: totalInput, output: totalOutput },
+    modelSwaps: allSwaps,
+    histories,
+  };
+}
+
+// -- Sparse Sharing --
+
+/**
+ * Select a sparse subset of other workers' responses for sharing.
+ * GroupDebate-inspired: each worker sees at most `groupSize` others.
+ */
+function sparseSelect(
+  allResponses: readonly WorkerResponse[],
+  workerIndex: number,
+  groupSize: number = 2,
+): WorkerResponse[] {
+  const others = allResponses.filter((r) => r.workerIndex !== workerIndex);
+  if (others.length <= groupSize) return [...others];
+  // Deterministic selection based on workerIndex to ensure reproducibility
+  const selected: WorkerResponse[] = [];
+  for (let i = 0; i < groupSize; i++) {
+    const idx = (workerIndex + i + 1) % others.length;
+    selected.push(others[idx]!);
+  }
+  return selected;
+}
+
+// -- Aggregation --
+
+/**
+ * Aggregate evaluation scoring results.
+ */
+function aggregateEvaluationResults(
+  responses: readonly WorkerResponse[],
+  method: import("./types").AggregationMethod,
+): { method: import("./types").AggregationMethod; results: { model: string; score?: number; verdict?: string }[] } {
+  const results = responses.map((r) => {
+    // Try to extract a numeric score from the response
+    const scoreMatch = r.content.match(/(?:score|rating|점수)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+    const verdictMatch = r.content.match(/(?:verdict|결론|판정)\s*[:=]?\s*(.+?)(?:\n|$)/i);
+    return {
+      model: r.model,
+      ...(scoreMatch ? { score: parseFloat(scoreMatch[1]!) } : {}),
+      ...(verdictMatch ? { verdict: verdictMatch[1]!.trim() } : {}),
+    };
+  });
+
+  return { method, results };
+}
+
+// -- Standard Round Execution --
+
+/**
+ * Execute a single deliberation round (parallel, with sparse sharing for R2+):
  *   1. Workers respond in parallel with per-worker fallback (callWithFallback)
  *   2. Collect responses, track failures and swaps
  */
@@ -626,10 +990,26 @@ export async function deliberate(
   const convergenceEnabled = cfg.protocol === "shared_convergence";
 
   for (let i = 1; i <= cfg.maxRounds; i++) {
-    let roundResult = await executeRound(
-      ctx, ctx.rounds.length + 1, deps, cfg, input, fallbackDeps?.pool,
-      workerHistories,
-    );
+    // Protocol-specific round execution
+    let roundResult: RoundResult;
+    switch (cfg.protocol) {
+      case "sequential_refinement":
+        roundResult = await executeSequentialRound(ctx, ctx.rounds.length + 1, deps, cfg, input, fallbackDeps?.pool);
+        break;
+      case "host_interrogation":
+        roundResult = await executeInterrogationRound(ctx, ctx.rounds.length + 1, deps, cfg, input, fallbackDeps?.pool);
+        break;
+      case "evaluation_scoring":
+        roundResult = await executeEvaluationRound(ctx, ctx.rounds.length + 1, deps, cfg, input, fallbackDeps?.pool);
+        break;
+      case "red_team":
+        roundResult = await executeRedTeamRound(ctx, ctx.rounds.length + 1, deps, cfg, input, fallbackDeps?.pool);
+        break;
+      default:
+        // shared_convergence, adversarial_debate: parallel with fallback
+        roundResult = await executeRound(ctx, ctx.rounds.length + 1, deps, cfg, input, fallbackDeps?.pool, workerHistories);
+        break;
+    }
     // Update worker histories for session continuation in next round
     workerHistories = roundResult.histories;
 
@@ -690,8 +1070,9 @@ export async function deliberate(
 
     // Check team viability: abort if active workers < min_viable
     // Only enforce for teams of 3+; smaller teams use existing all-fail guard.
+    // Skip for red_team — by design, each round uses a subset of workers.
     const finalActiveCount = roundResult.round.responses.length;
-    if (originalTeamSize >= 3 && finalActiveCount > 0 && finalActiveCount < minViable) {
+    if (cfg.protocol !== "red_team" && originalTeamSize >= 3 && finalActiveCount > 0 && finalActiveCount < minViable) {
       const lostSlots = (roundResult.round.failedWorkers ?? []).map((fw) => ({
         model: fw.model,
         reason: fw.error,
@@ -813,6 +1194,14 @@ export async function deliberate(
     warnings.push(`team_degraded: ${degradation.activeTeamSize}/${degradation.originalTeamSize} workers active`);
   }
 
+  // Aggregation for evaluation_scoring
+  const aggregation = cfg.protocol === "evaluation_scoring" && allRounds.length > 0
+    ? aggregateEvaluationResults(
+        allRounds[allRounds.length - 1]!.responses,
+        input.aggregation ?? "voting",
+      )
+    : undefined;
+
   return {
     roundsExecuted: allRounds.length,
     totalTokens: accTokens,
@@ -823,5 +1212,6 @@ export async function deliberate(
     ...(allModelSwaps.length > 0 ? { modelSwaps: allModelSwaps } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
     ...(degradation ? { degradation } : {}),
+    ...(aggregation ? { aggregation } : {}),
   };
 }

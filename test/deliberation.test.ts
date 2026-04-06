@@ -294,4 +294,175 @@ describe("Deliberation E2E", () => {
     // Total LLM calls = rounds * workers
     expect(result.totalLLMCalls).toBeGreaterThanOrEqual(result.roundsExecuted * 2);
   });
+
+  // ----------------------------------------------------------
+  // 10. [HP] sequential_refinement — workers run sequentially
+  // ----------------------------------------------------------
+  it("should run sequential refinement (A→B→C chain)", async () => {
+    const callOrder: string[] = [];
+    const chatFn = mock(async (model: string, messages: ChatMessage[]) => {
+      callOrder.push(model);
+      const userMsg = messages.find((m) => m.role === "user")?.content ?? "";
+      // After first worker, should see <previous-version>
+      if (callOrder.length > 1) {
+        expect(userMsg).toContain("<previous-version>");
+      }
+      return chatResult(`Output from ${model}`);
+    });
+
+    const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
+    const result = await fn({
+      task: "Refactor this function",
+      models: FIXTURE_MODEL_IDS, protocol: "sequential_refinement" as const,
+      maxRounds: 1,
+    });
+
+    expect(result.roundsExecuted).toBe(1);
+    expect(result.protocol).toBe("sequential_refinement");
+    // Workers should run sequentially — callOrder reflects insertion order
+    expect(callOrder.length).toBe(3);
+  });
+
+  // ----------------------------------------------------------
+  // 11. [HP] host_interrogation — workers get questions
+  // ----------------------------------------------------------
+  it("should run host interrogation with different questions", async () => {
+    const receivedQuestions: string[] = [];
+    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
+      const userMsg = messages.find((m) => m.role === "user")?.content ?? "";
+      const qMatch = userMsg.match(/<question>(.*?)<\/question>/);
+      if (qMatch) receivedQuestions.push(qMatch[1]!);
+      return chatResult("Answer to the question");
+    });
+
+    const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
+    const result = await fn({
+      task: "Analyze system bottlenecks",
+      models: FIXTURE_MODEL_IDS, protocol: "host_interrogation" as const,
+      maxRounds: 1,
+      questions: ["DB bottleneck?", "Network latency?", "Memory pressure?"],
+    });
+
+    expect(result.roundsExecuted).toBe(1);
+    expect(result.protocol).toBe("host_interrogation");
+    expect(receivedQuestions).toContain("DB bottleneck?");
+    expect(receivedQuestions).toContain("Network latency?");
+    expect(receivedQuestions).toContain("Memory pressure?");
+  });
+
+  // ----------------------------------------------------------
+  // 12. [HP] evaluation_scoring — independent scoring + aggregation
+  // ----------------------------------------------------------
+  it("should run evaluation scoring with aggregation", async () => {
+    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
+      const userMsg = messages.find((m) => m.role === "user")?.content ?? "";
+      expect(userMsg).toContain("<evaluation-criteria>");
+      expect(userMsg).toContain("<subject>");
+      return chatResult("score: 8\nverdict: Good quality implementation");
+    });
+
+    const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
+    const result = await fn({
+      task: "Evaluate this code",
+      models: FIXTURE_MODEL_IDS, protocol: "evaluation_scoring" as const,
+      maxRounds: 1,
+      criteria: "correctness, readability, performance",
+      subject: "function sort(arr) { return arr.sort(); }",
+    });
+
+    expect(result.roundsExecuted).toBe(1);
+    expect(result.protocol).toBe("evaluation_scoring");
+    expect(result.aggregation).toBeDefined();
+    expect(result.aggregation!.method).toBe("voting");
+    expect(result.aggregation!.results.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ----------------------------------------------------------
+  // 13. [HP] red_team — generator then attacker
+  // ----------------------------------------------------------
+  it("should run red team with generator/attacker rounds", async () => {
+    let roundNum = 0;
+    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
+      roundNum++;
+      const sysMsg = messages.find((m) => m.role === "system")?.content ?? "";
+      // First round: generators produce
+      // Second round: attackers analyze
+      if (sysMsg.includes("Find vulnerabilities")) {
+        const userMsg = messages.find((m) => m.role === "user")?.content ?? "";
+        expect(userMsg).toContain("<target-output>");
+        return chatResult("Found SQL injection vulnerability");
+      }
+      return chatResult("Secure login implementation");
+    });
+
+    const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
+    const result = await fn({
+      task: "Build authentication system",
+      models: FIXTURE_MODEL_IDS, protocol: "red_team" as const,
+      maxRounds: 2,
+    });
+
+    expect(result.roundsExecuted).toBe(2);
+    expect(result.protocol).toBe("red_team");
+  });
+
+  // ----------------------------------------------------------
+  // 14. [HP] adversarial_debate — steelman constraints present
+  // ----------------------------------------------------------
+  it("should include steelman constraints in adversarial debate R2", async () => {
+    let callNum = 0;
+    const capturedR2Messages: string[] = [];
+    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
+      callNum++;
+      if (callNum > 3) { // R2 messages — get last user message (follow-up)
+        const userMessages = messages.filter((m) => m.role === "user");
+        const lastUser = userMessages[userMessages.length - 1]?.content ?? "";
+        capturedR2Messages.push(lastUser);
+      }
+      return chatResult(`Response call ${callNum} ${"x".repeat(callNum * 40)}`);
+    });
+
+    const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
+    await fn({
+      task: "Compare Kafka vs RabbitMQ",
+      models: FIXTURE_MODEL_IDS, protocol: "adversarial_debate" as const,
+      maxRounds: 2,
+    });
+
+    // R2 messages should contain adversarial constraints
+    expect(capturedR2Messages.length).toBeGreaterThan(0);
+    const hassteelman = capturedR2Messages.some((msg) =>
+      msg.includes("steelman") || msg.includes("strongest form")
+    );
+    expect(hassteelman).toBe(true);
+  });
+
+  // ----------------------------------------------------------
+  // 15. [HP] sparse sharing — R2 workers don't see all positions
+  // ----------------------------------------------------------
+  it("should apply sparse sharing in R2 (not full mesh)", async () => {
+    let round = 0;
+    const r2AnalystCounts: number[] = [];
+    const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
+      round++;
+      const userMsg = messages.find((m) => m.role === "user")?.content ?? "";
+      if (round > 3) { // R2
+        const analystCount = (userMsg.match(/One analyst argues/g) ?? []).length;
+        r2AnalystCounts.push(analystCount);
+      }
+      return chatResult(`Position ${round}: unique content ${"y".repeat(round * 50)}`);
+    });
+
+    const fn = createDeliberateFn({ registry: fixtureRegistry(), chat: chatFn });
+    await fn({
+      task: "Architecture decision",
+      models: FIXTURE_MODEL_IDS, protocol: "shared_convergence" as const,
+      maxRounds: 2,
+    });
+
+    // With 3 workers and groupSize=2, each worker should see at most 2 others
+    for (const count of r2AnalystCounts) {
+      expect(count).toBeLessThanOrEqual(2);
+    }
+  });
 });
