@@ -172,6 +172,7 @@ export function buildSharedConvergenceR1(
     : SHARED_CONVERGENCE_SYSTEM_CRITIQUE;
 
   const userParts: string[] = [];
+
   if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
 
   // Assign diversity lens per worker (DMAD: diverse reasoning methods prevent mental set)
@@ -201,25 +202,20 @@ export function buildSharedConvergenceR2(
   ownPrevious: WorkerResponse | undefined,
   instructions?: string,
   roundInfo?: RoundInfo,
+  workerIndex?: number,
 ): ChatMessage[] {
   const system = (ctx.taskNature ?? "critique") === "artifact"
     ? SHARED_CONVERGENCE_SYSTEM_ARTIFACT
     : SHARED_CONVERGENCE_SYSTEM_CRITIQUE;
 
   const userParts: string[] = [];
-  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
 
-  // Anti-conformity harness
-  userParts.push(`<constraints>\n${ANTI_CONFORMITY}\n</constraints>`);
-  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
-
-  // Other positions (3rd person, sparse-selected)
+  // Reference data (long content) at top — Lost-in-the-Middle: push to start
   if (otherResponses.length > 0) {
     const others = formatOtherPositions(otherResponses);
     if (others) userParts.push(`<other-positions>\n${others}\n</other-positions>`);
   }
 
-  // Own previous
   if (ownPrevious) {
     userParts.push(`<your-previous>${ownPrevious.content}</your-previous>`);
   } else if (ctx.rounds.length > 0) {
@@ -232,6 +228,18 @@ export function buildSharedConvergenceR2(
     }).join("\n\n");
     userParts.push(`<debate-so-far>\n${transcript}\n</debate-so-far>`);
   }
+
+  // Instructions and constraints at bottom — close to task for recall
+  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+
+  // Restore R1 diversity lens in R2+ (prevents lens loss across rounds)
+  if (workerIndex != null && roundInfo && roundInfo.max > 1) {
+    const lens = DIVERSITY_LENSES[workerIndex % DIVERSITY_LENSES.length]!;
+    userParts.push(`<analysis-lens>${lens}</analysis-lens>`);
+  }
+
+  userParts.push(`<constraints>\n${ANTI_CONFORMITY}\n</constraints>`);
+  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
 
   if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
     userParts.push("This is the final round. Commit to your strongest position.");
@@ -253,16 +261,27 @@ export function buildSharedConvergenceFollowUp(
   otherResponses: readonly WorkerResponse[],
   instructions?: string,
   roundInfo?: RoundInfo,
+  workerIndex?: number,
 ): ChatMessage {
   const parts: string[] = [];
-  if (instructions) parts.push(`<host-instructions>${instructions}</host-instructions>`);
-  parts.push(`<constraints>\n${ANTI_CONFORMITY}\n</constraints>`);
-  parts.push(CONFIDENCE_AND_UNCERTAINTY);
 
+  // Reference data at top
   if (otherResponses.length > 0) {
     const others = formatOtherPositions(otherResponses);
     if (others) parts.push(`<other-positions>\n${others}\n</other-positions>`);
   }
+
+  // Instructions and constraints at bottom
+  if (instructions) parts.push(`<host-instructions>${instructions}</host-instructions>`);
+
+  // Restore R1 diversity lens
+  if (workerIndex != null && roundInfo && roundInfo.max > 1) {
+    const lens = DIVERSITY_LENSES[workerIndex % DIVERSITY_LENSES.length]!;
+    parts.push(`<analysis-lens>${lens}</analysis-lens>`);
+  }
+
+  parts.push(`<constraints>\n${ANTI_CONFORMITY}\n</constraints>`);
+  parts.push(CONFIDENCE_AND_UNCERTAINTY);
 
   if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
     parts.push("This is the final round. Commit to your strongest position.");
@@ -337,18 +356,15 @@ export function buildAdversarialDebateR2(
   ownPrevious: WorkerResponse | undefined,
   instructions?: string,
   _roundInfo?: RoundInfo,
+  workerIndex?: number,
 ): ChatMessage[] {
   const system = (ctx.taskNature ?? "critique") === "artifact"
     ? ADVERSARIAL_SYSTEM_ARTIFACT
     : ADVERSARIAL_SYSTEM_CRITIQUE;
 
   const userParts: string[] = [];
-  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
 
-  // Adversarial anti-conformity harness (steelman + challenge)
-  userParts.push(`<constraints>\n${ANTI_CONFORMITY_ADVERSARIAL}\n</constraints>`);
-  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
-
+  // Reference data at top
   if (otherResponses.length > 0) {
     const others = formatOtherPositions(otherResponses);
     if (others) userParts.push(`<positions-to-challenge>\n${others}\n</positions-to-challenge>`);
@@ -366,6 +382,18 @@ export function buildAdversarialDebateR2(
     userParts.push(`<debate-so-far>\n${transcript}\n</debate-so-far>`);
   }
 
+  // Instructions and constraints at bottom
+  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+
+  // Restore R1 adversarial stance
+  if (workerIndex != null) {
+    const lens = ADVERSARIAL_LENSES[workerIndex % ADVERSARIAL_LENSES.length]!;
+    userParts.push(`<assigned-stance>${lens}</assigned-stance>`);
+  }
+
+  userParts.push(`<constraints>\n${ANTI_CONFORMITY_ADVERSARIAL}\n</constraints>`);
+  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
+
   userParts.push(`<task>${ctx.task}</task>`);
 
   return [
@@ -381,17 +409,28 @@ export function buildAdversarialDebateFollowUp(
   ctx: SharedContext,
   otherResponses: readonly WorkerResponse[],
   instructions?: string,
-  _roundInfo?: RoundInfo, // eslint-disable-line @typescript-eslint/no-unused-vars
+  _roundInfo?: RoundInfo,
+  workerIndex?: number,
 ): ChatMessage {
   const parts: string[] = [];
-  if (instructions) parts.push(`<host-instructions>${instructions}</host-instructions>`);
-  parts.push(`<constraints>\n${ANTI_CONFORMITY_ADVERSARIAL}\n</constraints>`);
-  parts.push(CONFIDENCE_AND_UNCERTAINTY);
 
+  // Reference data at top
   if (otherResponses.length > 0) {
     const others = formatOtherPositions(otherResponses);
     if (others) parts.push(`<positions-to-challenge>\n${others}\n</positions-to-challenge>`);
   }
+
+  // Instructions and constraints at bottom
+  if (instructions) parts.push(`<host-instructions>${instructions}</host-instructions>`);
+
+  // Restore R1 adversarial stance
+  if (workerIndex != null) {
+    const lens = ADVERSARIAL_LENSES[workerIndex % ADVERSARIAL_LENSES.length]!;
+    parts.push(`<assigned-stance>${lens}</assigned-stance>`);
+  }
+
+  parts.push(`<constraints>\n${ANTI_CONFORMITY_ADVERSARIAL}\n</constraints>`);
+  parts.push(CONFIDENCE_AND_UNCERTAINTY);
 
   parts.push(`<task>${ctx.task}</task>`);
   return { role: "user", content: parts.join("\n\n") };

@@ -270,6 +270,47 @@ describe("buildSharedConvergenceR2", () => {
     )[0]!.content!;
     expect(sys).toContain("it can be approached");
   });
+
+  it("should include analysis-lens in R2+ when workerIndex and multi-round", () => {
+    const user = buildSharedConvergenceR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 2, max: 3 }, 0,
+    )[1]!.content!;
+    expect(user).toContain("<analysis-lens>");
+    expect(user).toContain("Prioritize practical constraints");
+  });
+
+  it("should assign different lenses per workerIndex in R2+", () => {
+    const u0 = buildSharedConvergenceR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 2, max: 3 }, 0,
+    )[1]!.content!;
+    const u1 = buildSharedConvergenceR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 2, max: 3 }, 1,
+    )[1]!.content!;
+    const lens0 = u0.match(/<analysis-lens>([\s\S]*?)<\/analysis-lens>/)?.[1];
+    const lens1 = u1.match(/<analysis-lens>([\s\S]*?)<\/analysis-lens>/)?.[1];
+    expect(lens0).not.toEqual(lens1);
+  });
+
+  it("should NOT include analysis-lens in R2+ for single-round", () => {
+    const user = buildSharedConvergenceR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 1, max: 1 }, 0,
+    )[1]!.content!;
+    expect(user).not.toContain("<analysis-lens>");
+  });
+
+  it("should NOT include analysis-lens without workerIndex", () => {
+    const user = buildSharedConvergenceR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 2, max: 3 },
+    )[1]!.content!;
+    expect(user).not.toContain("<analysis-lens>");
+  });
+
+  it("should place other-positions before constraints (Lost-in-the-Middle)", () => {
+    const user = buildSharedConvergenceR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    const posIdx = user.indexOf("<other-positions>");
+    const constIdx = user.indexOf("<constraints>");
+    expect(posIdx).toBeLessThan(constIdx);
+  });
 });
 
 describe("buildSharedConvergenceFollowUp", () => {
@@ -322,6 +363,25 @@ describe("buildSharedConvergenceFollowUp", () => {
     const msg = buildSharedConvergenceFollowUp(makeCtx(), others);
     expect(msg.content).not.toContain("<img>");
     expect(msg.content).toContain("&lt;img&gt;");
+  });
+
+  it("should include analysis-lens in FollowUp when workerIndex and multi-round", () => {
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), [], undefined, { current: 2, max: 3 }, 0);
+    expect(msg.content).toContain("<analysis-lens>");
+    expect(msg.content).toContain("Prioritize practical constraints");
+  });
+
+  it("should NOT include analysis-lens in FollowUp without workerIndex", () => {
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), [], undefined, { current: 2, max: 3 });
+    expect(msg.content).not.toContain("<analysis-lens>");
+  });
+
+  it("should place other-positions before constraints in FollowUp", () => {
+    const others = [makeResponse("w/b", "Redis is better", 1)];
+    const msg = buildSharedConvergenceFollowUp(makeCtx(), others);
+    const posIdx = msg.content!.indexOf("<other-positions>");
+    const constIdx = msg.content!.indexOf("<constraints>");
+    expect(posIdx).toBeLessThan(constIdx);
   });
 });
 
@@ -443,6 +503,38 @@ describe("buildAdversarialDebateR2", () => {
     const user = buildAdversarialDebateR2(makeCtx(), [], ownPrevious)[1]!.content!;
     expect(user).not.toContain("<positions-to-challenge>");
   });
+
+  it("should include assigned-stance in R2+ when workerIndex provided", () => {
+    const user = buildAdversarialDebateR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, undefined, 0,
+    )[1]!.content!;
+    expect(user).toContain("<assigned-stance>");
+    expect(user).toContain("Argue FOR");
+  });
+
+  it("should assign different stances per workerIndex in R2+", () => {
+    const u0 = buildAdversarialDebateR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, undefined, 0,
+    )[1]!.content!;
+    const u1 = buildAdversarialDebateR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, undefined, 1,
+    )[1]!.content!;
+    const stance0 = u0.match(/<assigned-stance>([\s\S]*?)<\/assigned-stance>/)?.[1];
+    const stance1 = u1.match(/<assigned-stance>([\s\S]*?)<\/assigned-stance>/)?.[1];
+    expect(stance0).not.toEqual(stance1);
+  });
+
+  it("should NOT include assigned-stance without workerIndex", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).not.toContain("<assigned-stance>");
+  });
+
+  it("should place positions-to-challenge before constraints (Lost-in-the-Middle)", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    const posIdx = user.indexOf("<positions-to-challenge>");
+    const constIdx = user.indexOf("<constraints>");
+    expect(posIdx).toBeLessThan(constIdx);
+  });
 });
 
 describe("buildAdversarialDebateFollowUp", () => {
@@ -483,6 +575,25 @@ describe("buildAdversarialDebateFollowUp", () => {
     const msg = buildAdversarialDebateFollowUp(makeCtx(), []);
     expect(msg.content).not.toContain("<role>");
     expect(msg.content).not.toContain("find weaknesses");
+  });
+
+  it("should include assigned-stance in FollowUp when workerIndex provided", () => {
+    const msg = buildAdversarialDebateFollowUp(makeCtx(), [], undefined, undefined, 0);
+    expect(msg.content).toContain("<assigned-stance>");
+    expect(msg.content).toContain("Argue FOR");
+  });
+
+  it("should NOT include assigned-stance in FollowUp without workerIndex", () => {
+    const msg = buildAdversarialDebateFollowUp(makeCtx(), []);
+    expect(msg.content).not.toContain("<assigned-stance>");
+  });
+
+  it("should place positions-to-challenge before constraints in FollowUp", () => {
+    const others = [makeResponse("w/b", "Redis", 1)];
+    const msg = buildAdversarialDebateFollowUp(makeCtx(), others);
+    const posIdx = msg.content!.indexOf("<positions-to-challenge>");
+    const constIdx = msg.content!.indexOf("<constraints>");
+    expect(posIdx).toBeLessThan(constIdx);
   });
 });
 

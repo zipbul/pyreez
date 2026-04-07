@@ -150,6 +150,7 @@ export interface EngineDeps {
     otherResponses: readonly WorkerResponse[],
     instructions?: string,
     roundInfo?: RoundInfo,
+    workerIndex?: number,
   ) => ChatMessage;
 }
 
@@ -391,7 +392,7 @@ async function callWithFallback(
       const lastRound = ctx.rounds[ctx.rounds.length - 1];
       // Sparse sharing for session continuation
       const otherResponses = sparseSelect(lastRound?.responses ?? [], workerIndex, 2);
-      const followUp = deps.buildFollowUp(ctx, otherResponses, input.workerInstructions, roundInfo);
+      const followUp = deps.buildFollowUp(ctx, otherResponses, input.workerInstructions, roundInfo, workerIndex);
       return [...activeHistory, followUp];
     }
     // Full rebuild: cold join, model swapped, or R2+ without session
@@ -448,7 +449,12 @@ async function callWithFallback(
       const fullHistory = [...messages, { role: "assistant" as const, content: result.content }];
 
       return {
-        response: { model: currentModel, content: result.content, workerIndex },
+        response: {
+          model: currentModel,
+          content: result.content,
+          workerIndex,
+          ...(result.truncated ? { truncated: true } : {}),
+        },
         failed: false,
         swaps,
         tokens: { input: totalInput, output: totalOutput },
@@ -1202,6 +1208,7 @@ export async function deliberate(
       model: resp.model,
       content: resp.content,
       ...(resp.confidence ? { confidence: resp.confidence } : {}),
+      ...(resp.truncated ? { truncated: true } : {}),
     })),
     ...(r.failedWorkers?.length ? { failedWorkers: r.failedWorkers } : {}),
   }));

@@ -115,20 +115,20 @@ function createEngineDepsForProtocol(
         chat: chatFn,
         buildR1Messages: (ctx, instructions, roundInfo, workerIndex) =>
           buildSharedConvergenceR1(ctx, instructions, roundInfo, workerIndex),
-        buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo) =>
-          buildSharedConvergenceR2(ctx, otherResponses, ownPrevious, instructions, roundInfo),
-        buildFollowUp: (ctx, otherResponses, instructions, roundInfo) =>
-          buildSharedConvergenceFollowUp(ctx, otherResponses, instructions, roundInfo),
+        buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex) =>
+          buildSharedConvergenceR2(ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex),
+        buildFollowUp: (ctx, otherResponses, instructions, roundInfo, workerIndex) =>
+          buildSharedConvergenceFollowUp(ctx, otherResponses, instructions, roundInfo, workerIndex),
       };
     case "adversarial_debate":
       return {
         chat: chatFn,
         buildR1Messages: (ctx, instructions, roundInfo, workerIndex) =>
           buildAdversarialDebateR1(ctx, instructions, roundInfo, workerIndex),
-        buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo) =>
-          buildAdversarialDebateR2(ctx, otherResponses, ownPrevious, instructions, roundInfo),
-        buildFollowUp: (ctx, otherResponses, instructions, roundInfo) =>
-          buildAdversarialDebateFollowUp(ctx, otherResponses, instructions, roundInfo),
+        buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex) =>
+          buildAdversarialDebateR2(ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex),
+        buildFollowUp: (ctx, otherResponses, instructions, roundInfo, workerIndex) =>
+          buildAdversarialDebateFollowUp(ctx, otherResponses, instructions, roundInfo, workerIndex),
       };
     case "host_interrogation":
     case "sequential_refinement":

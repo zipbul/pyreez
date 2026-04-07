@@ -80,6 +80,8 @@ export interface WorkerResponse {
   readonly workerIndex: number;
   /** Self-reported confidence from explicit markers. undefined = no marker found. */
   readonly confidence?: "high" | "medium" | "low";
+  /** True when the response was cut off by max_tokens (finish_reason === "length"). */
+  readonly truncated?: boolean;
 }
 
 /**
@@ -244,7 +246,7 @@ export interface DeliberateOutput {
   readonly rounds?: readonly {
     number: number;
     protocol: Protocol;
-    responses?: readonly { model: string; content: string; confidence?: "high" | "medium" | "low" }[];
+    responses?: readonly { model: string; content: string; confidence?: "high" | "medium" | "low"; truncated?: boolean }[];
     failedWorkers?: readonly FailedWorker[];
   }[];
   /** Warnings about deliberation quality (e.g., low provider diversity). */

@@ -594,6 +594,48 @@ describe("failedWorkers propagation in deliberate output", () => {
 });
 
 // =============================================================================
+// truncated response propagation
+// =============================================================================
+
+describe("truncated response propagation", () => {
+  it("should propagate truncated flag to output rounds when finish_reason is length", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+    const deps = makeDeps({
+      chat: mock(async () => ({
+        content: validWorkerContent("partial"),
+        inputTokens: 10,
+        outputTokens: 20,
+        truncated: true,
+      })),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    expect(output.rounds).toBeDefined();
+    const responses = output.rounds![0]!.responses!;
+    expect(responses.length).toBeGreaterThan(0);
+    expect(responses[0]!.truncated).toBe(true);
+  });
+
+  it("should NOT include truncated when response is complete", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const config = makeConfig();
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(validWorkerContent("ok"), 10, 20)),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+
+    expect(output.rounds).toBeDefined();
+    const responses = output.rounds![0]!.responses!;
+    expect(responses[0]!.truncated).toBeUndefined();
+  });
+});
+
+// =============================================================================
 // Debate Protocol Convergence
 // =============================================================================
 
