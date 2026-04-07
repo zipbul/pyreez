@@ -28,21 +28,17 @@ export interface RoundInfo {
 
 // -- Core Prompt Fragments --
 
-const DEPTH_INSTRUCTIONS_CRITIQUE = `First, identify the fundamental problem and its root cause. Then identify the different perspectives from which it can be analyzed. Think through each perspective thoroughly.
-
-Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
-
-After reaching your position, construct the strongest possible argument against it and defend against that argument. Then find the failure in your defense. For each failure reason, ask why it would happen — trace to the root cause. Stop only when a new challenge reveals nothing you haven't already addressed.
-
+// Global depth: applies to ALL protocols. GOAL-only, no PROCESS prescription.
+const GLOBAL_DEPTH = `Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
+If a premise is flawed, reject it — do not build on a broken foundation.
+Express uncertainty where it exists. Do not force confidence on ambiguous points.
 Before finishing, verify your key claims.`;
 
-const DEPTH_INSTRUCTIONS_ARTIFACT = `First, identify the fundamental problem and its constraints. Then identify the different perspectives from which it can be approached. Think through each perspective thoroughly.
+// Protocol-specific depth extensions (additive to GLOBAL_DEPTH)
+const DEPTH_EXPLORE = `Consider multiple approaches before committing. Discard the weakest before finalizing.
+After reaching your position, find the strongest argument against it. If you cannot defend against it, revise.`;
 
-Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
-
-After your implementation, construct the strongest possible argument against your approach and defend against it. Then find the failure in your defense. For each failure reason, ask why it would happen — trace to the root cause. Stop only when a new challenge reveals nothing you haven't already addressed.
-
-Before finishing, verify your key claims.`;
+const DEPTH_REFINE = `After your improvements, find the strongest argument against your changes. If you cannot defend a change, revert it.`;
 
 // -- Harness Fragments (pyreez-owned, host cannot override) --
 
@@ -67,11 +63,12 @@ Do not force confidence — if genuinely uncertain, say so.`;
 
 function buildSystemPrompt(
   roleDescription: string,
-  nature: "artifact" | "critique",
+  depthExtension?: string,
 ): string {
   const parts: string[] = [];
   parts.push(`<role>${roleDescription}</role>`);
-  parts.push(nature === "artifact" ? DEPTH_INSTRUCTIONS_ARTIFACT : DEPTH_INSTRUCTIONS_CRITIQUE);
+  parts.push(GLOBAL_DEPTH);
+  if (depthExtension) parts.push(depthExtension);
   return parts.join("\n\n");
 }
 
@@ -135,14 +132,9 @@ export function extractDebateDigest(content: string): string {
 
 // -- 1. Shared Convergence --
 
-const SHARED_CONVERGENCE_SYSTEM_CRITIQUE = buildSystemPrompt(
+const SHARED_CONVERGENCE_SYSTEM = buildSystemPrompt(
   "Think deeply, present concisely. No preamble — lead with your position.",
-  "critique",
-);
-
-const SHARED_CONVERGENCE_SYSTEM_ARTIFACT = buildSystemPrompt(
-  "Think deeply, present concisely. No preamble — lead with your position.",
-  "artifact",
+  DEPTH_EXPLORE,
 );
 
 // -- R1 Diversity Lenses (DMAD-inspired: diverse reasoning per worker) --
@@ -167,9 +159,7 @@ export function buildSharedConvergenceR1(
   roundInfo?: RoundInfo,
   workerIndex?: number,
 ): ChatMessage[] {
-  const system = (ctx.taskNature ?? "critique") === "artifact"
-    ? SHARED_CONVERGENCE_SYSTEM_ARTIFACT
-    : SHARED_CONVERGENCE_SYSTEM_CRITIQUE;
+  const system = SHARED_CONVERGENCE_SYSTEM;
 
   const userParts: string[] = [];
 
@@ -204,9 +194,7 @@ export function buildSharedConvergenceR2(
   roundInfo?: RoundInfo,
   workerIndex?: number,
 ): ChatMessage[] {
-  const system = (ctx.taskNature ?? "critique") === "artifact"
-    ? SHARED_CONVERGENCE_SYSTEM_ARTIFACT
-    : SHARED_CONVERGENCE_SYSTEM_CRITIQUE;
+  const system = SHARED_CONVERGENCE_SYSTEM;
 
   const userParts: string[] = [];
 
@@ -293,14 +281,9 @@ export function buildSharedConvergenceFollowUp(
 
 // -- 2. Adversarial Debate --
 
-const ADVERSARIAL_SYSTEM_CRITIQUE = buildSystemPrompt(
+const ADVERSARIAL_SYSTEM = buildSystemPrompt(
   "Think deeply, present concisely. No preamble — lead with your position. You are seeing other analysts' positions. Your goal is to find weaknesses.",
-  "critique",
-);
-
-const ADVERSARIAL_SYSTEM_ARTIFACT = buildSystemPrompt(
-  "Think deeply, present concisely. No preamble — lead with your position. You are seeing other analysts' positions. Your goal is to find weaknesses.",
-  "artifact",
+  DEPTH_EXPLORE,
 );
 
 // -- Adversarial Position Lenses (force opposing stances in R1) --
@@ -325,9 +308,7 @@ export function buildAdversarialDebateR1(
   _roundInfo?: RoundInfo,
   workerIndex?: number,
 ): ChatMessage[] {
-  const system = (ctx.taskNature ?? "critique") === "artifact"
-    ? ADVERSARIAL_SYSTEM_ARTIFACT
-    : ADVERSARIAL_SYSTEM_CRITIQUE;
+  const system = ADVERSARIAL_SYSTEM;
 
   const userParts: string[] = [];
   if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
@@ -358,9 +339,7 @@ export function buildAdversarialDebateR2(
   _roundInfo?: RoundInfo,
   workerIndex?: number,
 ): ChatMessage[] {
-  const system = (ctx.taskNature ?? "critique") === "artifact"
-    ? ADVERSARIAL_SYSTEM_ARTIFACT
-    : ADVERSARIAL_SYSTEM_CRITIQUE;
+  const system = ADVERSARIAL_SYSTEM;
 
   const userParts: string[] = [];
 
@@ -438,16 +417,14 @@ export function buildAdversarialDebateFollowUp(
 
 // -- 3. Host Interrogation --
 
-const HOST_INTERROGATION_SYSTEM = `<role>Answer the question directly and thoroughly. No preamble.</role>
-
-Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
-If the question challenges your previous answer, address the challenge with evidence — do not simply reaffirm.
+const HOST_INTERROGATION_SYSTEM = buildSystemPrompt(
+  "Answer the question directly and thoroughly. No preamble.",
+  DEPTH_EXPLORE,
+) + `\n\nIf the question challenges your previous answer, address the challenge with evidence — do not simply reaffirm.
 
 <constraints>
 Answer only what is asked. Do not volunteer unrelated analysis.
-If you do not know, say so. Do not speculate without labeling it.
 If the question contains a false premise, identify it before answering.
-If genuinely uncertain, say so.
 </constraints>`;
 
 /**
@@ -478,17 +455,13 @@ export function buildHostInterrogationMessages(
 
 // -- 4. Sequential Refinement --
 
-const SEQUENTIAL_REFINEMENT_SYSTEM = `<role>Improve the given work. Preserve what works, fix what doesn't, add what's missing. No preamble — lead with the improved version.</role>
-
-Before modifying, identify what the previous version does well and must be preserved.
-Then identify gaps, errors, or weaknesses. Improve only those areas.
-Ground changes in specific reasoning.
-
-<constraints>
+const SEQUENTIAL_REFINEMENT_SYSTEM = buildSystemPrompt(
+  "Improve the given work. Preserve what works, fix what doesn't, add what's missing. No preamble — lead with the improved version.",
+  DEPTH_REFINE,
+) + `\n\n<constraints>
 Do not rewrite from scratch. Build on the previous version.
 For every change, state what was wrong and why your version is better.
 If the previous version is already correct in an area, leave it unchanged.
-If genuinely uncertain about a change, flag it.
 Your output must be at least as complete as the previous version. Do not remove content, detail, or explanations unless they are factually wrong. Shortening is not improving.
 </constraints>`;
 
@@ -519,9 +492,9 @@ export function buildSequentialRefinementMessages(
 
 // -- 5. Evaluation Scoring --
 
-const EVALUATION_SCORING_SYSTEM = `<role>Evaluate independently. No preamble — lead with your analysis.</role>
-
-<constraints>
+const EVALUATION_SCORING_SYSTEM = buildSystemPrompt(
+  "Evaluate independently. No preamble — lead with your analysis.",
+) + `\n\n<constraints>
 Evaluate the subject against the provided criteria. Do not invent additional criteria.
 For each criterion, provide your own analysis and reasoning about the subject.
 Do not consider how other evaluators might score. Judge independently.
@@ -536,6 +509,8 @@ Do not consider how other evaluators might score. Judge independently.
 End with exactly this format:
 verdict: [one sentence — must be consistent with your analysis above]
 score: [overall 1-10 — must match the severity described in your verdict]
+
+Score anchors: 1-2 = fundamentally flawed/broken, 3-4 = significant issues, 5-6 = acceptable with notable issues, 7-8 = good with minor issues, 9-10 = excellent/exceptional.
 </output-format>`;
 
 /**
@@ -561,9 +536,9 @@ export function buildEvaluationScoringMessages(
 
 // -- 6. Red Team --
 
-const RED_TEAM_GENERATOR_SYSTEM = `<role>Produce the requested output. No preamble.</role>
-
-Think through edge cases, failure modes, and adversarial inputs.
+const RED_TEAM_GENERATOR_SYSTEM = buildSystemPrompt(
+  "Produce the requested output. No preamble.",
+) + `\n\nThink through edge cases, failure modes, and adversarial inputs.
 Anticipate how your output could be attacked or misused.
 
 <constraints>
@@ -571,9 +546,9 @@ Produce the strongest version you can.
 If you are aware of a weakness, address it proactively.
 </constraints>`;
 
-const RED_TEAM_ATTACKER_SYSTEM = `<role>Find vulnerabilities in the given output. No preamble — lead with the most critical finding.</role>
-
-<constraints>
+const RED_TEAM_ATTACKER_SYSTEM = buildSystemPrompt(
+  "Find vulnerabilities in the given output. No preamble — lead with the most critical finding.",
+) + `\n\n<constraints>
 Find concrete, exploitable weaknesses — not theoretical concerns.
 For each vulnerability, provide a specific attack scenario or proof.
 Rank findings by severity (critical > high > medium > low).

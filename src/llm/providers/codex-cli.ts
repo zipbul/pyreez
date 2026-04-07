@@ -76,6 +76,12 @@ export class CodexCliProvider implements LLMProvider {
       );
 
       if (exitCode !== 0) {
+        // Check stdout for structured error events (codex outputs JSON to stdout)
+        const isUsageLimit = stdout.includes("usage limit") || stdout.includes("purchase more credits");
+        const isRateLimit = stdout.includes("rate limit") || stdout.includes("too many requests");
+        if (isUsageLimit || isRateLimit) {
+          throw new LLMClientError(429, `codex CLI: usage/rate limit exceeded`, "rate_limit");
+        }
         throw new LLMClientError(
           500,
           `codex CLI exited with code ${exitCode}: ${stderr.trim()}`,

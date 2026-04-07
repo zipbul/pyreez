@@ -94,9 +94,14 @@ export class GeminiCliProvider implements LLMProvider {
         const isCapacityExhausted = stderrText.includes("429")
           || stderrText.includes("RESOURCE_EXHAUSTED")
           || stderrText.includes("rateLimitExceeded");
+        // EACCES on projects.json.tmp = parallel execution file race (gemini CLI bug).
+        // Classify as cli_error (model-scoped, not provider-scoped) so other gemini models can still be tried.
+        const isFileRace = stderrText.includes("EACCES") && stderrText.includes("projects.json");
         throw new LLMClientError(
-          isCapacityExhausted ? 429 : 500,
-          `gemini CLI exited with code ${exitCode}: ${stderrText}`,
+          isCapacityExhausted ? 429 : isFileRace ? 409 : 500,
+          isFileRace
+            ? `gemini CLI file race: ${stderrText.slice(0, 100)}`
+            : `gemini CLI exited with code ${exitCode}: ${stderrText}`,
           isCapacityExhausted ? "timeout" : "cli_error",
         );
       }

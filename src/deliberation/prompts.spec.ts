@@ -75,29 +75,25 @@ describe("buildSharedConvergenceR1", () => {
     expect(msgs[1]!.role).toBe("user");
   });
 
-  it("should include depth instructions in system", () => {
+  it("should include global depth in system", () => {
     const sys = buildSharedConvergenceR1(makeCtx())[0]!.content!;
-    expect(sys).toContain("strongest possible argument against");
     expect(sys).toContain("verify your key claims");
     expect(sys).toContain("Ground factual claims");
+    expect(sys).toContain("reject it");
+    expect(sys).toContain("Express uncertainty");
+  });
+
+  it("should include explore depth in system", () => {
+    const sys = buildSharedConvergenceR1(makeCtx())[0]!.content!;
+    expect(sys).toContain("multiple approaches");
+    expect(sys).toContain("Discard the weakest");
+    expect(sys).toContain("strongest argument against");
   });
 
   it("should include role tag in system", () => {
     const sys = buildSharedConvergenceR1(makeCtx())[0]!.content!;
     expect(sys).toContain("<role>");
     expect(sys).toContain("Think deeply");
-  });
-
-  it("should use critique depth by default", () => {
-    const sys = buildSharedConvergenceR1(makeCtx())[0]!.content!;
-    expect(sys).toContain("it can be analyzed");
-    expect(sys).not.toContain("it can be approached");
-  });
-
-  it("should use artifact depth for artifact taskNature", () => {
-    const sys = buildSharedConvergenceR1(makeCtx([], "artifact"))[0]!.content!;
-    expect(sys).toContain("it can be approached");
-    expect(sys).not.toContain("it can be analyzed");
   });
 
   it("should include confidence instructions in user message", () => {
@@ -107,10 +103,11 @@ describe("buildSharedConvergenceR1", () => {
     expect(user).toContain("LOW:");
   });
 
-  it("should NOT include confidence in system message", () => {
+  it("should NOT include confidence markers in system message", () => {
     const sys = buildSharedConvergenceR1(makeCtx())[0]!.content!;
     expect(sys).not.toContain("HIGH:");
-    expect(sys).not.toContain("confidence");
+    expect(sys).not.toContain("MEDIUM:");
+    expect(sys).not.toContain("LOW:");
   });
 
   it("should place task at end of user message", () => {
@@ -264,11 +261,10 @@ describe("buildSharedConvergenceR2", () => {
     expect((user.match(/One analyst argues/g) ?? []).length).toBe(4);
   });
 
-  it("should use artifact system prompt for artifact taskNature", () => {
-    const sys = buildSharedConvergenceR2(
-      makeCtx([], "artifact"), otherResponses, ownPrevious,
-    )[0]!.content!;
-    expect(sys).toContain("it can be approached");
+  it("should include global and explore depth in system", () => {
+    const sys = buildSharedConvergenceR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    expect(sys).toContain("reject it");
+    expect(sys).toContain("multiple approaches");
   });
 
   it("should include analysis-lens in R2+ when workerIndex and multi-round", () => {
@@ -485,11 +481,10 @@ describe("buildAdversarialDebateR2", () => {
     expect(user).not.toContain("final round");
   });
 
-  it("should use artifact system prompt for artifact taskNature", () => {
-    const sys = buildAdversarialDebateR2(
-      makeCtx([], "artifact"), otherResponses, ownPrevious,
-    )[0]!.content!;
-    expect(sys).toContain("it can be approached");
+  it("should include global and explore depth in system", () => {
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    expect(sys).toContain("reject it");
+    expect(sys).toContain("multiple approaches");
   });
 
   it("should escape XML in other responses", () => {

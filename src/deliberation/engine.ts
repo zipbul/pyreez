@@ -445,6 +445,11 @@ async function callWithFallback(
       totalInput += result.inputTokens;
       totalOutput += result.outputTokens;
 
+      // Empty response = model returned nothing useful. Treat as failure for fallback.
+      if (!result.content.trim()) {
+        throw new Error(`empty response from ${currentModel}`);
+      }
+
       // Build conversation history for session continuation in next round
       const fullHistory = [...messages, { role: "assistant" as const, content: result.content }];
 
@@ -757,7 +762,8 @@ function aggregateEvaluationResults(
     const scoreMatch = r.content.match(/(?:score|rating|점수|overall)\s*[:=]?\s*(\d+(?:\.\d+)?)/i)
       ?? r.content.match(/(\d+(?:\.\d+)?)\s*(?:\/\s*10|out of 10)/i)
       ?? r.content.match(/\*\*(\d+(?:\.\d+)?)\*\*\s*\/\s*10/i);
-    const verdictMatch = r.content.match(/(?:verdict|결론|판정)\s*[:=]?\s*(.+?)(?:\n|$)/i);
+    // Skip table rows (starting with |) — models sometimes emit tables after "verdict:"
+    const verdictMatch = r.content.match(/(?:verdict|결론|판정)\s*[:=]?\s*([^|\n].+?)(?:\n|$)/i);
     const confidence = parseConfidence(r.content);
     return {
       model: r.model,
