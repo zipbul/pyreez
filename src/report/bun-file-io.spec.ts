@@ -13,6 +13,7 @@ const mockMkdir = mock(() => Promise.resolve());
 const mockReaddir = mock(() => Promise.resolve([] as string[]));
 const mockUnlink = mock(() => Promise.resolve());
 const mockWriteFile = mock(() => Promise.resolve());
+const mockRename = mock(() => Promise.resolve());
 
 mock.module("node:fs/promises", () => ({
   appendFile: mockAppendFile,
@@ -21,6 +22,7 @@ mock.module("node:fs/promises", () => ({
   readdir: mockReaddir,
   unlink: mockUnlink,
   writeFile: mockWriteFile,
+  rename: mockRename,
 }));
 
 // SUT must be imported AFTER mock.module
@@ -274,5 +276,12 @@ describe("BunFileIO", () => {
 
     // Assert
     expect(mockWriteFile).toHaveBeenCalledWith("/tmp/empty.json", "", "utf-8");
+  });
+
+  // === rename ===
+
+  it("should delegate rename to fs.rename", async () => {
+    await io.rename("/tmp/old.json", "/tmp/new.json");
+    expect(mockRename).toHaveBeenCalledWith("/tmp/old.json", "/tmp/new.json");
   });
 });

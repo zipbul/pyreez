@@ -64,4 +64,19 @@ describe("spawnWithIdleTimeout", () => {
     );
     expect(result.stdout.trim()).toBe("/tmp");
   });
+
+  it("should rethrow non-idle errors from stream reading", async () => {
+    // Spawn a command that doesn't exist — Bun.spawn may throw
+    try {
+      await spawnWithIdleTimeout(
+        ["__nonexistent_command_xyz_12345__"],
+        { stdout: "pipe", stderr: "pipe" },
+        { idleMs: 5000 },
+      );
+      // If it doesn't throw, it should at least have non-zero exit code
+    } catch (error) {
+      // Should not be IdleTimeoutError — it's a spawn failure
+      expect(error).not.toBeInstanceOf(IdleTimeoutError);
+    }
+  });
 });

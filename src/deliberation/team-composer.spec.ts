@@ -166,4 +166,12 @@ describe("composeTeam", () => {
       composeTeam({ task: "test", modelIds: ["unknown/model"] }, makeDeps(models)),
     ).toThrow('Model "unknown/model" not found');
   });
+
+  it("should resolve models via getModels fallback when getById is not provided", () => {
+    const models = [makeModel({ id: "a/1" }), makeModel({ id: "b/2" })];
+    const deps: ComposeTeamDeps = { getModels: () => models };
+    const team = composeTeam({ task: "test", modelIds: ["a/1"] }, deps);
+    expect(team.workers).toHaveLength(1);
+    expect(team.workers[0]!.model).toBe("a/1");
+  });
 });

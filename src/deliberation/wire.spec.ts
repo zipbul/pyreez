@@ -451,4 +451,250 @@ describe("createDeliberateFn", () => {
       deliberateFn({ task: "task", models: [], protocol: "shared_convergence" }),
     ).rejects.toThrow("models is required");
   });
+
+  // -- Protocol-specific deps wiring --
+
+  it("should wire adversarial_debate deps with buildR2Messages and buildFollowUp", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async (_team, _input, engineDeps) => {
+      // Verify adversarial deps have R2 and followUp builders
+      expect(typeof engineDeps.buildR1Messages).toBe("function");
+      expect(typeof engineDeps.buildR2Messages).toBe("function");
+      expect(typeof engineDeps.buildFollowUp).toBe("function");
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await deliberateFn({ task: "Debate", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "adversarial_debate" });
+  });
+
+  it("should wire specialized protocol deps without R2/followUp", async () => {
+    for (const protocol of ["host_interrogation", "sequential_refinement", "evaluation_scoring", "red_team"] as const) {
+      mockComposeTeam.mockImplementation(() => STUB_TEAM);
+      mockDeliberate.mockImplementation(async (_team, _input, engineDeps) => {
+        expect(typeof engineDeps.buildR1Messages).toBe("function");
+        expect(engineDeps.buildR2Messages).toBeUndefined();
+        expect(engineDeps.buildFollowUp).toBeUndefined();
+        return STUB_DELIBERATE_OUTPUT;
+      });
+      const deps = makeWireDeps();
+      const deliberateFn = createDeliberateFn(deps);
+      await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol });
+    }
+  });
+
+  // -- Protocol-specific max rounds --
+
+  it("should use default maxRounds=3 for adversarial_debate", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async (_team, _input, _deps, config) => {
+      expect(config.maxRounds).toBe(3);
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "adversarial_debate" });
+  });
+
+  it("should use default maxRounds=1 for host_interrogation", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async (_team, _input, _deps, config) => {
+      expect(config.maxRounds).toBe(1);
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "host_interrogation" });
+  });
+
+  it("should use default maxRounds=2 for red_team", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async (_team, _input, _deps, config) => {
+      expect(config.maxRounds).toBe(2);
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "red_team" });
+  });
+
+  it("should use default maxRounds=1 for sequential_refinement", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async (_team, _input, _deps, config) => {
+      expect(config.maxRounds).toBe(1);
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "sequential_refinement" });
+  });
+
+  it("should use default maxRounds=1 for evaluation_scoring", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async (_team, _input, _deps, config) => {
+      expect(config.maxRounds).toBe(1);
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "evaluation_scoring" });
+  });
+
+  // -- Protocol-specific minimum model validation --
+
+  it("should throw for red_team with less than 2 models", async () => {
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await expect(
+      deliberateFn({ task: "Task", models: ["openai/gpt-4.1"], protocol: "red_team" }),
+    ).rejects.toThrow("red_team protocol requires at least 2 models");
+  });
+
+  it("should throw for adversarial_debate with less than 2 models", async () => {
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await expect(
+      deliberateFn({ task: "Task", models: ["openai/gpt-4.1"], protocol: "adversarial_debate" }),
+    ).rejects.toThrow("adversarial_debate protocol requires at least 2 models");
+  });
+
+  // -- Replenish callback --
+
+  it("should pass replenish callback in fallbackDeps", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async (_team, _input, _deps, _config, fallbackDeps) => {
+      expect(typeof fallbackDeps.replenish).toBe("function");
+      expect(typeof fallbackDeps.pool).toBe("object");
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "shared_convergence" });
+  });
+
+  it("should return empty array from replenish when no candidates match", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async (_team, _input, _deps, _config, fallbackDeps) => {
+      const result = fallbackDeps.replenish(
+        new Set(["openai"]),
+        2,
+        new Set(["openai/gpt-4.1"]),
+      );
+      expect(Array.isArray(result)).toBe(true);
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "shared_convergence" });
+  });
+
+  it("should return replacement members from replenish when candidates exist", async () => {
+    // Team uses only 2 of 3 available models — the 3rd is available for replenishment
+    const smallTeam: TeamComposition = {
+      workers: [{ model: "openai/gpt-4.1", role: "worker" }],
+    };
+    mockComposeTeam.mockImplementation(() => smallTeam);
+    mockDeliberate.mockImplementation(async (_team, _input, _deps, _config, fallbackDeps) => {
+      // Replenish with an alive provider, 1 empty slot, model not yet responded
+      const result = fallbackDeps.replenish(
+        new Set(["anthropic"]),  // alive provider
+        1,                       // 1 empty slot
+        new Set(["openai/gpt-4.1"]),  // already responded
+      );
+      // anthropic/claude-sonnet-4.6 should be a candidate (alive provider, not on team, not responded)
+      expect(result.length).toBeGreaterThan(0);
+      expect(result[0].role).toBe("worker");
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await deliberateFn({ task: "Task", models: ["openai/gpt-4.1"], protocol: "shared_convergence" });
+  });
+
+  // -- Invoke deps builders to cover arrow function bodies --
+
+  it("should produce callable buildR2Messages for adversarial_debate", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async (_team, _input, engineDeps) => {
+      const fakeRound = {
+        number: 1,
+        responses: [
+          { model: "openai/gpt-4.1", content: "position A", workerIndex: 0 },
+          { model: "deepseek/deepseek-r1", content: "position B", workerIndex: 1 },
+        ],
+      };
+      const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [fakeRound], taskNature: "critique" as const };
+      const fakeResponses = [{ model: "m", content: "c", workerIndex: 0 }];
+      // R1
+      const msgs1 = engineDeps.buildR1Messages!(fakeCtx as any, "instructions", { current: 1, max: 3 }, 0);
+      expect(Array.isArray(msgs1)).toBe(true);
+      // R2
+      if (engineDeps.buildR2Messages) {
+        const msgs2 = engineDeps.buildR2Messages(fakeCtx as any, fakeResponses, "prev", "instructions", { current: 2, max: 3 }, 0);
+        expect(Array.isArray(msgs2)).toBe(true);
+      }
+      // FollowUp — returns a single ChatMessage, not an array
+      if (engineDeps.buildFollowUp) {
+        const msg3 = engineDeps.buildFollowUp(fakeCtx as any, fakeResponses, "instructions", { current: 2, max: 3 }, 0);
+        expect(msg3).toBeDefined();
+        expect(typeof msg3.role).toBe("string");
+      }
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "adversarial_debate" });
+  });
+
+  it("should produce callable buildR1Messages for specialized protocols", async () => {
+    for (const protocol of ["host_interrogation", "sequential_refinement", "evaluation_scoring", "red_team"] as const) {
+      mockComposeTeam.mockImplementation(() => STUB_TEAM);
+      mockDeliberate.mockImplementation(async (_team, _input, engineDeps) => {
+        const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [], taskNature: "critique" as const };
+        const msgs = engineDeps.buildR1Messages!(fakeCtx as any, "instructions", { current: 1, max: 1 });
+        expect(Array.isArray(msgs)).toBe(true);
+        return STUB_DELIBERATE_OUTPUT;
+      });
+      const deps = makeWireDeps();
+      const deliberateFn = createDeliberateFn(deps);
+      await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol });
+    }
+  });
+
+  it("should produce callable buildR1Messages for default (unknown) protocol path", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async (_team, _input, engineDeps) => {
+      const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [], taskNature: "critique" as const };
+      const msgs = engineDeps.buildR1Messages!(fakeCtx as any, "instructions", { current: 1, max: 1 });
+      expect(Array.isArray(msgs)).toBe(true);
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    // Use shared_convergence (default path) — already tested, but ensures buildR1 body executes
+    await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "shared_convergence" });
+  });
+
+  it("should produce callable buildR2Messages for shared_convergence", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async (_team, _input, engineDeps) => {
+      const fakeRound = {
+        number: 1,
+        responses: [
+          { model: "openai/gpt-4.1", content: "position A", workerIndex: 0 },
+          { model: "deepseek/deepseek-r1", content: "position B", workerIndex: 1 },
+        ],
+      };
+      const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [fakeRound], taskNature: "critique" as const };
+      const fakeResponses = [{ model: "m", content: "c", workerIndex: 0 }];
+      if (engineDeps.buildR2Messages) {
+        const msgs = engineDeps.buildR2Messages(fakeCtx as any, fakeResponses, "prev", "instructions", { current: 2, max: 3 }, 0);
+        expect(Array.isArray(msgs)).toBe(true);
+      }
+      return STUB_DELIBERATE_OUTPUT;
+    });
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+    await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "shared_convergence" });
+  });
 });

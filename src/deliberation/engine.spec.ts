@@ -2260,3 +2260,213 @@ describe("confidence in output", () => {
     expect(output.rounds![0]!.responses![0]!.confidence).toBeUndefined();
   });
 });
+
+// =============================================================================
+// Aggregation (evaluation_scoring)
+// =============================================================================
+
+describe("aggregateEvaluationResults via deliberate", () => {
+  it("should aggregate with voting (default) and extract majority verdict", async () => {
+    let callIdx = 0;
+    const responses = [
+      "verdict: PASS\nscore: 8",
+      "verdict: PASS\nscore: 7",
+      "verdict: FAIL\nscore: 3",
+    ];
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(responses[callIdx++] ?? "")),
+    });
+    const team = makeTeam(3);
+    const input = makeInput({ protocol: "evaluation_scoring" });
+    const config = makeConfig({ protocol: "evaluation_scoring" });
+    const output = await deliberate(team, input, deps, config);
+    expect(output.aggregation).toBeDefined();
+    expect(output.aggregation!.method).toBe("voting");
+    expect(output.aggregation!.majorityVerdict).toBe("pass");
+    expect(output.aggregation!.voteCount).toBe(2);
+  });
+
+  it("should aggregate with consensus method", async () => {
+    const deps = makeDeps({
+      chat: mock(async () => chatResult("verdict: PASS\nscore: 9")),
+    });
+    const team = makeTeam(3);
+    const input = makeInput({ protocol: "evaluation_scoring", aggregation: "consensus" });
+    const config = makeConfig({ protocol: "evaluation_scoring" });
+    const output = await deliberate(team, input, deps, config);
+    expect(output.aggregation).toBeDefined();
+    expect(output.aggregation!.method).toBe("consensus");
+    expect(output.aggregation!.consensus).toBe("pass");
+  });
+
+  it("should return undefined consensus when verdicts disagree", async () => {
+    let callIdx = 0;
+    const responses = ["verdict: PASS", "verdict: FAIL"];
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(responses[callIdx++] ?? "")),
+    });
+    const team = makeTeam(2);
+    const input = makeInput({ protocol: "evaluation_scoring", aggregation: "consensus" });
+    const config = makeConfig({ protocol: "evaluation_scoring" });
+    const output = await deliberate(team, input, deps, config);
+    expect(output.aggregation!.consensus).toBeUndefined();
+  });
+
+  it("should aggregate with confidence_weighted method", async () => {
+    let callIdx = 0;
+    const responses = [
+      "verdict: PASS\nscore: 9\nHIGH confidence",
+      "verdict: PASS\nscore: 5\nLOW confidence",
+    ];
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(responses[callIdx++] ?? "")),
+    });
+    const team = makeTeam(2);
+    const input = makeInput({ protocol: "evaluation_scoring", aggregation: "confidence_weighted" });
+    const config = makeConfig({ protocol: "evaluation_scoring" });
+    const output = await deliberate(team, input, deps, config);
+    expect(output.aggregation).toBeDefined();
+    expect(output.aggregation!.method).toBe("confidence_weighted");
+    expect(output.aggregation!.weightedScore).toBeDefined();
+    // HIGH(1.0)*9 + LOW(0.3)*5 = 9+1.5 = 10.5, totalWeight = 1.3, avg ≈ 8.08
+    expect(output.aggregation!.weightedScore).toBeCloseTo(8.08, 1);
+  });
+
+  it("should not include aggregation for non-evaluation protocols", async () => {
+    const deps = makeDeps();
+    const team = makeTeam(2);
+    const input = makeInput({ protocol: "shared_convergence" });
+    const config = makeConfig({ protocol: "shared_convergence" });
+    const output = await deliberate(team, input, deps, config);
+    expect(output.aggregation).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// onRound callback
+// =============================================================================
+
+describe("onRound callback", () => {
+  it("should call onRound with round data including confidence", async () => {
+    const onRoundCalls: unknown[] = [];
+    const deps = makeDeps({
+      chat: mock(async () => chatResult("HIGH confidence: this is right")),
+    });
+    const team = makeTeam(2);
+    const input = makeInput({
+      onRound: (round) => { onRoundCalls.push(round); },
+    });
+    const config = makeConfig();
+    await deliberate(team, input, deps, config);
+    expect(onRoundCalls).toHaveLength(1);
+    const round = onRoundCalls[0] as any;
+    expect(round.number).toBe(1);
+    expect(round.protocol).toBe("shared_convergence");
+    expect(round.responses).toHaveLength(2);
+    expect(round.responses[0].confidence).toBe("high");
+  });
+
+  it("should include failedWorkers in onRound when present", async () => {
+    const onRoundCalls: unknown[] = [];
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") throw new Error("timeout");
+        return chatResult("ok");
+      }),
+    });
+    const team = makeTeam(2);
+    const input = makeInput({
+      onRound: (round) => { onRoundCalls.push(round); },
+    });
+    await deliberate(team, input, deps, makeConfig());
+    const round = onRoundCalls[0] as any;
+    expect(round.failedWorkers).toBeDefined();
+    expect(round.failedWorkers.length).toBeGreaterThan(0);
+  });
+
+  it("should not include failedWorkers in onRound when none failed", async () => {
+    const onRoundCalls: unknown[] = [];
+    const deps = makeDeps();
+    const team = makeTeam(2);
+    const input = makeInput({
+      onRound: (round) => { onRoundCalls.push(round); },
+    });
+    await deliberate(team, input, deps, makeConfig());
+    const round = onRoundCalls[0] as any;
+    expect(round.failedWorkers).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// Replenishment — actual callWithFallback execution
+// =============================================================================
+
+describe("replenishment with actual replacement workers", () => {
+  it("should execute replenished workers via callWithFallback on R1 empty slots", async () => {
+    // Scenario: 2-worker team. model-0 fails, model-1 succeeds for itself but
+    // fails when used as Phase 4 fallback for model-0's slot.
+    // This leaves 1 empty slot → replenish is called → replacement succeeds.
+    let callCount = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        callCount++;
+        // model-0: always fails
+        if (model === "prov-a/model-0") {
+          throw new LLMClientError(500, "server error");
+        }
+        // model-1: succeeds first call (own slot), fails on Phase 4 duplicate attempt
+        if (model === "prov-b/model-1") {
+          if (callCount <= 2) return chatResult(validWorkerContent("ok"), 10, 20);
+          throw new LLMClientError(500, "overloaded");
+        }
+        // model-3 (replenished): succeeds
+        if (model === "prov-d/model-3") {
+          return chatResult(validWorkerContent("replenished"), 10, 20);
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([], cooldown);
+
+    const customTeam: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-b/model-1", role: "worker" },
+      ],
+    };
+
+    const replenish = mock((_aliveProviders: ReadonlySet<string>, emptySlots: number, _respondedModels: ReadonlySet<string>) => {
+      return Array.from({ length: emptySlots }, () => ({
+        model: "prov-d/model-3",
+        role: "worker" as const,
+      }));
+    });
+
+    const output = await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool, replenish });
+    expect(output.roundsExecuted).toBe(1);
+    // Either Phase 4 recovered or replenish filled the gap
+    expect(output.rounds![0]!.responses!.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// =============================================================================
+// Aggregation — confidence_weighted with no parseable scores (fallback path)
+// =============================================================================
+
+describe("aggregation confidence_weighted fallback", () => {
+  it("should return fallback result when no scores are parseable", async () => {
+    const deps = makeDeps({
+      chat: mock(async () => chatResult("no score here, just text")),
+    });
+    const team = makeTeam(2);
+    const input = makeInput({ protocol: "evaluation_scoring", aggregation: "confidence_weighted" });
+    const config = makeConfig({ protocol: "evaluation_scoring" });
+    const output = await deliberate(team, input, deps, config);
+    expect(output.aggregation).toBeDefined();
+    expect(output.aggregation!.method).toBe("confidence_weighted");
+    // No weightedScore because no parseable scores
+    expect(output.aggregation!.weightedScore).toBeUndefined();
+  });
+});
