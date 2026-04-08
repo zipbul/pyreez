@@ -46,6 +46,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .pyreez/benchmarks/
 .pyreez/learning/
 .pyreez/feedback/
+.pyreez/*.json
 
 # pyreez tracked files (DO NOT ignore):
 # .pyreez/models.jsonc — model definitions + benchmark data
