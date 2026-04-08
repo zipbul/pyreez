@@ -22,7 +22,7 @@ Classify every claim before presenting:
 - **[analysis]** (frameworks, design opinions, tradeoff judgments) → state reasoning chain explicitly.
 - **[inference]** (deduction from verified premises) → state premises.
 
-If a fact cannot be verified: "확인할 수 없습니다". Do not guess.
+If a fact cannot be verified, state that it is unverifiable. Do not guess.
 Claims not supported by inputs are marked as [UNCERTAIN].
 Unclassified claims are prohibited.
 
@@ -53,8 +53,8 @@ Do not skip any phase — each phase produces a verifiable output below.
 
 <checklist>
 - [ ] deliberate (task framing applied)
-- [ ] Phase 1: comprehend (output template filled)
-- [ ] Phase 2: evaluate (factual claims verified via WebSearch, analytical claims have reasoning chains)
+- [ ] Phase 1: comprehend + gap check (output template filled, perspective gaps assessed)
+- [ ] Phase 2: evaluate (factual claims verified via appropriate source, analytical claims have reasoning chains)
 - [ ] Phase 3: self-critique (exactly 3 flaws found and fixed)
 - [ ] Phase 4: confidence (HIGH → present / MEDIUM → present with caveats / LOW → do not present)
 - [ ] synthesize (unverified facts removed or flagged in final output)
@@ -67,25 +67,28 @@ CLI: `bun run src/cli.ts <subcommand> [flags]`.
 **model selection**: Run `models` to see available models with benchmark scores. Select by benchmark categories matching the task's needs (coding, reasoning, agentic, etc.) + provider diversity (at least 2 providers). Use real model IDs from `.pyreez/models.jsonc`.
 
 **task framing**: The user's topic is: `$ARGUMENTS`. Before deliberate, reframe it:
-- Identify the fundamental problem first, not the surface question.
-- Use Evaluate/Create level questions, not "list pros/cons".
-- Commit to a position. If genuinely uncertain, state what evidence would resolve it.
+- Rewrite the surface question as a fundamental question. Not "analyze pros/cons of X" but "under what conditions does X produce worse outcomes than the alternative?"
+- Demand judgment, not description. Evaluate/Create level — require workers to take positions, design solutions, or identify failure conditions. Never ask them to merely list or explain.
+- Frame for divergence, not consensus. Ask for conditions, boundaries, failure modes — not agreement on whether something is good.
+- Gather concrete context. Read relevant code, configs, constraints, or data and include them in --task. General questions produce general answers.
 
-**protocol**: Choose by communication structure needed.
-- `shared_convergence` — workers share positions (sparse), converge toward consensus (default for multi-round)
-- `adversarial_debate` — workers share + must challenge, no convergence
-- `host_interrogation` — workers isolated, host asks 1:1 questions
-- `sequential_refinement` — workers chain A→B→C, each improves previous
-- `evaluation_scoring` — workers isolated, independent scoring + aggregation
-- `red_team` — asymmetric roles (generator vs attacker)
+Sources: Socratic Questioning (EMNLP 2023) — sub-question decomposition outperforms CoT/ToT. CQoT (arXiv 2412.15177) — critical questioning improves reasoning +4.7%. Consensus-Diversity Tradeoff (EMNLP 2025) — partial diversity retention improves exploration/robustness. Paul & Elder Six Types of Socratic Questions (2006) — foundational questioning taxonomy.
 
-**deliberate**: Run `deliberate --task "..." --models "model1,model2,model3" --protocol shared_convergence [--max-rounds N] [--worker-instructions "..."]`. Use `--task -` for long tasks via stdin.
+**protocol**: Choose by what the task needs.
+- `shared_convergence` — need multiple perspectives to converge on a position (architecture decisions, tradeoff analysis)
+- `adversarial_debate` — need stress-testing, opposing arguments, robustness check (design review, assumption challenging)
+- `host_interrogation` — need isolated answers to specific questions without cross-contamination (independent expert opinions)
+- `sequential_refinement` — need iterative improvement where each worker builds on the previous (document drafting, solution design)
+- `evaluation_scoring` — need independent scoring against criteria (code review, proposal evaluation)
+- `red_team` — need adversarial attack/defense (security review, vulnerability analysis)
+
+**deliberate**: Run `deliberate --task "..." --models "model1,model2,model3" --protocol shared_convergence [--max-rounds N] [--worker-instructions "..."]`. Use `--task -` for long tasks via stdin. Use `--worker-instructions` to set a shared analysis angle or constraint for all workers (e.g., "Focus on failure modes in distributed systems with >10K RPS").
 </workflow>
 
 <synthesis-phases>
 After deliberate returns, process worker responses through all four phases.
 
-**Phase 1 — Comprehend each worker**
+**Phase 1 — Comprehend and find gaps**
 
 For each worker, fill all three fields:
 
@@ -94,10 +97,22 @@ For each worker, fill all three fields:
 - **most_unexpected_claim**: the single most surprising claim (one sentence)
 - **loss_if_removed**: what the synthesis concretely loses without this worker
 
+Then check for perspective gaps across ALL workers:
+- Any ambiguous concepts left undefined?
+- Any hidden assumptions no worker questioned?
+- Any claims lacking evidence that no worker challenged?
+- Any viewpoint or stakeholder perspective entirely unexplored?
+- Any implications or consequences no worker traced?
+- Is the original question itself flawed or too narrow?
+
+If a critical gap exists: run a supplementary deliberation targeting that gap before proceeding to Phase 2.
+
+Source: Paul & Elder Six Types of Socratic Questions (2006) — clarification, assumptions, evidence, perspectives, implications, meta-questioning.
+
 **Phase 2 — Evaluate and ground**
 
 Apply claim-protocol to every claim in the synthesis draft:
-- Factual claims (numbers, dates, events, benchmarks): verify using the most appropriate source for the claim type. Code/architecture claims → read the actual code. External facts (benchmarks, statistics, API behavior) → WebSearch (2+ sources). Project-internal facts → git log, file inspection. User-provided data → treat as given, do not re-verify. If unverifiable → remove or flag "확인할 수 없습니다".
+- Factual claims (numbers, dates, events, benchmarks): verify using the most appropriate source for the claim type. Code/architecture claims → read the actual code. External facts (benchmarks, statistics, API behavior) → WebSearch (2+ sources). Project-internal facts → git log, file inspection. User-provided data → treat as given, do not re-verify. If unverifiable → remove or flag as unverifiable.
 - Analytical/creative claims: keep if reasoning chain exists. Amplify creative proposals that have reasoning chains — do not dismiss them for lacking citations.
 - If no factual claims require verification (e.g., pure design/tradeoff analysis), skip verification and state why.
 
@@ -117,7 +132,7 @@ Rate overall synthesis confidence: HIGH / MEDIUM / LOW with one-sentence justifi
 </synthesis-phases>
 
 <constraints>
-- When workers disagree, determine which has stronger evidence and adopt that position. Do not present both as parallel options (Path A / Path B).
+- When workers disagree, determine which has the stronger case — stronger evidence for factual claims, stronger reasoning chain for analytical/design claims — and adopt that position. Do not present both as parallel options (Path A / Path B).
 - Synthesize — adopt and build beyond. Do not copy worker text into the synthesis.
 - Factual claims that remain unverified after Phase 2 must be flagged in the final synthesis or removed. Phase labels are not just working notes — they survive to user output for facts.
 </constraints>
