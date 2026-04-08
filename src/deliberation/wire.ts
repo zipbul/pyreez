@@ -140,12 +140,6 @@ function createEngineDepsForProtocol(
         buildR1Messages: (ctx, instructions, roundInfo) =>
           buildSharedConvergenceR1(ctx, instructions, roundInfo),
       };
-    default:
-      return {
-        chat: chatFn,
-        buildR1Messages: (ctx, instructions, roundInfo) =>
-          buildSharedConvergenceR1(ctx, instructions, roundInfo),
-      };
   }
 }
 

@@ -17,7 +17,7 @@
  */
 
 import type { ChatMessage } from "../llm/types";
-import type { InterrogationExchange, Protocol, SharedContext, WorkerResponse } from "./types";
+import type { InterrogationExchange, SharedContext, WorkerResponse } from "./types";
 
 // -- Types --
 
@@ -633,30 +633,3 @@ Respond with ONLY the following XML structure:
   ];
 }
 
-// -- Protocol Dispatcher --
-
-/**
- * Get the appropriate R1 builder for a protocol.
- */
-export function getR1Builder(protocol: Protocol): (
-  ctx: SharedContext,
-  instructions?: string,
-  roundInfo?: RoundInfo,
-  workerIndex?: number,
-) => ChatMessage[] {
-  switch (protocol) {
-    case "shared_convergence":
-      return buildSharedConvergenceR1;
-    case "adversarial_debate":
-      return buildAdversarialDebateR1;
-    case "sequential_refinement":
-      return (ctx, instructions) => buildSequentialRefinementMessages(ctx, undefined, instructions);
-    case "evaluation_scoring":
-    case "host_interrogation":
-    case "red_team":
-      // These protocols have specialized input — handled directly by engine
-      return buildSharedConvergenceR1;
-    default:
-      return buildSharedConvergenceR1;
-  }
-}

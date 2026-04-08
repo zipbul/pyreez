@@ -17,7 +17,6 @@ import {
   buildRedTeamAttackerMessages,
   buildAcceptanceMessages,
   extractDebateDigest,
-  getR1Builder,
 } from "./prompts";
 import type {
   SharedContext,
@@ -934,48 +933,6 @@ describe("extractDebateDigest", () => {
     const content = "L1.\nL2.\nL3.\nL4.\nOk.";
     const digest = extractDebateDigest(content);
     expect(digest).toBe("L1.\nL2.\nL3.");
-  });
-});
-
-// ================================================================
-// getR1Builder (Protocol Dispatcher)
-// ================================================================
-
-describe("getR1Builder", () => {
-  it("should return buildSharedConvergenceR1 for shared_convergence", () => {
-    const builder = getR1Builder("shared_convergence");
-    const ctx = makeCtx();
-    expect(builder(ctx)).toEqual(buildSharedConvergenceR1(ctx));
-  });
-
-  it("should return buildAdversarialDebateR1 for adversarial_debate", () => {
-    const builder = getR1Builder("adversarial_debate");
-    const ctx = makeCtx();
-    expect(builder(ctx)).toEqual(buildAdversarialDebateR1(ctx));
-  });
-
-  it("should return sequential_refinement R1 (no previous) for sequential_refinement", () => {
-    const builder = getR1Builder("sequential_refinement");
-    const ctx = makeCtx();
-    expect(builder(ctx, "inst")).toEqual(buildSequentialRefinementMessages(ctx, undefined, "inst"));
-  });
-
-  it("should return fallback for evaluation_scoring", () => {
-    const builder = getR1Builder("evaluation_scoring");
-    const ctx = makeCtx();
-    expect(builder(ctx)).toEqual(buildSharedConvergenceR1(ctx));
-  });
-
-  it("should return fallback for host_interrogation", () => {
-    const builder = getR1Builder("host_interrogation");
-    const ctx = makeCtx();
-    expect(builder(ctx)).toEqual(buildSharedConvergenceR1(ctx));
-  });
-
-  it("should return fallback for red_team", () => {
-    const builder = getR1Builder("red_team");
-    const ctx = makeCtx();
-    expect(builder(ctx)).toEqual(buildSharedConvergenceR1(ctx));
   });
 });
 
