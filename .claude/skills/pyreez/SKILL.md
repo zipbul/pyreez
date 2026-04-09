@@ -74,9 +74,15 @@ CLI: `bun run src/cli.ts <subcommand> [flags]`.
 
 Sources: Socratic Questioning (EMNLP 2023) — sub-question decomposition outperforms CoT/ToT. CQoT (arXiv 2412.15177) — critical questioning improves reasoning +4.7%. Consensus-Diversity Tradeoff (EMNLP 2025) — partial diversity retention improves exploration/robustness. Paul & Elder Six Types of Socratic Questions (2006) — foundational questioning taxonomy.
 
+**adversarial_debate task reframing**: When choosing adversarial_debate, the task MUST be reframed to elicit disagreement naturally. Heterogeneous models receive identical prompts — adversarial tension comes from the question, not the harness. Transform yes/no or evaluative questions into failure-condition questions:
+- "X가 맞는가?" → "X가 틀린 구체적 시나리오를 구성하라. 구성할 수 없다면 왜 불가능한지 논증하라."
+- "X의 가치는?" → "X가 가치를 잃는 경계 조건은 무엇인가?"
+- "X를 도입해야 하는가?" → "X 도입이 도입하지 않는 것보다 나쁜 결과를 내는 구체적 조건은?"
+This is not optional — directional questions ("is X good?") produce unanimous agreement, defeating the protocol's purpose.
+
 **protocol**: Choose by what the task needs.
 - `shared_convergence` — need multiple perspectives to converge on a position (architecture decisions, tradeoff analysis)
-- `adversarial_debate` — need stress-testing, opposing arguments, robustness check (design review, assumption challenging)
+- `adversarial_debate` — need stress-testing, opposing arguments, robustness check (design review, assumption challenging). Note: adversarial tension comes from question framing (see above), not from per-worker stance assignment
 - `host_interrogation` — need isolated answers to specific questions without cross-contamination (independent expert opinions)
 - `sequential_refinement` — need iterative improvement where each worker builds on the previous (document drafting, solution design)
 - `evaluation_scoring` — need independent scoring against criteria (code review, proposal evaluation)

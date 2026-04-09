@@ -385,27 +385,17 @@ describe("buildSharedConvergenceFollowUp", () => {
 // ================================================================
 
 describe("buildAdversarialDebateR1", () => {
-  it("should include assigned-stance for adversarial position forcing", () => {
+  it("should NOT include assigned-stance (model heterogeneity provides diversity)", () => {
     const ctx = makeCtx();
     const r1 = buildAdversarialDebateR1(ctx, "inst", { current: 1, max: 3 }, 0);
-    const user = r1[1]!.content!;
-    expect(user).toContain("<assigned-stance>");
-    expect(user).toContain("Argue FOR");
-  });
-
-  it("should assign different stances per workerIndex", () => {
-    const ctx = makeCtx();
-    const r1w0 = buildAdversarialDebateR1(ctx, undefined, undefined, 0);
-    const r1w1 = buildAdversarialDebateR1(ctx, undefined, undefined, 1);
-    const stance0 = r1w0[1]!.content!.match(/<assigned-stance>([\s\S]*?)<\/assigned-stance>/)?.[1];
-    const stance1 = r1w1[1]!.content!.match(/<assigned-stance>([\s\S]*?)<\/assigned-stance>/)?.[1];
-    expect(stance0).not.toEqual(stance1);
-  });
-
-  it("should not include assigned-stance without workerIndex", () => {
-    const ctx = makeCtx();
-    const r1 = buildAdversarialDebateR1(ctx);
     expect(r1[1]!.content!).not.toContain("<assigned-stance>");
+  });
+
+  it("should give identical prompts regardless of workerIndex", () => {
+    const ctx = makeCtx();
+    const r1w0 = buildAdversarialDebateR1(ctx, "inst", { current: 1, max: 3 }, 0);
+    const r1w1 = buildAdversarialDebateR1(ctx, "inst", { current: 1, max: 3 }, 1);
+    expect(r1w0[1]!.content!).toEqual(r1w1[1]!.content!);
   });
 });
 
@@ -498,28 +488,10 @@ describe("buildAdversarialDebateR2", () => {
     expect(user).not.toContain("<positions-to-challenge>");
   });
 
-  it("should include assigned-stance in R2+ when workerIndex provided", () => {
+  it("should NOT include assigned-stance in R2+", () => {
     const user = buildAdversarialDebateR2(
       makeCtx(), otherResponses, ownPrevious, undefined, undefined, 0,
     )[1]!.content!;
-    expect(user).toContain("<assigned-stance>");
-    expect(user).toContain("Argue FOR");
-  });
-
-  it("should assign different stances per workerIndex in R2+", () => {
-    const u0 = buildAdversarialDebateR2(
-      makeCtx(), otherResponses, ownPrevious, undefined, undefined, 0,
-    )[1]!.content!;
-    const u1 = buildAdversarialDebateR2(
-      makeCtx(), otherResponses, ownPrevious, undefined, undefined, 1,
-    )[1]!.content!;
-    const stance0 = u0.match(/<assigned-stance>([\s\S]*?)<\/assigned-stance>/)?.[1];
-    const stance1 = u1.match(/<assigned-stance>([\s\S]*?)<\/assigned-stance>/)?.[1];
-    expect(stance0).not.toEqual(stance1);
-  });
-
-  it("should NOT include assigned-stance without workerIndex", () => {
-    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
     expect(user).not.toContain("<assigned-stance>");
   });
 
@@ -571,14 +543,8 @@ describe("buildAdversarialDebateFollowUp", () => {
     expect(msg.content).not.toContain("find weaknesses");
   });
 
-  it("should include assigned-stance in FollowUp when workerIndex provided", () => {
+  it("should NOT include assigned-stance in FollowUp", () => {
     const msg = buildAdversarialDebateFollowUp(makeCtx(), [], undefined, undefined, 0);
-    expect(msg.content).toContain("<assigned-stance>");
-    expect(msg.content).toContain("Argue FOR");
-  });
-
-  it("should NOT include assigned-stance in FollowUp without workerIndex", () => {
-    const msg = buildAdversarialDebateFollowUp(makeCtx(), []);
     expect(msg.content).not.toContain("<assigned-stance>");
   });
 

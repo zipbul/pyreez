@@ -286,38 +286,26 @@ const ADVERSARIAL_SYSTEM = buildSystemPrompt(
   DEPTH_EXPLORE,
 );
 
-// -- Adversarial Position Lenses (force opposing stances in R1) --
-
-const ADVERSARIAL_LENSES = [
-  "Argue FOR the most obvious/popular answer. Build the strongest possible case for the default choice. Make it so convincing that alternatives seem unreasonable.",
-  "Argue AGAINST the most obvious/popular answer. Find fatal flaws in the default choice. Present a compelling case for the less popular alternative.",
-  "Reject the framing of the question entirely. The real problem is not what's being asked — redefine it and argue for a solution nobody proposed.",
-  "Argue that all presented options are inadequate. The correct answer is something not yet considered. Propose it and defend it.",
-  "Argue from the perspective of someone who will maintain this decision for 5 years. What choice minimizes long-term regret regardless of short-term tradeoffs?",
-  "Argue from the perspective of someone who needs results in 2 weeks. What choice maximizes immediate value regardless of long-term consequences?",
-  "Take the position that the question itself reveals a deeper architectural problem. Diagnose what's actually broken and argue that fixing the root cause makes the surface question irrelevant.",
-];
+// Adversarial stance lenses removed: heterogeneous models already provide
+// perspective diversity. Assigning per-worker stances conflated two variables
+// (model difference × question difference), and frame-rejecting lenses (3 of 7)
+// produced outputs the synthesis/acceptance pipeline could not handle.
+// Adversarial dynamics come from R2+ challenge structure + ANTI_CONFORMITY_ADVERSARIAL.
 
 /**
- * Build R1 for adversarial_debate (forces opposing positions via adversarial lenses).
- * Unlike shared_convergence, each worker is assigned a STANCE, not just an analysis angle.
+ * Build R1 for adversarial_debate.
+ * All workers receive the same prompt — diversity comes from heterogeneous models.
  */
 export function buildAdversarialDebateR1(
   ctx: SharedContext,
   instructions?: string,
   _roundInfo?: RoundInfo,
-  workerIndex?: number,
+  _workerIndex?: number,
 ): ChatMessage[] {
   const system = ADVERSARIAL_SYSTEM;
 
   const userParts: string[] = [];
   if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
-
-  // Assign adversarial stance (not just analysis angle — forces opposing positions)
-  if (workerIndex != null) {
-    const lens = ADVERSARIAL_LENSES[workerIndex % ADVERSARIAL_LENSES.length]!;
-    userParts.push(`<assigned-stance>${lens}</assigned-stance>`);
-  }
 
   userParts.push(CONFIDENCE_AND_UNCERTAINTY);
   userParts.push(`<task>${ctx.task}</task>`);
@@ -337,7 +325,7 @@ export function buildAdversarialDebateR2(
   ownPrevious: WorkerResponse | undefined,
   instructions?: string,
   _roundInfo?: RoundInfo,
-  workerIndex?: number,
+  _workerIndex?: number,
 ): ChatMessage[] {
   const system = ADVERSARIAL_SYSTEM;
 
@@ -364,12 +352,6 @@ export function buildAdversarialDebateR2(
   // Instructions and constraints at bottom
   if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
 
-  // Restore R1 adversarial stance
-  if (workerIndex != null) {
-    const lens = ADVERSARIAL_LENSES[workerIndex % ADVERSARIAL_LENSES.length]!;
-    userParts.push(`<assigned-stance>${lens}</assigned-stance>`);
-  }
-
   userParts.push(`<constraints>\n${ANTI_CONFORMITY_ADVERSARIAL}\n</constraints>`);
   userParts.push(CONFIDENCE_AND_UNCERTAINTY);
 
@@ -389,7 +371,7 @@ export function buildAdversarialDebateFollowUp(
   otherResponses: readonly WorkerResponse[],
   instructions?: string,
   _roundInfo?: RoundInfo,
-  workerIndex?: number,
+  _workerIndex?: number,
 ): ChatMessage {
   const parts: string[] = [];
 
@@ -401,12 +383,6 @@ export function buildAdversarialDebateFollowUp(
 
   // Instructions and constraints at bottom
   if (instructions) parts.push(`<host-instructions>${instructions}</host-instructions>`);
-
-  // Restore R1 adversarial stance
-  if (workerIndex != null) {
-    const lens = ADVERSARIAL_LENSES[workerIndex % ADVERSARIAL_LENSES.length]!;
-    parts.push(`<assigned-stance>${lens}</assigned-stance>`);
-  }
 
   parts.push(`<constraints>\n${ANTI_CONFORMITY_ADVERSARIAL}\n</constraints>`);
   parts.push(CONFIDENCE_AND_UNCERTAINTY);
