@@ -45,13 +45,15 @@ const DEPTH_REFINE = `After your improvements, find the strongest argument again
 const ANTI_CONFORMITY = `Assess discrepancies between your analysis and others' using specific evidence.
 Change your position only when evidence against your analysis is clear.
 State what specific evidence or logic led you to agree or disagree.
-Do not rely on conformity, consensus, or social pressure.`;
+Do not rely on conformity, consensus, or social pressure.
+When others report their confidence, weigh their evidence against their stated certainty: high-confidence claims with weak evidence are red flags; low-confidence claims with strong evidence deserve attention.`;
 
 const ANTI_CONFORMITY_ADVERSARIAL = `For every position you encounter, identify its weakest point with specific evidence.
 Before criticizing, restate the opposing argument in its strongest form (steelman).
 Concede points where the opposing evidence is genuinely stronger than yours.
 State what you concede and why, with the specific evidence that convinced you.
-Do not agree to reach consensus. Do not soften criticism.`;
+Do not agree to reach consensus. Do not soften criticism.
+When others report their confidence, weigh their evidence against their stated certainty: high-confidence claims with weak evidence are red flags; low-confidence claims with strong evidence deserve attention.`;
 
 const CONFIDENCE_AND_UNCERTAINTY = `For each major claim, indicate your confidence:
 - HIGH: strong evidence or direct expertise
@@ -84,11 +86,15 @@ function escapeXmlContent(text: string): string {
 
 /**
  * Format other workers' responses in 3rd person (sycophancy reduction).
+ * Includes confidence when reported (ConfMAD: agents condition updates on others' confidence).
  */
 function formatOtherPositions(responses: readonly WorkerResponse[], workerIndex?: number): string {
   return responses
     .filter((r) => workerIndex == null || r.workerIndex !== workerIndex)
-    .map((r) => `One analyst argues:\n${escapeXmlContent(r.content)}`)
+    .map((r) => {
+      const conf = r.confidence ? ` (their confidence: ${r.confidence.toUpperCase()})` : "";
+      return `One analyst argues${conf}:\n${escapeXmlContent(r.content)}`;
+    })
     .join("\n\n");
 }
 

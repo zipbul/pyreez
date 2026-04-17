@@ -249,6 +249,27 @@ describe("buildSharedConvergenceR2", () => {
     expect(user).not.toContain("<other-positions>");
   });
 
+  it("should include other workers' confidence when present", () => {
+    const responses: WorkerResponse[] = [
+      { model: "w/b", content: "Use Redis", workerIndex: 1, confidence: "high" },
+      { model: "w/c", content: "Use Postgres", workerIndex: 2, confidence: "low" },
+    ];
+    const user = buildSharedConvergenceR2(makeCtx(), responses, ownPrevious)[1]!.content!;
+    expect(user).toContain("HIGH");
+    expect(user).toContain("LOW");
+    expect(user).toMatch(/confidence:\s*HIGH/i);
+    expect(user).toMatch(/confidence:\s*LOW/i);
+  });
+
+  it("should NOT add confidence label when worker has no confidence marker", () => {
+    const responses: WorkerResponse[] = [
+      { model: "w/b", content: "Use Redis", workerIndex: 1 },
+    ];
+    const user = buildSharedConvergenceR2(makeCtx(), responses, ownPrevious)[1]!.content!;
+    expect(user).not.toMatch(/their confidence:\s*(HIGH|MEDIUM|LOW)/i);
+    expect(user).toContain("One analyst argues");
+  });
+
   it("should handle 4+ other responses", () => {
     const responses = [
       makeResponse("w/a", "A resp", 0),
@@ -481,6 +502,16 @@ describe("buildAdversarialDebateR2", () => {
     const user = buildAdversarialDebateR2(makeCtx(), responses, ownPrevious)[1]!.content!;
     expect(user).not.toContain("<script>");
     expect(user).toContain("&lt;script&gt;");
+  });
+
+  it("should include other workers' confidence when present (adversarial)", () => {
+    const responses: WorkerResponse[] = [
+      { model: "w/b", content: "Use Redis", workerIndex: 1, confidence: "high" },
+      { model: "w/c", content: "Use Postgres", workerIndex: 2, confidence: "low" },
+    ];
+    const user = buildAdversarialDebateR2(makeCtx(), responses, ownPrevious)[1]!.content!;
+    expect(user).toMatch(/confidence:\s*HIGH/i);
+    expect(user).toMatch(/confidence:\s*LOW/i);
   });
 
   it("should handle empty otherResponses", () => {
