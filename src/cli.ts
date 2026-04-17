@@ -62,6 +62,7 @@ Commands:
   models       List available models with benchmark scores
   deliberate   Run multi-model deliberation
   acceptance   Verify a synthesis against worker positions
+  rank         Pairwise-rank candidate responses with an LLM judge (LLM-Blender pattern)
 
 Run "bun run src/cli.ts <command> --help" for command-specific help.`);
   process.exit(1);
@@ -225,6 +226,40 @@ async function main(): Promise<void> {
         synthesis: synthesis!,
         workers: workersResult.data!,
       });
+      break;
+    }
+
+    case "rank": {
+      const task = await resolveValue(flags["task"]);
+      if (!task) die("--task is required for rank");
+      const candidatesRaw = await resolveValue(flags["candidates"]);
+      if (!candidatesRaw) die("--candidates is required (JSON array: [{id, content}, ...])");
+      const judgeModel = flags["judge"];
+      if (!judgeModel) die("--judge is required (model id, e.g. openai/gpt-5.4-mini)");
+
+      let candidates: { id: string; content: string }[];
+      try {
+        const parsed = JSON.parse(candidatesRaw!);
+        if (!Array.isArray(parsed)) throw new Error("candidates must be a JSON array");
+        candidates = parsed.map((c, i) => {
+          if (typeof c?.id !== "string" || typeof c?.content !== "string") {
+            throw new Error(`candidates[${i}] missing id or content`);
+          }
+          return { id: c.id, content: c.content };
+        });
+      } catch (err) {
+        die(`--candidates parse failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      const { rankByPairwise } = await import("./synthesis/pairranker");
+      const { createLLMJudge } = await import("./synthesis/llm-judge");
+      if (!config.chatFn) die("chat function not available");
+      const judge = createLLMJudge(judgeModel!, async (model, messages) => {
+        const r = await config.chatFn!(model, messages);
+        return { content: r.content };
+      });
+      const ranking = await rankByPairwise(task!, candidates!, judge);
+      result = { data: ranking };
       break;
     }
 
