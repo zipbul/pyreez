@@ -27,9 +27,9 @@ Claims not supported by inputs are marked as [UNCERTAIN].
 Unclassified claims are prohibited.
 
 Sources:
-- "Claims not supported by inputs are marked as [UNCERTAIN]" — PromptBuilder Prompt Engineering Best Practices 2026
-- "If unsure: Say so explicitly. Do not guess." — Claude Prompt Engineering Best Practices 2026
-- Explicit denial-of-knowledge fallback — AI Q&A Hub LLM Hallucination System Architecture 2026
+- "Claims not supported by inputs are marked as [UNCERTAIN]" — PromptBuilder, "Prompt Engineering Best Practices 2026", https://promptbuilder.cc/blog/prompt-engineering-best-practices-2026
+- "If unsure: Say so explicitly. Do not guess." — PromptBuilder, "Claude Prompt Engineering Best Practices 2026", https://promptbuilder.cc/blog/claude-prompt-engineering-best-practices-2026 (note: this is a third-party guide, not Anthropic official)
+- Constraint clause + explicit fallback to reduce hallucination — AI Q&A Hub, "Fix LLM Hallucination System Architecture (2026)", https://www.aiqnahub.com/llm-hallucination-system-architecture/ (the source documents the principle of "answer only from provided context + explicit fallback"; "denial-of-knowledge" is our shorthand)
 </claim-protocol>
 
 <self-critique>
@@ -41,9 +41,9 @@ Before presenting any response, run this verification:
 
 This is mandatory, not optional. A response that skips self-critique is incomplete.
 
-Sources:
-- "Identify exactly 3 specific flaws" achieving 100% success vs 34% for open-ended reflection — Epistemic Stability: Engineering Consistent Procedures for Industrial LLM Hallucination Reduction, 2026
-- "Before finalizing, verify: ☐ Output matches format ☐ All criteria satisfied ☐ Uncertain claims marked" — PromptBuilder 2026
+Provenance:
+- The "exactly 3" count is a pyreez convention (forces concreteness vs. open-ended "find issues"); not from a specific paper. The general principle of self-critique improving LLM output is well-documented across the literature on LLM self-reflection (e.g., ACL/EMNLP 2023 self-correction studies), but the specific "3 flaws" procedure is our design.
+- "Before finalizing, verify: output matches format / criteria satisfied / uncertain claims marked" — PromptBuilder, "Prompt Engineering Best Practices 2026", https://promptbuilder.cc/blog/prompt-engineering-best-practices-2026
 </self-critique>
 
 <critical-gate>
@@ -73,7 +73,11 @@ CLI: `bun run src/cli.ts <subcommand> [flags]`.
 - Frame for divergence, not consensus. Ask for conditions, boundaries, failure modes — not agreement on whether something is good.
 - Gather concrete context. Read relevant code, configs, constraints, or data and include them in --task. General questions produce general answers.
 
-Sources: Socratic Questioning (EMNLP 2023) — sub-question decomposition outperforms CoT/ToT. CQoT (arXiv 2412.15177) — critical questioning improves reasoning +4.7%. Consensus-Diversity Tradeoff (EMNLP 2025) — partial diversity retention improves exploration/robustness. Paul & Elder Six Types of Socratic Questions (2006) — foundational questioning taxonomy.
+Sources:
+- "The Art of Socratic Questioning: Recursive Thinking with Large Language Models" — Qi et al., EMNLP 2023, https://arxiv.org/abs/2305.14999 — sub-question decomposition outperforms CoT/ToT on MMLU/MATH/LogiQA.
+- "Critical-Questions-of-Thought: Steering LLM reasoning with Argumentative Querying" — Castagna et al., https://arxiv.org/abs/2412.15177 — uses Toulmin's 8 critical questions; iterates if <7/8 pass. (We cite the technique, not specific gain numbers — those vary by benchmark.)
+- "The Hidden Strength of Disagreement: Unraveling the Consensus-Diversity Tradeoff in Adaptive Multi-Agent Systems" — EMNLP 2025, https://arxiv.org/abs/2502.16565 — partial diversity retention boosts exploration/robustness over forced consensus.
+- Paul & Elder, "Six Types of Socratic Questions" (Critical Thinking Foundation, 2006) — foundational questioning taxonomy.
 
 **adversarial_debate task reframing**: When choosing adversarial_debate, the task MUST be reframed to elicit disagreement naturally. Heterogeneous models receive identical prompts — adversarial tension comes from the question, not the harness. Transform yes/no or evaluative questions into failure-condition questions:
 - "X가 맞는가?" → "X가 틀린 구체적 시나리오를 구성하라. 구성할 수 없다면 왜 불가능한지 논증하라."
@@ -125,7 +129,15 @@ After `deliberate` returns, read the output signals BEFORE synthesizing. Each si
 - `quality-check --responses '[...]' --judge <model>` — cross-validation only.
 - `convergence-check --task ... --responses '[...]' --judge <model>` — convergence only.
 
-Sources: ConfMAD (arXiv 2509.14034) — confidence-modulated debate. Demystifying MAD (arXiv 2601.19921) — diversity-aware initialisation. Debate hacking (arXiv 2510.20963) — minority dissent suppression.
+Sources:
+- "Enhancing Multi-Agent Debate System Performance via Confidence Expression" (ConfMAD) — Lin & Hooi (NUS), https://arxiv.org/abs/2509.14034 — confidence-modulated debate; "<50% convergence to correct answer when minority is right" finding.
+- "Demystifying Multi-Agent Debate: The Role of Confidence and Diversity" — Zhu, Zhang, Chi, Stafford, Collier, Vlachos, https://arxiv.org/abs/2601.19921 — diversity-aware initialisation correlates with debate success.
+- "Towards Scalable Oversight with Collaborative Multi-Agent Debate in Error Detection" — Chen et al., https://arxiv.org/abs/2510.20963 — debate hacking by dishonest debaters misleading the judge.
+- "Toward Epistemic Stability: Engineering Consistent Procedures for Industrial LLM Hallucination Reduction" — Mar 2026, https://arxiv.org/abs/2603.10047 — LLM-as-Judge framework for evaluating prompt engineering strategies (M1–M5 with verdict rates 34–100%).
+- "Judging the Judges: A Systematic Investigation of Position Bias in Pairwise Comparative Assessments by LLMs" — Lin Shi, Chiyu Ma, Wenhua Liang, Weicheng Ma, Soroush Vosoughi (Dartmouth) — position bias in LLM judges is systematic; swap pass is standard mitigation.
+- synaptent/aragora "CONVERGENCE.md" (Feb 2026), https://github.com/synaptent/aragora/blob/main/docs/algorithms/CONVERGENCE.md — multi-component convergence score formula and consecutive_rounds_needed concept.
+- "LLM-Blender: Ensembling LLMs with Pairwise Ranking and Generative Fusion" — Jiang, Ren, Lin (USC-INK), ACL 2023, https://arxiv.org/abs/2306.02561 — pairwise ranking pattern for synthesis.
+- "FActScore: Fine-grained Atomic Evaluation of Factual Precision in Long Form Text Generation" — Min et al., EMNLP 2023, https://arxiv.org/abs/2305.14251 — atomic-fact decomposition pattern.
 </signal-actions>
 
 <synthesis-phases>
@@ -150,7 +162,7 @@ Then check for perspective gaps across ALL workers:
 
 If a critical gap exists: run a supplementary deliberation targeting that gap before proceeding to Phase 2.
 
-Source: Paul & Elder Six Types of Socratic Questions (2006) — clarification, assumptions, evidence, perspectives, implications, meta-questioning.
+Source: Paul & Elder, "The Thinker's Guide to the Art of Socratic Questioning" (Foundation for Critical Thinking, 2006), https://www.criticalthinking.org/files/SocraticQuestioning2006.pdf — six types: clarification, assumptions, evidence, perspectives, implications, meta-questioning.
 
 **Phase 2 — Evaluate and ground**
 
