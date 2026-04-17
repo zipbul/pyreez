@@ -235,6 +235,36 @@ export function levenshteinDistance(a: string, b: string): number {
  * Returns true if convergence detected.
  */
 /**
+ * Compute R1 diversity score: average pairwise Levenshtein change rate across
+ * all worker responses. 0.0 = identical, 1.0 = maximally different.
+ * Returns null when fewer than 2 responses or all responses are empty.
+ *
+ * Demystifying MAD (arXiv 2601.19921, Jan 2026): initial answer diversity
+ * correlates with debate success. Low R1 diversity is a leading indicator that
+ * heterogeneous models converged before debate even started — usually because
+ * the question pre-determined the answer. Host should reframe (see
+ * HOST_QUESTIONING_DEPTH Rule 2).
+ */
+export function computeR1Diversity(round: Round): number | null {
+  const responses = round.responses;
+  if (responses.length < 2) return null;
+  let sum = 0;
+  let pairs = 0;
+  for (let i = 0; i < responses.length; i++) {
+    for (let j = i + 1; j < responses.length; j++) {
+      const a = responses[i]!.content;
+      const b = responses[j]!.content;
+      const maxLen = Math.max(a.length, b.length);
+      if (maxLen === 0) continue;
+      sum += levenshteinDistance(a, b) / maxLen;
+      pairs++;
+    }
+  }
+  if (pairs === 0) return null;
+  return sum / pairs;
+}
+
+/**
  * Detect R1 conformity — all workers report HIGH confidence AND their responses
  * are textually similar (Levenshtein change rate < 0.30 between every pair).
  *
@@ -1256,11 +1286,17 @@ export async function deliberate(
     warnings.push(`provider_diversity_low: ${providers.size} provider(s) — minimum 2 recommended`);
   }
 
-  // R1 conformity signal — only meaningful for protocols that share positions
+  // R1 conformity + diversity signals — only meaningful for protocols that share positions
   const r1 = allRounds[0];
+  let r1Diversity: number | null | undefined = undefined;
   if (r1 && r1.responses.length >= 2 && (cfg.protocol === "shared_convergence" || cfg.protocol === "adversarial_debate")) {
     const conformityWarning = detectConformity(r1);
     if (conformityWarning) warnings.push(conformityWarning);
+
+    r1Diversity = computeR1Diversity(r1);
+    if (r1Diversity !== null && r1Diversity < 0.20) {
+      warnings.push(`r1_diversity_low: score=${r1Diversity.toFixed(2)} — heterogeneous models converged before debate. Reframe the task to ask for failure conditions or boundaries (HOST_QUESTIONING_DEPTH Rule 2).`);
+    }
   }
 
   // Build degradation metadata if team shrank
@@ -1301,5 +1337,6 @@ export async function deliberate(
     ...(warnings.length > 0 ? { warnings } : {}),
     ...(degradation ? { degradation } : {}),
     ...(aggregation ? { aggregation } : {}),
+    ...(r1Diversity !== undefined ? { r1Diversity } : {}),
   };
 }

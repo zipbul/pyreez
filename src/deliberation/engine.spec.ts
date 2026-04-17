@@ -2589,3 +2589,86 @@ describe("R1 conformity warning in deliberate output", () => {
     expect(warns.some((w) => w.includes("r1_conformity_suspected"))).toBe(false);
   });
 });
+
+// =============================================================================
+// computeR1Diversity
+// =============================================================================
+
+describe("computeR1Diversity", () => {
+  it("returns null for fewer than 2 responses", async () => {
+    const { computeR1Diversity } = await import("./engine");
+    const round = { number: 1, responses: [{ model: "a", content: "x", workerIndex: 0 }] };
+    expect(computeR1Diversity(round)).toBeNull();
+  });
+
+  it("returns 0 for identical responses", () => {
+    const { computeR1Diversity } = require("./engine");
+    const round = {
+      number: 1,
+      responses: [
+        { model: "a", content: "same answer", workerIndex: 0 },
+        { model: "b", content: "same answer", workerIndex: 1 },
+      ],
+    };
+    expect(computeR1Diversity(round)).toBe(0);
+  });
+
+  it("returns near-1 for completely different responses", () => {
+    const { computeR1Diversity } = require("./engine");
+    const round = {
+      number: 1,
+      responses: [
+        { model: "a", content: "AAAAAAAAAA", workerIndex: 0 },
+        { model: "b", content: "BBBBBBBBBB", workerIndex: 1 },
+      ],
+    };
+    const score = computeR1Diversity(round);
+    expect(score).toBeGreaterThan(0.9);
+  });
+
+  it("emits r1_diversity_low warning when avg pairwise distance < 0.20", async () => {
+    const team = makeTeam(2);
+    const input = makeInput({ protocol: "shared_convergence", maxRounds: 1 });
+    const config = makeConfig({ protocol: "shared_convergence" });
+
+    let call = 0;
+    const deps = makeDeps({
+      chat: mock(async () => {
+        call++;
+        return {
+          content: "Same answer here, almost identical." + (call === 2 ? "." : ""),
+          inputTokens: 1, outputTokens: 1, finishReason: "stop",
+        };
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+    expect(output.r1Diversity).toBeDefined();
+    expect(output.r1Diversity).toBeLessThan(0.20);
+    const warns = output.warnings ?? [];
+    expect(warns.some((w) => w.includes("r1_diversity_low"))).toBe(true);
+  });
+
+  it("does NOT emit diversity warning when responses differ", async () => {
+    const team = makeTeam(2);
+    const input = makeInput({ protocol: "shared_convergence", maxRounds: 1 });
+    const config = makeConfig({ protocol: "shared_convergence" });
+
+    let call = 0;
+    const deps = makeDeps({
+      chat: mock(async () => {
+        call++;
+        return {
+          content: call === 1
+            ? "Bun is faster but ecosystem is smaller, prefer Node for production."
+            : "Node has battle-tested libraries; only switch to Bun for prototypes.",
+          inputTokens: 1, outputTokens: 1, finishReason: "stop",
+        };
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+    const warns = output.warnings ?? [];
+    expect(warns.some((w) => w.includes("r1_diversity_low"))).toBe(false);
+  });
+});

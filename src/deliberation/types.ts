@@ -251,6 +251,8 @@ export interface DeliberateOutput {
   }[];
   /** Warnings about deliberation quality (e.g., low provider diversity). */
   readonly warnings?: readonly string[];
+  /** R1 diversity score (0.0=identical, 1.0=maximally different). null when <2 responses. */
+  readonly r1Diversity?: number | null;
   /** Model swaps that occurred during deliberation (worker failure → fallback). */
   readonly modelSwaps?: readonly ModelSwap[];
   /** Team degradation info — present when team shrank below requested size. */
