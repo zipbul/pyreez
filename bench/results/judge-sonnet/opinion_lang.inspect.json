@@ -1,0 +1,21 @@
+{
+  "host_actions": [
+    "convergence_score=0.23 status=diverging",
+    "convergence is DIVERSE — proceed to synthesis with full diversity",
+    "self_judge_bias: judge \"anthropic/claude-sonnet-4.6\" shares provider \"anthropic\" with at least one worker — convergence and ranking verdicts may be biased toward same-provider models. Re-run with a cross-provider judge for a sanity check."
+  ],
+  "convergence": {
+    "level": "diverse",
+    "reasoning": "The analysts disagree on the single best language: Haiku says \"it depends\" with no clear winner, Grok picks Python, and Gemini picks Go as the default. No clear majority on one language."
+  },
+  "convergenceScore": {
+    "overall": 0.22895191219496325,
+    "status": "diverging",
+    "components": {
+      "semantic": 0,
+      "diversity": 0.8552404390251839,
+      "evidence": 0,
+      "stability": 1
+    }
+  }
+}

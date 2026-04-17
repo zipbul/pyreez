@@ -1,0 +1,80 @@
+[
+  {
+    "id": "math_obvious",
+    "category": "obvious",
+    "expectedLevel": "high",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "factual_who",
+    "category": "obvious",
+    "expectedLevel": "high",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "factual_year",
+    "category": "obvious",
+    "expectedLevel": "high",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "directional_bun",
+    "category": "directional",
+    "expectedLevel": "moderate",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "directional_typed",
+    "category": "directional",
+    "expectedLevel": "moderate",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "failure_bun",
+    "category": "failure_cond",
+    "expectedLevel": "diverse",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "failure_microservices",
+    "category": "failure_cond",
+    "expectedLevel": "diverse",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "opinion_lang",
+    "category": "opinion",
+    "expectedLevel": "moderate",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "opinion_db",
+    "category": "opinion",
+    "expectedLevel": "moderate",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "design_chat",
+    "category": "design",
+    "expectedLevel": "moderate",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "tradeoff_arch",
+    "category": "design",
+    "expectedLevel": "moderate",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "ethics_ai",
+    "category": "controversial",
+    "expectedLevel": "diverse",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  },
+  {
+    "id": "philosophy_freewill",
+    "category": "controversial",
+    "expectedLevel": "diverse",
+    "error": "SyntaxError: JSON Parse error: Unexpected EOF"
+  }
+]

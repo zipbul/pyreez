@@ -1,0 +1,22 @@
+{
+  "host_actions": [
+    "convergence_score=0.43 status=refining",
+    "read xai/grok-4-1-fast response FIRST — convergence is moderate with named dissenter",
+    "self_judge_bias: judge \"anthropic/claude-sonnet-4.6\" shares provider \"anthropic\" with at least one worker — convergence and ranking verdicts may be biased toward same-provider models. Re-run with a cross-provider judge for a sanity check."
+  ],
+  "convergence": {
+    "level": "moderate",
+    "dissenterId": "xai/grok-4-1-fast",
+    "reasoning": "All three analysts agree on native module/C++ addon failures (HIGH confidence) as a core failure condition, and most agree on module resolution/exports issues. The main divergence is that grok-4 includes Windows environment as a condition while the others don't, and gemini includes APM tools while others don't — but all three share the native modules failure condition as a clear consensus point, with partial overlap on module resolution issues."
+  },
+  "convergenceScore": {
+    "overall": 0.43397548262236174,
+    "status": "refining",
+    "components": {
+      "semantic": 0.5,
+      "diversity": 0.8301225868881915,
+      "evidence": 0,
+      "stability": 1
+    }
+  }
+}

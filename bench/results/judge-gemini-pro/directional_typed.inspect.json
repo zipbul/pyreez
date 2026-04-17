@@ -1,0 +1,21 @@
+{
+  "host_actions": [
+    "convergence_score=0.64 status=converged",
+    "convergence is HIGH — reframe task as failure-conditions question (HOST_QUESTIONING_DEPTH Rule 2) and re-run deliberate",
+    "self_judge_bias: judge \"google/gemini-3.1-pro-preview\" shares provider \"google\" with at least one worker — convergence and ranking verdicts may be biased toward same-provider models. Re-run with a cross-provider judge for a sanity check."
+  ],
+  "convergence": {
+    "level": "high",
+    "reasoning": "All analysts agree that TypeScript is not strictly essential for new Node.js projects, though they all note it is highly recommended or a de facto standard for larger, collaborative applications."
+  },
+  "convergenceScore": {
+    "overall": 0.6365130023848053,
+    "status": "converged",
+    "components": {
+      "semantic": 1,
+      "diversity": 0.817434988075973,
+      "evidence": 0,
+      "stability": 1
+    }
+  }
+}

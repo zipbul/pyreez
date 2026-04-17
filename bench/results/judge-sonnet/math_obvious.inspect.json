@@ -1,0 +1,21 @@
+{
+  "host_actions": [
+    "convergence_score=0.68 status=converged",
+    "convergence is HIGH — reframe task as failure-conditions question (HOST_QUESTIONING_DEPTH Rule 2) and re-run deliberate",
+    "self_judge_bias: judge \"anthropic/claude-sonnet-4.6\" shares provider \"anthropic\" with at least one worker — convergence and ranking verdicts may be biased toward same-provider models. Re-run with a cross-provider judge for a sanity check."
+  ],
+  "convergence": {
+    "level": "high",
+    "reasoning": "All three analysts agree that 2 + 2 = 4 with HIGH confidence."
+  },
+  "convergenceScore": {
+    "overall": 0.6797510115157175,
+    "status": "converged",
+    "components": {
+      "semantic": 1,
+      "diversity": 0.6012449424214131,
+      "evidence": 0,
+      "stability": 1
+    }
+  }
+}

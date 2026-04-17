@@ -1,0 +1,21 @@
+{
+  "host_actions": [
+    "convergence_score=0.23 status=diverging",
+    "convergence is DIVERSE — proceed to synthesis with full diversity",
+    "self_judge_bias: judge \"google/gemini-3.1-pro-preview\" shares provider \"google\" with at least one worker — convergence and ranking verdicts may be biased toward same-provider models. Re-run with a cross-provider judge for a sanity check."
+  ],
+  "convergence": {
+    "level": "diverse",
+    "reasoning": "The analysts propose different primary backend languages (Grok chooses Python, Gemini chooses Go, and Claude says it depends on specific requirements without picking a single winner), showing no consensus."
+  },
+  "convergenceScore": {
+    "overall": 0.22895191219496325,
+    "status": "diverging",
+    "components": {
+      "semantic": 0,
+      "diversity": 0.8552404390251839,
+      "evidence": 0,
+      "stability": 1
+    }
+  }
+}

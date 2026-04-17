@@ -1,0 +1,21 @@
+{
+  "host_actions": [
+    "convergence_score=0.23 status=diverging",
+    "convergence is DIVERSE — proceed to synthesis with full diversity",
+    "self_judge_bias: judge \"google/gemini-3.1-pro-preview\" shares provider \"google\" with at least one worker — convergence and ranking verdicts may be biased toward same-provider models. Re-run with a cross-provider judge for a sanity check."
+  ],
+  "convergence": {
+    "level": "diverse",
+    "reasoning": "While all analysts agree that native C++/V8 module dependencies cause failures, they provide completely divergent answers for the remaining two conditions with no clear majority."
+  },
+  "convergenceScore": {
+    "overall": 0.2339754826223617,
+    "status": "diverging",
+    "components": {
+      "semantic": 0,
+      "diversity": 0.8301225868881915,
+      "evidence": 0,
+      "stability": 1
+    }
+  }
+}
