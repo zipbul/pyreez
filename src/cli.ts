@@ -63,6 +63,7 @@ Commands:
   deliberate   Run multi-model deliberation
   acceptance   Verify a synthesis against worker positions
   rank         Pairwise-rank candidate responses with an LLM judge (LLM-Blender pattern)
+  quality-check  Cross-validate factual claims across responses (FActScore-inspired)
 
 Run "bun run src/cli.ts <command> --help" for command-specific help.`);
   process.exit(1);
@@ -260,6 +261,38 @@ async function main(): Promise<void> {
       });
       const ranking = await rankByPairwise(task!, candidates!, judge);
       result = { data: ranking };
+      break;
+    }
+
+    case "quality-check": {
+      const responsesRaw = await resolveValue(flags["responses"]);
+      if (!responsesRaw) die("--responses is required (JSON array: [{id, content}, ...])");
+      const judgeModel = flags["judge"];
+      if (!judgeModel) die("--judge is required (model id)");
+
+      let responses: { id: string; content: string }[];
+      try {
+        const parsed = JSON.parse(responsesRaw!);
+        if (!Array.isArray(parsed)) throw new Error("responses must be a JSON array");
+        responses = parsed.map((r, i) => {
+          if (typeof r?.id !== "string" || typeof r?.content !== "string") {
+            throw new Error(`responses[${i}] missing id or content`);
+          }
+          return { id: r.id, content: r.content };
+        });
+      } catch (err) {
+        die(`--responses parse failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      const { crossValidate } = await import("./quality/cross-validate");
+      const { createLLMCrossValidator } = await import("./quality/llm-cross-validator");
+      if (!config.chatFn) die("chat function not available");
+      const judge = createLLMCrossValidator(judgeModel!, async (model, messages) => {
+        const r = await config.chatFn!(model, messages);
+        return { content: r.content };
+      });
+      const findings = await crossValidate(responses!, judge);
+      result = { data: findings };
       break;
     }
 
