@@ -52,18 +52,47 @@ function parseVerdict(text: string): "A" | "B" | "TIE" {
   return "TIE";
 }
 
+export interface LLMJudgeOptions {
+  /**
+   * Position-bias mitigation strategy.
+   * - "eager" (default): always run forward + swap pass. 2N calls. Most accurate.
+   * - "lazy": run forward only; swap only when forward verdict is TIE. ~N–2N calls.
+   *   Trades accuracy for cost when verdicts are usually clean.
+   */
+  positionBias?: "eager" | "lazy";
+}
+
 /**
  * Create a JudgeFn that uses an LLM to compare candidates.
- * Position bias mitigation: judges A vs B and B vs A; only declares a winner
- * when both orderings agree. Doubles cost but reduces position-bias noise.
+ * Default position-bias mitigation: judge A vs B AND B vs A; only declare a
+ * winner when both orderings agree, else TIE. Doubles cost but halves
+ * position-bias error (NeurIPS 2023 LLM-as-Judge research).
+ *
+ * Pass `{ positionBias: "lazy" }` to skip the swap pass when forward verdict
+ * is already A or B; cuts cost ~50% when judges are decisive.
  */
-export function createLLMJudge(model: string, chat: ChatFn): JudgeFn {
+export function createLLMJudge(
+  model: string,
+  chat: ChatFn,
+  options?: LLMJudgeOptions,
+): JudgeFn {
+  const lazy = options?.positionBias === "lazy";
   return async (task, a, b) => {
+    if (lazy) {
+      const forward = await chat(model, buildJudgeMessages(task, a, b))
+        .then((r) => parseVerdict(r.content));
+      if (forward === "A" || forward === "B") return forward;
+      // TIE — confirm with swap
+      const swapped = await chat(model, buildJudgeMessages(task, b, a))
+        .then((r) => parseVerdict(r.content));
+      if (swapped === "A") return "B";
+      if (swapped === "B") return "A";
+      return "TIE";
+    }
     const [forward, swapped] = await Promise.all([
       chat(model, buildJudgeMessages(task, a, b)).then((r) => parseVerdict(r.content)),
       chat(model, buildJudgeMessages(task, b, a)).then((r) => parseVerdict(r.content)),
     ]);
-    // forward: A means a wins. swapped: A means b wins (because b was passed first).
     if (forward === "A" && swapped === "B") return "A";
     if (forward === "B" && swapped === "A") return "B";
     return "TIE";

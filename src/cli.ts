@@ -65,6 +65,7 @@ Commands:
   rank         Pairwise-rank candidate responses with an LLM judge (LLM-Blender pattern)
   quality-check  Cross-validate factual claims across responses (FActScore-inspired)
   convergence-check  LLM-judge semantic convergence across responses (HIGH/MODERATE/DIVERSE)
+  inspect       Integrated post-deliberate inspection: convergence + (rank if N≥4) + quality (opt-in)
 
 Run "bun run src/cli.ts <command> --help" for command-specific help.`);
   process.exit(1);
@@ -256,10 +257,11 @@ async function main(): Promise<void> {
       const { rankByPairwise } = await import("./synthesis/pairranker");
       const { createLLMJudge } = await import("./synthesis/llm-judge");
       if (!config.chatFn) die("chat function not available");
+      const lazy = flags["lazy"] === "true";
       const judge = createLLMJudge(judgeModel!, async (model, messages) => {
         const r = await config.chatFn!(model, messages);
         return { content: r.content };
-      });
+      }, lazy ? { positionBias: "lazy" } : undefined);
       const ranking = await rankByPairwise(task!, candidates!, judge);
       result = { data: ranking };
       break;
@@ -326,6 +328,38 @@ async function main(): Promise<void> {
         return { content: r.content };
       }, task!, responses!);
       result = { data: verdict };
+      break;
+    }
+
+    case "inspect": {
+      const task = await resolveValue(flags["task"]);
+      if (!task) die("--task is required for inspect");
+      const deliberateRaw = await resolveValue(flags["deliberate"]);
+      if (!deliberateRaw) die("--deliberate is required (path or '-' for stdin: full deliberate JSON output)");
+      const judgeModel = flags["judge"];
+      if (!judgeModel) die("--judge is required (model id)");
+      const factualLikely = flags["factual"] === "true";
+
+      let deliberate: any;
+      try {
+        deliberate = JSON.parse(deliberateRaw!);
+      } catch (err) {
+        die(`--deliberate parse failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      const { runInspection } = await import("./inspect/inspect");
+      if (!config.chatFn) die("chat function not available");
+      const inspection = await runInspection({
+        task: task!,
+        deliberate,
+        judgeModel: judgeModel!,
+        chat: async (model, messages) => {
+          const r = await config.chatFn!(model, messages);
+          return { content: r.content };
+        },
+        factualLikely,
+      });
+      result = { data: inspection };
       break;
     }
 

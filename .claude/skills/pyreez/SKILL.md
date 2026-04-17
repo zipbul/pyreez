@@ -53,12 +53,13 @@ Do not skip any phase — each phase produces a verifiable output below.
 
 <checklist>
 - [ ] deliberate (task framing applied)
+- [ ] inspect signals (warnings, r1Diversity → actions per signal-actions table)
 - [ ] Phase 1: comprehend + gap check (output template filled, perspective gaps assessed)
 - [ ] Phase 2: evaluate (factual claims verified via appropriate source, analytical claims have reasoning chains)
 - [ ] Phase 3: self-critique (exactly 3 flaws found and fixed)
 - [ ] Phase 4: confidence (HIGH → present / MEDIUM → present with caveats / LOW → do not present)
 - [ ] synthesize (unverified facts removed or flagged in final output)
-- [ ] acceptance
+- [ ] acceptance (mark alignment per worker; meta-critique excluded from action_required)
 </checklist>
 
 <workflow>
@@ -89,7 +90,35 @@ This is not optional — directional questions ("is X good?") produce unanimous 
 - `red_team` — need adversarial attack/defense (security review, vulnerability analysis)
 
 **deliberate**: Run `deliberate --task "..." --models "model1,model2,model3" --protocol shared_convergence [--max-rounds N] [--worker-instructions "..."]`. Use `--task -` for long tasks via stdin. Use `--worker-instructions` to set a shared analysis angle or constraint for all workers (e.g., "Focus on failure modes in distributed systems with >10K RPS").
+
+**post-deliberate inspection commands** (opt-in, run only when needed):
+- `rank --task "..." --candidates '[{id, content}, ...]' --judge <model>` — pairwise LLM judge ranks responses by win count (LLM-Blender pattern). Use when N≥3 worker responses and you need to weight them in synthesis.
+- `quality-check --responses '[...]' --judge <model>` — flags claims unsupported or contradicted by peer responses (FActScore pattern). Use when responses contain factual claims to verify.
+- `convergence-check --task "..." --responses '[...]' --judge <model>` — LLM judge classifies overall convergence as HIGH/MODERATE/DIVERSE and names dissenter. Use when text-distance signals (warnings, r1Diversity) are ambiguous and you need a precise read.
 </workflow>
+
+<signal-actions>
+After `deliberate` returns, read the output signals BEFORE synthesizing. Each signal triggers a specific action — the synthesis quality depends on responding to these, not ignoring them.
+
+| Signal in deliberate output | What it means | Required action |
+|---|---|---|
+| `warnings: [...provider_diversity_low]` | Only 1 provider — diversity comes from prompt lenses alone | Acknowledge in confidence assessment. Re-run with 2+ providers if available |
+| `warnings: [...r1_conformity_suspected]` | All workers HIGH confidence + textually similar | Run `convergence-check` to confirm semantic agreement. If confirmed, reframe task per HOST_QUESTIONING_DEPTH Rule 2 (failure conditions, not yes/no) |
+| `warnings: [...r1_diversity_low]` (score <0.20) | Workers converged before debate started | Reframe task. Original task likely too directional. Do not proceed with synthesis on the current responses |
+| `warnings: [...minority_dissent]` | One worker HIGH confidence disagrees with majority | Read the named dissenter response FIRST. Do not auto-trust the majority. Treat dissenter as candidate-correct until disproven |
+| `r1Diversity` between 0.20–0.50 | Borderline diversity | Run `convergence-check` for precise read before synthesizing |
+| `r1Diversity` ≥ 0.50 | Healthy diversity | Proceed to Phase 1 |
+| No warnings, r1Diversity high | Best case | Proceed to Phase 1 |
+
+**When to run inspection commands**:
+- `rank`: ALWAYS for N≥4 workers (manual ranking is unreliable). Skip for N≤3 (cost > value).
+- `quality-check`: When task involves factual claims (technical specs, historical events, numbers). Skip for pure opinion/design tasks.
+- `convergence-check`: When text-distance warnings fire OR when r1Diversity is in 0.20–0.50 borderline range. Costs 1 LLM call; resolves false negatives in text-distance signals.
+
+**Cost discipline**: Each inspection command adds latency and tokens. Run only when the signal warrants it; don't run all three by default.
+
+Sources: ConfMAD (arXiv 2509.14034) — confidence-modulated debate. Demystifying MAD (arXiv 2601.19921) — diversity-aware initialisation. Debate hacking (arXiv 2510.20963) — minority dissent suppression.
+</signal-actions>
 
 <synthesis-phases>
 After deliberate returns, process worker responses through all four phases.

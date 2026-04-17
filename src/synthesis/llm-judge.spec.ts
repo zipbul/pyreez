@@ -58,3 +58,42 @@ describe("createLLMJudge", () => {
     expect(verdict).toBe("B");
   });
 });
+
+describe("createLLMJudge with positionBias=lazy", () => {
+  it("makes only 1 call when forward verdict is decisive (A)", async () => {
+    let calls = 0;
+    const chat = async () => {
+      calls++;
+      return { content: "A" };
+    };
+    const judge = createLLMJudge("test/judge", chat, { positionBias: "lazy" });
+    const verdict = await judge("task", { id: "a", content: "x" }, { id: "b", content: "y" });
+    expect(calls).toBe(1);
+    expect(verdict).toBe("A");
+  });
+
+  it("makes only 1 call when forward verdict is decisive (B)", async () => {
+    let calls = 0;
+    const chat = async () => {
+      calls++;
+      return { content: "B" };
+    };
+    const judge = createLLMJudge("test/judge", chat, { positionBias: "lazy" });
+    const verdict = await judge("task", { id: "a", content: "x" }, { id: "b", content: "y" });
+    expect(calls).toBe(1);
+    expect(verdict).toBe("B");
+  });
+
+  it("falls back to swap when forward is TIE", async () => {
+    let calls = 0;
+    const chat = async () => {
+      calls++;
+      return { content: calls === 1 ? "TIE" : "A" };
+    };
+    const judge = createLLMJudge("test/judge", chat, { positionBias: "lazy" });
+    const verdict = await judge("task", { id: "a", content: "x" }, { id: "b", content: "y" });
+    expect(calls).toBe(2);
+    // swap was a vs b passed as (b,a) — A means b wins
+    expect(verdict).toBe("B");
+  });
+});

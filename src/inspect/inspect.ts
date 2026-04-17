@@ -1,0 +1,113 @@
+/**
+ * inspect — integrated post-deliberate inspection workflow.
+ *
+ * Reads a deliberate output and conditionally runs convergence-check, rank,
+ * quality-check based on signal triggers. Aggregates host_actions per signal
+ * so the host has a single report instead of orchestrating four CLI commands.
+ *
+ * Cost-discipline: each inspection sub-call is gated by a precondition.
+ *
+ * @module inspect
+ */
+
+import type { ChatMessage } from "../llm/types";
+import type { ConvergenceLevel } from "../quality/convergence-judge";
+import { judgeConvergence } from "../quality/convergence-judge";
+import { rankByPairwise } from "../synthesis/pairranker";
+import { createLLMJudge } from "../synthesis/llm-judge";
+import { crossValidate } from "../quality/cross-validate";
+import { createLLMCrossValidator } from "../quality/llm-cross-validator";
+
+interface DeliberateLike {
+  rounds?: readonly { number: number; responses?: readonly { model: string; content: string; confidence?: string }[] }[];
+  warnings?: readonly string[];
+  r1Diversity?: number | null;
+}
+
+export interface InspectInput {
+  task: string;
+  deliberate: DeliberateLike;
+  judgeModel: string;
+  chat: (model: string, messages: ChatMessage[]) => Promise<{ content: string }>;
+  /** Set true when responses likely contain factual claims worth cross-validating. */
+  factualLikely?: boolean;
+}
+
+export interface InspectResult {
+  skipped?: boolean;
+  convergence?: { level: ConvergenceLevel; dissenterId?: string; reasoning?: string };
+  ranking?: readonly { id: string; wins: number; losses: number }[];
+  qualityFindings?: readonly { id: string; unsupported: readonly string[]; contradicted: readonly string[] }[];
+  host_actions: string[];
+}
+
+const RANK_MIN_WORKERS = 4;
+const BORDERLINE_DIVERSITY_LO = 0.20;
+const BORDERLINE_DIVERSITY_HI = 0.50;
+
+export async function runInspection(input: InspectInput): Promise<InspectResult> {
+  const r1 = input.deliberate.rounds?.[0];
+  const responses = r1?.responses ?? [];
+  if (responses.length === 0) {
+    return { skipped: true, host_actions: ["No R1 responses to inspect."] };
+  }
+
+  const warnings = input.deliberate.warnings ?? [];
+  const diversity = input.deliberate.r1Diversity ?? null;
+  const actions: string[] = [];
+  const result: InspectResult = { host_actions: actions };
+
+  const candidates = responses.map((r) => ({ id: r.model, content: r.content }));
+
+  // 1. Convergence check — when text-distance signals fired or diversity is borderline
+  const conformitySuspected = warnings.some((w) => w.includes("r1_conformity_suspected"));
+  const dissentSuspected = warnings.some((w) => w.includes("minority_dissent"));
+  const diversityLow = warnings.some((w) => w.includes("r1_diversity_low"));
+  const borderline = diversity !== null && diversity >= BORDERLINE_DIVERSITY_LO && diversity < BORDERLINE_DIVERSITY_HI;
+
+  const diversityNumericLow = diversity !== null && diversity < BORDERLINE_DIVERSITY_LO;
+  if (conformitySuspected || dissentSuspected || diversityLow || diversityNumericLow || borderline) {
+    result.convergence = await judgeConvergence(input.judgeModel, input.chat, input.task, candidates);
+    if (result.convergence.level === "high" && (conformitySuspected || diversityLow || diversityNumericLow)) {
+      actions.push("convergence is HIGH — reframe task as failure-conditions question (HOST_QUESTIONING_DEPTH Rule 2) and re-run deliberate");
+    } else if (result.convergence.level === "moderate" && result.convergence.dissenterId) {
+      actions.push(`read ${result.convergence.dissenterId} response FIRST — convergence is moderate with named dissenter`);
+    } else if (result.convergence.level === "moderate" || (result.convergence.level === "high" && (diversityNumericLow || diversityLow))) {
+      actions.push("convergence suggests reframe — see Rule 2 in HOST_QUESTIONING_DEPTH");
+    } else if (result.convergence.level === "diverse") {
+      actions.push("convergence is DIVERSE — text-distance signal was a false positive; proceed to synthesis");
+    }
+  }
+
+  // 2. Ranking — only worth the LLM cost for N≥4 workers. Use lazy position-bias
+  // mitigation here: inspect runs as part of standard workflow, ~50% cost cut
+  // when verdicts are decisive, with marginal accuracy loss on ties.
+  if (responses.length >= RANK_MIN_WORKERS) {
+    const judge = createLLMJudge(input.judgeModel, input.chat, { positionBias: "lazy" });
+    const ranked = await rankByPairwise(input.task, candidates, judge);
+    result.ranking = ranked.ranking;
+    actions.push(`ranking computed — top response: ${ranked.ranking[0]?.id}, lowest: ${ranked.ranking[ranked.ranking.length - 1]?.id}`);
+  }
+
+  // 3. Quality check — opt-in via factualLikely
+  if (input.factualLikely) {
+    const validator = createLLMCrossValidator(input.judgeModel, input.chat);
+    const findings = await crossValidate(candidates, validator);
+    result.qualityFindings = findings.findings;
+    const flagged = findings.findings.filter((f) => f.unsupported.length > 0 || f.contradicted.length > 0);
+    if (flagged.length > 0) {
+      actions.push(`quality issues found in ${flagged.length} response(s) — review unsupported/contradicted claims before including in synthesis`);
+    }
+  }
+
+  // 4. Standing warnings → actions
+  if (warnings.some((w) => w.includes("provider_diversity_low"))) {
+    actions.push("provider_diversity_low — note in confidence assessment; re-run with 2+ providers if available");
+  }
+
+  if (actions.length === 0) {
+    actions.push("no signal-triggered actions — proceed to Phase 1 synthesis");
+  }
+
+  return result;
+}
