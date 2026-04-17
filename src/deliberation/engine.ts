@@ -1346,20 +1346,15 @@ export async function deliberate(
     warnings.push(`provider_diversity_low: ${providers.size} provider(s) — minimum 2 recommended`);
   }
 
-  // R1 conformity + diversity signals — only meaningful for protocols that share positions
+  // R1 diversity score — cheap text-distance metric. Always emitted as a value
+  // for downstream tooling, but no longer raises warnings: empirical measurement
+  // (9 task types) showed r1Diversity clusters in 0.74–0.85 range regardless of
+  // semantic convergence, making text-distance thresholds dead in practice.
+  // Use the inspect convergence-judge pass for reliable convergence reads.
   const r1 = allRounds[0];
   let r1Diversity: number | null | undefined = undefined;
   if (r1 && r1.responses.length >= 2 && (cfg.protocol === "shared_convergence" || cfg.protocol === "adversarial_debate")) {
-    const conformityWarning = detectConformity(r1);
-    if (conformityWarning) warnings.push(conformityWarning);
-
     r1Diversity = computeR1Diversity(r1);
-    if (r1Diversity !== null && r1Diversity < 0.20) {
-      warnings.push(`r1_diversity_low: score=${r1Diversity.toFixed(2)} — heterogeneous models converged before debate. Reframe the task to ask for failure conditions or boundaries (HOST_QUESTIONING_DEPTH Rule 2).`);
-    }
-
-    const dissentWarning = detectMinorityDissent(r1);
-    if (dissentWarning) warnings.push(dissentWarning);
   }
 
   // Build degradation metadata if team shrank

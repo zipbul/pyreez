@@ -45,8 +45,11 @@ Convert directional questions into failure-condition questions before passing to
 ```bash
 bun run src/cli.ts deliberate --task "..." --models "m1,m2,m3" --protocol <p> [--max-rounds N]
 bun run src/cli.ts inspect --task "..." --judge <model> --deliberate -    # pipe deliberate JSON
-bun run src/cli.ts acceptance --task "..." --synthesis "..." --workers '[{model, original_position, alignment}]'
+bun run src/cli.ts fuse --task "..." --judge <model> --candidates '[{id, content}]' [--ranking '[{id, wins, losses}]']
+bun run src/cli.ts acceptance --task "..." --synthesis "..." --workers '[{model, original_position, alignment?}]'
 ```
+
+`fuse` produces a synthesis DRAFT from worker responses (LLM-Blender GenFuser pattern). Use after inspect when you want a starting point — still apply cross-worker gap checks and pick the stronger case yourself. Pass `--ranking` from `inspect`'s ranking output (or `rank`) to weight strong candidates.
 
 Pass `--factual true` to `inspect` when responses contain verifiable factual claims.
 
@@ -59,7 +62,7 @@ Pass `--factual true` to `inspect` when responses contain verifiable factual cla
 | `convergence.level: "moderate"` no dissenter | Synthesize with explicit acknowledgment of split |
 | `convergence.level: "diverse"` | Best case. Synthesize with full diversity |
 | `convergenceScore.status: "converged"` | Same as `level: high` — reframe |
-| `convergenceScore.status: "diverging"` | Should not happen on single-provider runs; treat as alarm |
+| `convergenceScore.status: "diverging"` | Treat as alarm; rare on single-provider runs |
 | `ranking` (N≥4 only) | Weight workers by win count |
 | `qualityFindings` | Remove or caveat flagged unsupported/contradicted claims |
 | `host_actions` includes `provider_diversity_low` | Add caveat in confidence assessment |
@@ -91,4 +94,6 @@ Mark each worker's `alignment`:
 - `"on-task"` — answered the question; verdict counts toward `action_required`
 - `"meta-critique"` — rejected the framing or proposed an unrelated alternative; preserved in `metaCritiques`, does not block
 
-If any on-task worker rejects, revise synthesis addressing the misrepresented/unresolved fields and re-run. Meta-critique positions can be cited as alternative perspectives but cannot force re-runs.
+If any on-task worker rejects, revise synthesis addressing the misrepresented/unresolved fields and re-run. Cap acceptance retries at 3 — if an on-task worker still rejects after 3 revisions, surface the disagreement to the user instead of looping. Meta-critique positions can be cited as alternative perspectives but cannot force re-runs.
+
+Workers without explicit `alignment` are auto-classified by the same model that judges them. Override by passing `alignment: "on-task" | "meta-critique"` explicitly when you want to force a classification.

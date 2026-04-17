@@ -202,11 +202,32 @@ export async function handleAcceptance(
       let totalInput = 0;
       let totalOutput = 0;
 
+      // Auto-classify alignment for workers that didn't specify one.
+      // Defaults to on-task if classification fails (preserves verdict participation).
+      const { classifyAlignment } = await import("./quality/alignment-classifier");
+      const classifiedWorkers = await Promise.all(args.workers.map(async (w) => {
+        if (w.alignment) return w;
+        try {
+          const alignment = await classifyAlignment(
+            w.model,
+            async (model, messages) => {
+              const r = await config.chatFn!(model, messages, { temperature: 0 });
+              return { content: r.content };
+            },
+            args.task,
+            w.original_position,
+          );
+          return { ...w, alignment };
+        } catch {
+          return { ...w, alignment: "on-task" as const };
+        }
+      }));
+
       // Split workers by alignment. Meta-critique workers are preserved
       // separately and excluded from action_required, since they reject the
       // task framing itself and cannot be reconciled with an on-task synthesis.
-      const onTaskWorkers = args.workers.filter((w) => w.alignment !== "meta-critique");
-      const metaCritiqueWorkers = args.workers.filter((w) => w.alignment === "meta-critique");
+      const onTaskWorkers = classifiedWorkers.filter((w) => w.alignment !== "meta-critique");
+      const metaCritiqueWorkers = classifiedWorkers.filter((w) => w.alignment === "meta-critique");
 
       const judgeWorker = async (w: typeof args.workers[number]) => {
         const messages = buildAcceptanceMessages(args.synthesis, w.original_position, args.task);

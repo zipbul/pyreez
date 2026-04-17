@@ -2544,7 +2544,7 @@ describe("detectConformity", () => {
 // =============================================================================
 
 describe("R1 conformity warning in deliberate output", () => {
-  it("emits r1_conformity_suspected when R1 responses are HIGH and similar", async () => {
+  it("does NOT emit r1_conformity_suspected (text-distance signal disabled — measurement showed it is dead)", async () => {
     const team = makeTeam(2);
     const input = makeInput({ protocol: "shared_convergence", maxRounds: 1 });
     const config = makeConfig({ protocol: "shared_convergence" });
@@ -2563,7 +2563,7 @@ describe("R1 conformity warning in deliberate output", () => {
 
     const output = await deliberate(team, input, deps, config);
     const warns = output.warnings ?? [];
-    expect(warns.some((w) => w.includes("r1_conformity_suspected"))).toBe(true);
+    expect(warns.some((w) => w.includes("r1_conformity_suspected"))).toBe(false);
   });
 
   it("does NOT emit conformity warning when R1 responses differ", async () => {
@@ -2626,7 +2626,7 @@ describe("computeR1Diversity", () => {
     expect(score).toBeGreaterThan(0.9);
   });
 
-  it("emits r1_diversity_low warning when avg pairwise distance < 0.20", async () => {
+  it("emits r1Diversity score but NOT r1_diversity_low warning (signal disabled — measurement showed it dead)", async () => {
     const team = makeTeam(2);
     const input = makeInput({ protocol: "shared_convergence", maxRounds: 1 });
     const config = makeConfig({ protocol: "shared_convergence" });
@@ -2646,7 +2646,7 @@ describe("computeR1Diversity", () => {
     expect(output.r1Diversity).toBeDefined();
     expect(output.r1Diversity).toBeLessThan(0.20);
     const warns = output.warnings ?? [];
-    expect(warns.some((w) => w.includes("r1_diversity_low"))).toBe(true);
+    expect(warns.some((w) => w.includes("r1_diversity_low"))).toBe(false);
   });
 
   it("does NOT emit diversity warning when responses differ", async () => {
@@ -2754,7 +2754,7 @@ describe("detectMinorityDissent", () => {
 // =============================================================================
 
 describe("minority_dissent warning in deliberate output", () => {
-  it("emits minority_dissent when R1 has lone HIGH-confidence dissenter", async () => {
+  it("does NOT emit minority_dissent (text-distance signal disabled — measurement showed it dead)", async () => {
     const team = makeTeam(3);
     const input = makeInput({ protocol: "shared_convergence", maxRounds: 1, models: ["test/m0", "test/m1", "test/m2"] });
     const config = makeConfig({ protocol: "shared_convergence" });
@@ -2774,6 +2774,6 @@ describe("minority_dissent warning in deliberate output", () => {
 
     const output = await deliberate(team, input, deps, config);
     const warns = output.warnings ?? [];
-    expect(warns.some((w) => w.includes("minority_dissent"))).toBe(true);
+    expect(warns.some((w) => w.includes("minority_dissent"))).toBe(false);
   });
 });

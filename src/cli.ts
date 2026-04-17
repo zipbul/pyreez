@@ -66,6 +66,7 @@ Commands:
   quality-check  Cross-validate factual claims across responses (FActScore-inspired)
   convergence-check  LLM-judge semantic convergence across responses (HIGH/MODERATE/DIVERSE)
   inspect       Integrated post-deliberate inspection: convergence + (rank if N≥4) + quality (opt-in)
+  fuse          Fuse ranked candidates into a single synthesis draft (LLM-Blender GenFuser)
 
 Run "bun run src/cli.ts <command> --help" for command-specific help.`);
   process.exit(1);
@@ -360,6 +361,56 @@ async function main(): Promise<void> {
         factualLikely,
       });
       result = { data: inspection };
+      break;
+    }
+
+    case "fuse": {
+      const task = await resolveValue(flags["task"]);
+      if (!task) die("--task is required for fuse");
+      const candidatesRaw = await resolveValue(flags["candidates"]);
+      if (!candidatesRaw) die("--candidates is required (JSON array: [{id, content}, ...])");
+      const judgeModel = flags["judge"];
+      if (!judgeModel) die("--judge is required (model id)");
+      const rankingRaw = flags["ranking"];
+
+      let candidates: { id: string; content: string }[];
+      try {
+        const parsed = JSON.parse(candidatesRaw!);
+        if (!Array.isArray(parsed)) throw new Error("candidates must be a JSON array");
+        candidates = parsed.map((c, i) => {
+          if (typeof c?.id !== "string" || typeof c?.content !== "string") {
+            throw new Error(`candidates[${i}] missing id or content`);
+          }
+          return { id: c.id, content: c.content };
+        });
+      } catch (err) {
+        die(`--candidates parse failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      let ranking: { id: string; wins: number; losses: number }[] | undefined;
+      if (rankingRaw) {
+        try {
+          const parsed = JSON.parse(rankingRaw);
+          if (!Array.isArray(parsed)) throw new Error("ranking must be a JSON array");
+          ranking = parsed;
+        } catch (err) {
+          die(`--ranking parse failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      const { fuseCandidates } = await import("./synthesis/fuser");
+      if (!config.chatFn) die("chat function not available");
+      const fuseResult = await fuseCandidates(
+        judgeModel!,
+        async (model, messages) => {
+          const r = await config.chatFn!(model, messages);
+          return { content: r.content };
+        },
+        task!,
+        candidates!,
+        ranking ? { ranking } : undefined,
+      );
+      result = { data: fuseResult };
       break;
     }
 
