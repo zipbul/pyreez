@@ -265,6 +265,66 @@ export function computeR1Diversity(round: Round): number | null {
 }
 
 /**
+ * Detect minority dissent — when N-1 workers cluster on the same answer and
+ * one outlier disagrees with HIGH confidence, surface the outlier so the host
+ * doesn't auto-trust the majority.
+ *
+ * Defense against debate hacking (arXiv 2510.20963) and the "majority pressure
+ * suppresses correct minority" failure documented in arXiv 2509.11035 (ConfMAD)
+ * and "Can LLM Agents Really Debate?" (arXiv 2511.07784).
+ *
+ * Heuristic: requires N≥3. Compute each response's average distance to peers.
+ * If exactly one response has avg distance > 0.50 AND all the rest cluster
+ * (avg pairwise distance < 0.30) AND the outlier reports HIGH confidence,
+ * emit a warning naming the dissenter.
+ */
+export function detectMinorityDissent(round: Round): string | null {
+  const responses = round.responses;
+  if (responses.length < 3) return null;
+
+  const avgDistTo = (i: number): number => {
+    let sum = 0;
+    let count = 0;
+    for (let j = 0; j < responses.length; j++) {
+      if (i === j) continue;
+      const a = responses[i]!.content;
+      const b = responses[j]!.content;
+      const maxLen = Math.max(a.length, b.length);
+      if (maxLen === 0) continue;
+      sum += levenshteinDistance(a, b) / maxLen;
+      count++;
+    }
+    return count === 0 ? 0 : sum / count;
+  };
+
+  const distances = responses.map((_, i) => avgDistTo(i));
+  // Find the response with the highest avg distance to peers
+  let outlierIdx = 0;
+  for (let i = 1; i < distances.length; i++) {
+    if (distances[i]! > distances[outlierIdx]!) outlierIdx = i;
+  }
+  if (distances[outlierIdx]! < 0.50) return null;
+
+  // Check the rest cluster tightly
+  const rest = responses.filter((_, i) => i !== outlierIdx);
+  for (let i = 0; i < rest.length; i++) {
+    for (let j = i + 1; j < rest.length; j++) {
+      const a = rest[i]!.content;
+      const b = rest[j]!.content;
+      const maxLen = Math.max(a.length, b.length);
+      if (maxLen === 0) continue;
+      const rate = levenshteinDistance(a, b) / maxLen;
+      if (rate >= 0.30) return null; // rest don't cluster
+    }
+  }
+
+  const outlier = responses[outlierIdx]!;
+  if (outlier.confidence !== "high") return null;
+
+  return `minority_dissent: worker ${outlier.model} (HIGH confidence) disagrees with the majority cluster — review the dissent before adopting the majority position. Majority pressure can suppress correct minority answers (ConfMAD arXiv 2509.11035, debate hacking arXiv 2510.20963).`;
+}
+
+/**
  * Detect R1 conformity — all workers report HIGH confidence AND their responses
  * are textually similar (Levenshtein change rate < 0.30 between every pair).
  *
@@ -1297,6 +1357,9 @@ export async function deliberate(
     if (r1Diversity !== null && r1Diversity < 0.20) {
       warnings.push(`r1_diversity_low: score=${r1Diversity.toFixed(2)} — heterogeneous models converged before debate. Reframe the task to ask for failure conditions or boundaries (HOST_QUESTIONING_DEPTH Rule 2).`);
     }
+
+    const dissentWarning = detectMinorityDissent(r1);
+    if (dissentWarning) warnings.push(dissentWarning);
   }
 
   // Build degradation metadata if team shrank

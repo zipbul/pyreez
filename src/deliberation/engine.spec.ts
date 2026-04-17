@@ -2672,3 +2672,108 @@ describe("computeR1Diversity", () => {
     expect(warns.some((w) => w.includes("r1_diversity_low"))).toBe(false);
   });
 });
+
+// =============================================================================
+// detectMinorityDissent
+// =============================================================================
+
+describe("detectMinorityDissent", () => {
+  it("returns null for fewer than 3 responses", async () => {
+    const { detectMinorityDissent } = await import("./engine");
+    const round = {
+      number: 1,
+      responses: [
+        { model: "a", content: "x", workerIndex: 0, confidence: "high" as const },
+        { model: "b", content: "y", workerIndex: 1, confidence: "high" as const },
+      ],
+    };
+    expect(detectMinorityDissent(round)).toBeNull();
+  });
+
+  it("identifies the lone dissenter when N-1 agree and 1 disagrees", () => {
+    const { detectMinorityDissent } = require("./engine");
+    const consensus = "Yes use Bun for performance — much faster than Node and the ecosystem is catching up.";
+    const round = {
+      number: 1,
+      responses: [
+        { model: "majority/a", content: consensus, workerIndex: 0, confidence: "high" },
+        { model: "majority/b", content: consensus, workerIndex: 1, confidence: "high" },
+        { model: "outlier/c", content: "Stick with Node — Bun's GC pauses break our latency budget. Different stack, different priorities.", workerIndex: 2, confidence: "high" },
+      ],
+    };
+    const w = detectMinorityDissent(round);
+    expect(w).not.toBeNull();
+    expect(w).toContain("outlier/c");
+    expect(w).toContain("HIGH");
+  });
+
+  it("returns null when all responses cluster (no dissenter)", () => {
+    const { detectMinorityDissent } = require("./engine");
+    const consensus = "Yes use Bun for performance.";
+    const round = {
+      number: 1,
+      responses: [
+        { model: "a", content: consensus, workerIndex: 0, confidence: "high" },
+        { model: "b", content: consensus + " Slightly different.", workerIndex: 1, confidence: "high" },
+        { model: "c", content: consensus + " Also similar.", workerIndex: 2, confidence: "high" },
+      ],
+    };
+    expect(detectMinorityDissent(round)).toBeNull();
+  });
+
+  it("returns null when responses are all different (no majority cluster)", () => {
+    const { detectMinorityDissent } = require("./engine");
+    const round = {
+      number: 1,
+      responses: [
+        { model: "a", content: "AAAAAAAAAAAAAAAAA", workerIndex: 0, confidence: "high" },
+        { model: "b", content: "BBBBBBBBBBBBBBBBB", workerIndex: 1, confidence: "high" },
+        { model: "c", content: "CCCCCCCCCCCCCCCCC", workerIndex: 2, confidence: "high" },
+      ],
+    };
+    expect(detectMinorityDissent(round)).toBeNull();
+  });
+
+  it("does NOT highlight a dissenter that lacks HIGH confidence", () => {
+    const { detectMinorityDissent } = require("./engine");
+    const consensus = "Yes use Bun for performance.";
+    const round = {
+      number: 1,
+      responses: [
+        { model: "a", content: consensus, workerIndex: 0, confidence: "high" },
+        { model: "b", content: consensus + " Same.", workerIndex: 1, confidence: "high" },
+        { model: "c", content: "Stick with Node — Bun's GC pauses break latency.", workerIndex: 2, confidence: "low" },
+      ],
+    };
+    expect(detectMinorityDissent(round)).toBeNull();
+  });
+});
+
+// =============================================================================
+// minority dissent integration
+// =============================================================================
+
+describe("minority_dissent warning in deliberate output", () => {
+  it("emits minority_dissent when R1 has lone HIGH-confidence dissenter", async () => {
+    const team = makeTeam(3);
+    const input = makeInput({ protocol: "shared_convergence", maxRounds: 1, models: ["test/m0", "test/m1", "test/m2"] });
+    const config = makeConfig({ protocol: "shared_convergence" });
+
+    let call = 0;
+    const consensus = "Yes use Bun for performance — much faster than Node and the ecosystem is catching up. confidence: HIGH";
+    const dissent = "Stick with Node — Bun's GC pauses break our latency budget. Different stack. confidence: HIGH";
+    const deps = makeDeps({
+      chat: mock(async () => {
+        call++;
+        return {
+          content: call < 3 ? consensus : dissent,
+          inputTokens: 1, outputTokens: 1, finishReason: "stop",
+        };
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+    const warns = output.warnings ?? [];
+    expect(warns.some((w) => w.includes("minority_dissent"))).toBe(true);
+  });
+});
