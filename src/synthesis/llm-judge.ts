@@ -55,9 +55,16 @@ function parseVerdict(text: string): "A" | "B" | "TIE" {
 export interface LLMJudgeOptions {
   /**
    * Position-bias mitigation strategy.
-   * - "eager" (default): always run forward + swap pass. 2N calls. Most accurate.
+   * - "eager" (default, research-recommended): always run forward + swap pass.
+   *   2N calls. Position bias in LLM judges is systematic, not random — see
+   *   "Judging the Judges: A Systematic Investigation of Position Bias in
+   *   Pairwise Comparative Assessments by LLMs" (Lin Shi et al., Dartmouth).
+   *   Swap pass is the standard mitigation.
    * - "lazy": run forward only; swap only when forward verdict is TIE. ~N–2N calls.
-   *   Trades accuracy for cost when verdicts are usually clean.
+   *   COST OPTIMIZATION ONLY — pyreez extension, no research backing. Trades
+   *   accuracy for cost. Use when budget is tight and verdicts are expected
+   *   decisive. Verdicts that look A/B but are position-bias artifacts will
+   *   slip through unchallenged. Do NOT use for high-stakes ranking.
    */
   positionBias?: "eager" | "lazy";
 }

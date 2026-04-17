@@ -112,7 +112,12 @@ After `deliberate` returns, read the output signals BEFORE synthesizing. Each si
 **inspect cost discipline**:
 - Default: 1 LLM call (convergence-check). Cheap.
 - `--factual` flag adds N LLM calls (cross-validate each worker). Use only when responses contain verifiable factual claims.
-- N≥4 workers: adds ~N calls for ranking (lazy position-bias mitigation, ~50% of eager mode).
+- N≥4 workers: adds 2*N*(N-1)/2 calls for ranking (eager position-bias mitigation per "Judging the Judges", Lin Shi et al., Dartmouth — position bias in LLM judges is systematic, swap pass is standard).
+
+**Threshold caveats (be honest about provenance)**:
+- `convergenceScore.overall ≥ 0.85` → "converged", `< 0.40` → "diverging" — these defaults are pyreez heuristics, NOT from Aragora source. Aragora documents the formula and consecutive_rounds concept but does not publish specific score thresholds. Tune based on your task domain's observed score distribution.
+- Aragora weights (semantic 0.4 + diversity 0.2 + evidence 0.2 + stability 0.2) come from synaptent/aragora docs/algorithms/CONVERGENCE.md but were designed for evidence-heavy domains (specs, policy). On opinion/design tasks where evidence=0, scores skew low and "refining" status may be over-emitted. Read components.semantic alongside the overall score.
+- N≥4 ranking threshold is a pyreez heuristic, NOT from research. Adjust if cost vs. value math changes.
 
 **Standalone commands** (use only when `inspect` doesn't fit):
 - `rank --task ... --candidates '[...]' --judge <model>` — pairwise ranking only.

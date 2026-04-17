@@ -114,11 +114,13 @@ export async function runInspection(input: InspectInput): Promise<InspectResult>
   // Suppress unused-variable warnings for dead signals (kept in code for documentation)
   void conformitySuspected; void dissentSuspected; void diversityLow; void borderline;
 
-  // 2. Ranking — only worth the LLM cost for N≥4 workers. Use lazy position-bias
-  // mitigation here: inspect runs as part of standard workflow, ~50% cost cut
-  // when verdicts are decisive, with marginal accuracy loss on ties.
+  // 2. Ranking — only worth the LLM cost for N≥4 workers. Use eager position-bias
+  // mitigation: research consensus (Lin Shi et al., Dartmouth — "Judging the
+  // Judges") is that position bias in LLM judges is systematic; swap pass is
+  // standard mitigation. Lazy mode trades accuracy for cost with no research
+  // backing, so we don't apply it to inspection runs by default.
   if (responses.length >= RANK_MIN_WORKERS) {
-    const judge = createLLMJudge(input.judgeModel, input.chat, { positionBias: "lazy" });
+    const judge = createLLMJudge(input.judgeModel, input.chat);
     const ranked = await rankByPairwise(input.task, candidates, judge);
     result.ranking = ranked.ranking;
     actions.push(`ranking computed — top response: ${ranked.ranking[0]?.id}, lowest: ${ranked.ranking[ranked.ranking.length - 1]?.id}`);

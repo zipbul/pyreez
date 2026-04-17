@@ -53,24 +53,48 @@ export function computeConvergenceScore(c: ConvergenceComponents): number {
 
 export type ConvergenceStatus = "converged" | "refining" | "diverging";
 
-const CONVERGED_THRESHOLD = 0.85;
-const DIVERGING_THRESHOLD = 0.40;
+/**
+ * Default thresholds: pyreez heuristics, NOT from Aragora source.
+ * Aragora docs/algorithms/CONVERGENCE.md describes the formula and the
+ * consecutive_rounds_needed concept (default 1) but does not publish
+ * specific score thresholds for converged/diverging classification.
+ *
+ * These defaults are starting points pending measurement; callers should
+ * tune via classifyStatus arguments based on observed score distributions.
+ *
+ * Empirical note (pyreez measurement): Aragora weights skew low when
+ * evidence=0, which is common in opinion/design tasks. Threshold 0.85 may
+ * be too strict for those domains.
+ */
+export const DEFAULT_CONVERGED_THRESHOLD = 0.85;
+export const DEFAULT_DIVERGING_THRESHOLD = 0.40;
+
+export interface ClassifyOptions {
+  convergedThreshold?: number;
+  divergingThreshold?: number;
+  consecutiveRoundsNeeded?: number;
+}
 
 /**
  * Classify into 3-state status with consecutive-stable-rounds requirement.
- * Source: synaptent/aragora CONVERGENCE.md — converged requires both score
- * threshold AND `consecutive_stable_rounds >= consecutive_rounds_needed`.
- *
- * Default consecutive_rounds_needed = 1 (Aragora default).
+ * Status logic source: synaptent/aragora CONVERGENCE.md — converged requires
+ * both score threshold AND consecutive_stable_rounds >= consecutive_rounds_needed.
+ * The 3-state taxonomy (converged/refining/diverging) is from the same source.
  */
 export function classifyStatus(
   score: number,
   consecutiveStableRounds: number,
-  consecutiveRoundsNeeded: number = 1,
+  consecutiveRoundsNeededOrOptions: number | ClassifyOptions = 1,
 ): ConvergenceStatus {
-  if (score >= CONVERGED_THRESHOLD && consecutiveStableRounds >= consecutiveRoundsNeeded) {
+  const opts: ClassifyOptions = typeof consecutiveRoundsNeededOrOptions === "number"
+    ? { consecutiveRoundsNeeded: consecutiveRoundsNeededOrOptions }
+    : consecutiveRoundsNeededOrOptions;
+  const conv = opts.convergedThreshold ?? DEFAULT_CONVERGED_THRESHOLD;
+  const div = opts.divergingThreshold ?? DEFAULT_DIVERGING_THRESHOLD;
+  const need = opts.consecutiveRoundsNeeded ?? 1;
+  if (score >= conv && consecutiveStableRounds >= need) {
     return "converged";
   }
-  if (score < DIVERGING_THRESHOLD) return "diverging";
+  if (score < div) return "diverging";
   return "refining";
 }
