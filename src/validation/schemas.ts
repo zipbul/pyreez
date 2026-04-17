@@ -14,6 +14,7 @@ import { z } from "zod/v4";
 export const AcceptanceWorkerSchema = z.object({
   model: z.string().min(1),
   original_position: z.string().min(1),
+  alignment: z.enum(["on-task", "meta-critique"]).optional(),
 });
 
 export const AcceptanceWorkersArraySchema = z.array(AcceptanceWorkerSchema).min(1);

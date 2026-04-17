@@ -144,5 +144,9 @@ Rate overall synthesis confidence: HIGH / MEDIUM / LOW with one-sentence justifi
 </constraints>
 
 <post-synthesis>
-**acceptance**: Run `acceptance` with original task, synthesis, and worker positions. If any worker rejects, revise the synthesis addressing misrepresented/unresolved issues, then re-run acceptance.
+**acceptance**: Run `acceptance` with original task, synthesis, and worker positions. Mark each worker's `alignment`:
+- `"on-task"` (default): the worker answered the question. Verdict counts toward `action_required`.
+- `"meta-critique"`: the worker rejected the framing or proposed an unrelated alternative. Preserved separately in `metaCritiques`; verdict does NOT block `action_required`.
+
+If any on-task worker rejects, revise the synthesis addressing misrepresented/unresolved issues, then re-run acceptance. Meta-critique worker positions can be cited as alternative perspectives in the synthesis but cannot force re-runs.
 </post-synthesis>

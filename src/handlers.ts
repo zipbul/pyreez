@@ -181,7 +181,7 @@ export async function handleAcceptance(
   args: {
     task: string;
     synthesis: string;
-    workers: { model: string; original_position: string }[];
+    workers: { model: string; original_position: string; alignment?: "on-task" | "meta-critique" }[];
   },
 ): Promise<HandlerResult> {
   return logRun(config, "acceptance", async () => {
@@ -202,7 +202,13 @@ export async function handleAcceptance(
       let totalInput = 0;
       let totalOutput = 0;
 
-      const workerPromises = args.workers.map(async (w) => {
+      // Split workers by alignment. Meta-critique workers are preserved
+      // separately and excluded from action_required, since they reject the
+      // task framing itself and cannot be reconciled with an on-task synthesis.
+      const onTaskWorkers = args.workers.filter((w) => w.alignment !== "meta-critique");
+      const metaCritiqueWorkers = args.workers.filter((w) => w.alignment === "meta-critique");
+
+      const judgeWorker = async (w: typeof args.workers[number]) => {
         const messages = buildAcceptanceMessages(args.synthesis, w.original_position, args.task);
         const result = await config.chatFn!(w.model, messages, { temperature: 0 });
         totalInput += result.inputTokens;
@@ -223,19 +229,19 @@ export async function handleAcceptance(
           ...(misrepresented && misrepresented !== "None." ? { misrepresented } : {}),
           ...(unresolved && unresolved !== "None." ? { unresolved } : {}),
         };
-      });
+      };
 
-      const results = await Promise.allSettled(workerPromises);
-      const workers = results
+      const onTaskResults = await Promise.allSettled(onTaskWorkers.map(judgeWorker));
+      const workers = onTaskResults
         .filter((r): r is PromiseFulfilledResult<{ model: string; verdict: "accept" | "partial" | "reject"; misrepresented?: string; unresolved?: string }> => r.status === "fulfilled")
         .map((r) => r.value);
 
-      const failed = results.filter((r) => r.status === "rejected");
+      const failed = onTaskResults.filter((r) => r.status === "rejected");
       if (workers.length === 0 && failed.length > 0) {
         return {
           error: JSON.stringify({
             error: `All ${failed.length} acceptance check(s) failed`,
-            failedModels: args.workers.map((w) => w.model),
+            failedModels: onTaskWorkers.map((w) => w.model),
           }),
         };
       }
@@ -247,6 +253,13 @@ export async function handleAcceptance(
         data: {
           workers,
           totalTokens: { input: totalInput, output: totalOutput },
+          ...(metaCritiqueWorkers.length > 0 ? {
+            metaCritiques: metaCritiqueWorkers.map((w) => ({
+              model: w.model,
+              original_position: w.original_position,
+              note: "Excluded from acceptance: this worker rejected the task framing rather than answering it. Preserved for host review; not blocking action_required.",
+            })),
+          } : {}),
           ...(hasReject ? {
             action_required: "reject — revise synthesis to address misrepresented/unresolved issues, then re-run acceptance",
           } : hasPartial ? {
