@@ -54,19 +54,24 @@ export function computeConvergenceScore(c: ConvergenceComponents): number {
 export type ConvergenceStatus = "converged" | "refining" | "diverging";
 
 /**
- * Default thresholds: pyreez heuristics, NOT from Aragora source.
+ * Default thresholds: pyreez measurement-based, NOT from Aragora source.
  * Aragora docs/algorithms/CONVERGENCE.md describes the formula and the
  * consecutive_rounds_needed concept (default 1) but does not publish
  * specific score thresholds for converged/diverging classification.
  *
- * These defaults are starting points pending measurement; callers should
- * tune via classifyStatus arguments based on observed score distributions.
+ * Initial pyreez measurement (6 task types: math_obvious, directional,
+ * factual_who, tradeoff, opinion, design — single provider, single round):
+ *   HIGH (semantic 1.0) cases scored 0.643–0.717 (4 cases)
+ *   MODERATE (semantic 0.5) cases scored 0.437–0.444 (2 cases)
+ *   gap [0.444, 0.643] → midpoint 0.543
  *
- * Empirical note (pyreez measurement): Aragora weights skew low when
- * evidence=0, which is common in opinion/design tasks. Threshold 0.85 may
- * be too strict for those domains.
+ * Default 0.60 converged: includes all observed HIGH, excludes all observed
+ * MODERATE, with margin from midpoint. 0.40 diverging: kept as-is pending
+ * data on DIVERSE-level cases (currently no measurement).
+ *
+ * Re-tune as the corpus grows. Override via ClassifyOptions.
  */
-export const DEFAULT_CONVERGED_THRESHOLD = 0.85;
+export const DEFAULT_CONVERGED_THRESHOLD = 0.60;
 export const DEFAULT_DIVERGING_THRESHOLD = 0.40;
 
 export interface ClassifyOptions {
