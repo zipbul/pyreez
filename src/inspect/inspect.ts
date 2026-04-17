@@ -65,19 +65,23 @@ export async function runInspection(input: InspectInput): Promise<InspectResult>
   const diversityLow = warnings.some((w) => w.includes("r1_diversity_low"));
   const borderline = diversity !== null && diversity >= BORDERLINE_DIVERSITY_LO && diversity < BORDERLINE_DIVERSITY_HI;
 
-  const diversityNumericLow = diversity !== null && diversity < BORDERLINE_DIVERSITY_LO;
-  if (conformitySuspected || dissentSuspected || diversityLow || diversityNumericLow || borderline) {
-    result.convergence = await judgeConvergence(input.judgeModel, input.chat, input.task, candidates);
-    if (result.convergence.level === "high" && (conformitySuspected || diversityLow || diversityNumericLow)) {
-      actions.push("convergence is HIGH — reframe task as failure-conditions question (HOST_QUESTIONING_DEPTH Rule 2) and re-run deliberate");
-    } else if (result.convergence.level === "moderate" && result.convergence.dissenterId) {
-      actions.push(`read ${result.convergence.dissenterId} response FIRST — convergence is moderate with named dissenter`);
-    } else if (result.convergence.level === "moderate" || (result.convergence.level === "high" && (diversityNumericLow || diversityLow))) {
-      actions.push("convergence suggests reframe — see Rule 2 in HOST_QUESTIONING_DEPTH");
-    } else if (result.convergence.level === "diverse") {
-      actions.push("convergence is DIVERSE — text-distance signal was a false positive; proceed to synthesis");
-    }
+  // Always run convergence-check via LLM judge.
+  // Empirical measurement (7 tasks): text-distance r1Diversity ranges 0.737–0.853
+  // even on math_obvious "2+2=4?" where semantic convergence is HIGH. Text-distance
+  // signals (r1_conformity_suspected, r1_diversity_low, minority_dissent) are
+  // dead in practice; only the LLM judge gives a reliable convergence read.
+  result.convergence = await judgeConvergence(input.judgeModel, input.chat, input.task, candidates);
+  if (result.convergence.level === "high") {
+    actions.push("convergence is HIGH — reframe task as failure-conditions question (HOST_QUESTIONING_DEPTH Rule 2) and re-run deliberate");
+  } else if (result.convergence.level === "moderate" && result.convergence.dissenterId) {
+    actions.push(`read ${result.convergence.dissenterId} response FIRST — convergence is moderate with named dissenter`);
+  } else if (result.convergence.level === "moderate") {
+    actions.push("convergence is MODERATE — review minority view before adopting majority");
+  } else if (result.convergence.level === "diverse") {
+    actions.push("convergence is DIVERSE — proceed to synthesis with full diversity");
   }
+  // Suppress unused-variable warnings for dead signals (kept in code for documentation)
+  void conformitySuspected; void dissentSuspected; void diversityLow; void borderline;
 
   // 2. Ranking — only worth the LLM cost for N≥4 workers. Use lazy position-bias
   // mitigation here: inspect runs as part of standard workflow, ~50% cost cut

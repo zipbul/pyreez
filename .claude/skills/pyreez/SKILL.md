@@ -91,31 +91,33 @@ This is not optional — directional questions ("is X good?") produce unanimous 
 
 **deliberate**: Run `deliberate --task "..." --models "model1,model2,model3" --protocol shared_convergence [--max-rounds N] [--worker-instructions "..."]`. Use `--task -` for long tasks via stdin. Use `--worker-instructions` to set a shared analysis angle or constraint for all workers (e.g., "Focus on failure modes in distributed systems with >10K RPS").
 
-**post-deliberate inspection commands** (opt-in, run only when needed):
-- `rank --task "..." --candidates '[{id, content}, ...]' --judge <model>` — pairwise LLM judge ranks responses by win count (LLM-Blender pattern). Use when N≥3 worker responses and you need to weight them in synthesis.
-- `quality-check --responses '[...]' --judge <model>` — flags claims unsupported or contradicted by peer responses (FActScore pattern). Use when responses contain factual claims to verify.
-- `convergence-check --task "..." --responses '[...]' --judge <model>` — LLM judge classifies overall convergence as HIGH/MODERATE/DIVERSE and names dissenter. Use when text-distance signals (warnings, r1Diversity) are ambiguous and you need a precise read.
+**inspect** (run after every deliberate): `inspect --task "..." --judge <model> --deliberate -` (deliberate JSON via stdin) `[--factual true]`. Integrated post-deliberate workflow: convergence-check (always) + ranking (N≥4) + cross-validation (--factual). Returns convergence level, optional dissenter, ranking, quality findings, and a host_actions list. See <signal-actions> below for what to do with each output.
 </workflow>
 
 <signal-actions>
 After `deliberate` returns, read the output signals BEFORE synthesizing. Each signal triggers a specific action — the synthesis quality depends on responding to these, not ignoring them.
 
-| Signal in deliberate output | What it means | Required action |
+**ALWAYS run `inspect` after `deliberate`**. Empirical measurement (7 task types, r1Diversity range 0.737–0.853) showed text-distance signals (r1_conformity_suspected, r1_diversity_low, minority_dissent) are dead in practice — they almost never trigger on natural LLM responses, even when semantic convergence is HIGH. The reliable convergence read comes only from `inspect`'s LLM-judge pass.
+
+| inspect output | What it means | Required action |
 |---|---|---|
-| `warnings: [...provider_diversity_low]` | Only 1 provider — diversity comes from prompt lenses alone | Acknowledge in confidence assessment. Re-run with 2+ providers if available |
-| `warnings: [...r1_conformity_suspected]` | All workers HIGH confidence + textually similar | Run `convergence-check` to confirm semantic agreement. If confirmed, reframe task per HOST_QUESTIONING_DEPTH Rule 2 (failure conditions, not yes/no) |
-| `warnings: [...r1_diversity_low]` (score <0.20) | Workers converged before debate started | Reframe task. Original task likely too directional. Do not proceed with synthesis on the current responses |
-| `warnings: [...minority_dissent]` | One worker HIGH confidence disagrees with majority | Read the named dissenter response FIRST. Do not auto-trust the majority. Treat dissenter as candidate-correct until disproven |
-| `r1Diversity` between 0.20–0.50 | Borderline diversity | Run `convergence-check` for precise read before synthesizing |
-| `r1Diversity` ≥ 0.50 | Healthy diversity | Proceed to Phase 1 |
-| No warnings, r1Diversity high | Best case | Proceed to Phase 1 |
+| `convergence.level: "high"` | All workers reach the same core conclusion | Reframe task as failure-conditions (HOST_QUESTIONING_DEPTH Rule 2) and re-run deliberate. Do NOT synthesize from converged responses |
+| `convergence.level: "moderate"` + `dissenterId` | Clear majority + one named outlier | Read the dissenter response FIRST. Treat dissenter as candidate-correct until disproven (debate hacking arXiv 2510.20963) |
+| `convergence.level: "moderate"` (no dissenterId) | Mixed positions, no clean majority | Proceed to synthesis with explicit acknowledgment of split |
+| `convergence.level: "diverse"` | Meaningfully different positions across workers | Best case. Proceed to Phase 1 synthesis with full diversity |
+| `ranking` present (N≥4 workers) | Pairwise judgment ordering | Weight workers by win count when synthesizing |
+| `qualityFindings` (when `--factual` set) | Unsupported/contradicted claims per worker | Remove or caveat flagged claims before including in synthesis |
+| `host_actions` includes "provider_diversity_low" | Only 1 provider — prompt lens diversity only | Note in confidence assessment; re-run with 2+ providers if available |
 
-**When to run inspection commands**:
-- `rank`: ALWAYS for N≥4 workers (manual ranking is unreliable). Skip for N≤3 (cost > value).
-- `quality-check`: When task involves factual claims (technical specs, historical events, numbers). Skip for pure opinion/design tasks.
-- `convergence-check`: When text-distance warnings fire OR when r1Diversity is in 0.20–0.50 borderline range. Costs 1 LLM call; resolves false negatives in text-distance signals.
+**inspect cost discipline**:
+- Default: 1 LLM call (convergence-check). Cheap.
+- `--factual` flag adds N LLM calls (cross-validate each worker). Use only when responses contain verifiable factual claims.
+- N≥4 workers: adds ~N calls for ranking (lazy position-bias mitigation, ~50% of eager mode).
 
-**Cost discipline**: Each inspection command adds latency and tokens. Run only when the signal warrants it; don't run all three by default.
+**Standalone commands** (use only when `inspect` doesn't fit):
+- `rank --task ... --candidates '[...]' --judge <model>` — pairwise ranking only.
+- `quality-check --responses '[...]' --judge <model>` — cross-validation only.
+- `convergence-check --task ... --responses '[...]' --judge <model>` — convergence only.
 
 Sources: ConfMAD (arXiv 2509.14034) — confidence-modulated debate. Demystifying MAD (arXiv 2601.19921) — diversity-aware initialisation. Debate hacking (arXiv 2510.20963) — minority dissent suppression.
 </signal-actions>

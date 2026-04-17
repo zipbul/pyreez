@@ -62,16 +62,16 @@ describe("runInspection", () => {
     expect(result.convergence).toBeDefined();
   });
 
-  it("skips convergence-check when r1Diversity is high and no warnings", async () => {
-    const judge = mock(async () => ({ content: "" }));
+  it("ALWAYS runs convergence-check (text-distance signals are dead in practice)", async () => {
+    const judge = mock(async () => ({ content: "<convergence>DIVERSE</convergence>" }));
     const result = await runInspection({
       task: "task",
       deliberate: makeDeliberateOutput({ r1Diversity: 0.7 }),
       judgeModel: "test/judge",
       chat: judge,
     });
-    expect(result.convergence).toBeUndefined();
-    expect(judge).not.toHaveBeenCalled();
+    expect(result.convergence).toBeDefined();
+    expect(judge).toHaveBeenCalled();
   });
 
   it("runs rank when N >= 4 workers", async () => {
@@ -130,7 +130,7 @@ describe("runInspection", () => {
 
   it("aggregates host_actions for each triggered signal", async () => {
     const judge: InspectInput["chat"] = mock(async () => ({
-      content: "<convergence>MODERATE</convergence>",
+      content: "<convergence>HIGH</convergence>",
     }));
     const result = await runInspection({
       task: "task",
