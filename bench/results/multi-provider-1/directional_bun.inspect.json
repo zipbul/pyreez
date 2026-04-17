@@ -1,0 +1,21 @@
+{
+  "host_actions": [
+    "convergence_score=0.64 status=converged",
+    "convergence is HIGH — reframe task as failure-conditions question (HOST_QUESTIONING_DEPTH Rule 2) and re-run deliberate",
+    "self_judge_bias: judge \"anthropic/claude-haiku-4.5\" shares provider \"anthropic\" with at least one worker — convergence and ranking verdicts may be biased toward same-provider models. Re-run with a cross-provider judge for a sanity check."
+  ],
+  "convergence": {
+    "level": "high",
+    "reasoning": "All three analysts converge on the same core answer: Bun is a good choice for new backend projects, with conditions depending on project characteristics, team expertise, and specific use case."
+  },
+  "convergenceScore": {
+    "overall": 0.6360484425928903,
+    "status": "converged",
+    "components": {
+      "semantic": 1,
+      "diversity": 0.8197577870355489,
+      "evidence": 0,
+      "stability": 1
+    }
+  }
+}

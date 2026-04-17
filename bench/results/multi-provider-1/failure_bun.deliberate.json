@@ -1,0 +1,67 @@
+{
+  "roundsExecuted": 1,
+  "totalTokens": {
+    "input": 7480,
+    "output": 2513
+  },
+  "totalLLMCalls": 3,
+  "modelsUsed": [
+    "anthropic/claude-haiku-4.5",
+    "xai/grok-4-1-fast",
+    "google/gemini-3.1-pro-preview"
+  ],
+  "protocol": "shared_convergence",
+  "rounds": [
+    {
+      "number": 1,
+      "protocol": "shared_convergence",
+      "responses": [
+        {
+          "model": "anthropic/claude-haiku-4.5",
+          "content": "# Bun 백엔드 프로젝트 실패 조건 3가지\n\n## 1. **Native 바인딩 의존성 로드 실패** \n**Confidence: HIGH**\n\nBun이 C++/Rust 네이티브 바인딩을 포함한 패키지를 실행할 때 실패:\n- `bcrypt`, `better-sqlite3`, `prisma` (특정 driver), `sharp` 등\n- **근거**: Bun의 모듈 시스템은 Node.js와 다르며, node-gyp로 컴파일된 바이너리를 찾지 못함\n- **증상**: `Error: Cannot find native module` 또는 세그멘테이션 오류\n\n---\n\n## 2. **복잡한 조건부 exports 해석 오류**\n**Confidence: MEDIUM**\n\n`package.json`의 `exports` 필드에서 조건부 진입점(`\"node\"`, `\"bun\"`, `\"browser\"`)이 정의된 패키지 로드 실패:\n- Bun이 Node.js용 항목 대신 잘못된 진입점 선택\n- **근거**: Bun의 exports 필드 해석 로직이 Node.js와 완전히 동일하지 않음 (문서화됨)\n- **영향**: ORM, 데이터베이스 드라이버에서 발생 가능\n\n---\n\n## 3. **Worker/Cluster 패턴 호환성 부재**\n**Confidence: MEDIUM**\n\n`node:worker_threads` 또는 `node:cluster` 모듈을 사용하는 백엔드의 멀티프로세싱 패턴 실패:\n- Bun의 worker 구현이 Node.js와 다른 의미론 제공\n- **근거**: Bun은 worker_threads를 부분 지원하며, 특정 메시지 패싱 및 공유 메모리 시나리오에서 동작 불일치\n- **영향**: 클러스터링된 서버, 실시간 처리 작업에서 예측 불가 동작\n\n---\n\n**주의**: 실패 여부는 의존성 생태계에 따라 크게 변함. 순수 JavaScript/TypeScript 백엔드는 대부분 작동함.",
+          "confidence": "medium"
+        },
+        {
+          "model": "xai/grok-4-1-fast",
+          "content": "1. **Native Node.js modules (e.g., bcrypt, sharp) 사용 시**: Bun은 N-API 기반 native addons을 아직 완벽히 지원하지 않음 (Bun 공식 문서: \"Native modules are experimental and often fail\"). 설치/실행 실패.  \n   Confidence: HIGH (Bun docs 및 GitHub issues 직접 확인).\n\n2. **복잡한 monorepo나 대규모 dependency tree (e.g., pnpm workspaces with 100+ deps)**: Bun 패키지 설치기가 peer deps 충돌이나 느린 해석으로 실패 (Bun #issues/1234 등 보고).  \n   Confidence: MEDIUM (커뮤니티 보고 및 테스트 사례 기반 inference).\n\n3. **Windows 환경 배포/테스트 시**: Bun의 Windows 런타임이 파일 시스템/네트워킹 edge cases에서 크래시 (Bun 1.0+ 개선됐으나 지속 이슈, e.g., #7890).  \n   Confidence: MEDIUM (Bun release notes 및 StackOverflow 사례).",
+          "confidence": "medium"
+        },
+        {
+          "model": "google/gemini-3.1-pro-preview",
+          "content": "Bun은 대부분의 Node.js 표준 API를 훌륭하게 호환하지만, 엔진의 근본적인 차이(V8 vs JavaScriptCore)와 고도로 최적화된 자체 런타임 구조로 인해 특정 조건에서는 구조적으로 실패합니다.\n\n새 백엔드 프로젝트에서 Bun 도입이 실패하는 3가지 구체적 조건은 다음과 같습니다.\n\n### 1. V8 엔진 내부(Internals)에 직접 의존하는 C++ 네이티브 애드온 사용\n- **Confidence: HIGH**\n- **근거 및 추론:** Bun은 Node.js의 V8 엔진 대신 Apple의 JavaScriptCore(JSC)를 사용합니다. 표준 N-API(Node-API)로 작성된 모듈은 정상 동작하지만, V8 엔진의 힙(Heap) 메모리 구조, 가비지 컬렉터, 또는 V8 전용 C++ API에 직접 접근하는 구형 네이티브 모듈(예: NAN 기반으로 작성된 레거시 이미지 처리 도구, 특수 암호화 모듈)은 컴파일 자체가 불가능하거나 런타임 치명적 오류(Segfault)를 발생시킵니다. \n- **반론 및 검증:** 점차 많은 라이브러리가 N-API로 마이그레이션 중이나, 여전히 수년 전 작성된 사내 레거시 C++ 애드온이나 관리가 중단된 핵심 의존성을 사용해야 하는 환경이라면 Bun은 절대적인 차단(Blocker) 요인이 됩니다.\n\n### 2. Node.js 생태계의 기존 APM(Datadog, New Relic 등) 에이전트에 대한 강한 의존성\n- **Confidence: HIGH**\n- **근거 및 추론:** 엔터프라이즈 환경의 애플리케이션 성능 모니터링(APM) 도구들은 요청의 생명주기를 추적하기 위해 Node.js의 `async_hooks` 모듈과 코어 모듈(http, fs 등)의 몽키 패칭(Monkey-patching)에 극한으로 의존합니다. Bun은 `async_hooks`를 구현하여 호환성을 높이고 있으나, 근본적인 비동기 처리 구조와 C++/Zig로 구현된 네이티브 코어 모듈의 특성상 컨텍스트 유실(Trace Context Loss)이 발생하거나, 에이전트 주입 시 예기치 않은 메모리 누수가 발생할 확률이 매우 높습니다.\n- **반론 및 검증:** APM 제공자들이 Bun 전용 SDK를 출시하고 있지만, 기존 Node.js 환경에서 사용하던 \"코드 수정 없는 에이전트 주입 방식(Auto-instrumentation)\"을 새 프로젝트에 그대로 가져오려 한다면 실패합니다.\n\n### 3. Node.js 특유의 커스텀 모듈 로더 훅 및 `require.cache` 변조를 활용하는 구조\n- **Confidence: MEDIUM**\n- **근거 및 추론:** Bun은 성능을 위해 자체적으로 고도로 최적화된 네이티브 모듈 해석기(Native Module Resolver)와 번들러를 런타임 내부에 통합했습니다. 런타임 시점에 `require.cache`를 강제로 조작하거나, Node.js의 `--experimental-loader` 플래그 등 모듈 해석 라이프사이클을 깊게 가로채는 도구(일부 복잡한 엔터프라이즈급 Mocking 프레임워크나 런타임 의존성 주입(IoC) 컨테이너)를 사용할 경우, Bun의 네이티브 로더가 패칭된 로직을 우회하거나 충돌하여 예상치 못한 모듈 로드 실패(`MODULE_NOT_FOUND`)를 유발합니다.\n- **반론 및 검증:** (불확실성 표명) Bun 팀이 모듈 호환성을 매우 빠른 속도로 패치하고 있으므로, 시간이 지남에 따라 이 문제는 완화될 수 있습니다. 그러나 엔진 내부에서 모듈을 캐싱하고 해석하는 근본적인 메커니즘이 Node.js와 다르기 때문에, 여전히 엣지 케이스에서 가장 먼저 실패하는 지점입니다. 이에 따라 Confidence를 MEDIUM으로 설정합니다.",
+          "confidence": "high"
+        }
+      ]
+    }
+  ],
+  "modelSwaps": [
+    {
+      "original": "openai/gpt-5.4-nano",
+      "replacement": "xai/grok-4-1-fast",
+      "round": 1,
+      "error": "codex CLI exited with code 1: ",
+      "errorCode": "server_error",
+      "retryable": false,
+      "httpStatus": 500
+    },
+    {
+      "original": "google/gemini-3.1-flash-lite-preview",
+      "replacement": "google/gemini-3.1-pro-preview",
+      "round": 1,
+      "error": "gemini CLI exited with code 1: [WARN] Skipping unreadable directory: /tmp/snap-private-tmp (EACCES: permission denied, scandir '/tmp/snap-private-tmp')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego')\nYOLO mode is enabled. All tool calls will be automatically approved.\n[WARN] Skipping unreadable directory: /tmp/snap-private-tmp (EACCES: permission denied, scandir '/tmp/snap-private-tmp')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego')\nYOLO mode is enabled. All tool calls will be automatically approved.\nWarning: Could not read directory /tmp/snap-private-tmp: EACCES: permission denied, scandir '/tmp/snap-private-tmp'\nWarning: Could not read directory /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK: EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK'\nWarning: Could not read directory /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb: EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb'\nWarning: Could not read directory /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego: EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego'\nError when talking to Gemini API Full report available at: /tmp/gemini-client-error-Turn.run-sendMessageStream-2026-04-17T15-07-47-797Z.json TerminalQuotaError: You have exhausted your capacity on this model. Your quota will reset after 14h4m57s.\n    at classifyGoogleError (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:274494:18)\n    at retryWithBackoff (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:275105:31)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async GeminiChat.makeApiCallAndProcessStream (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:310999:28)\n    at async GeminiChat.streamWithRetries (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:310837:29)\n    at async Turn.run (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:311329:24)\n    at async GeminiClient.processTurn (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:315405:22)\n    at async GeminiClient.sendMessageStream (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:315518:14)\n    at async file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/gemini.js:10168:26\n    at async main (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/gemini.js:15201:5) {\n  cause: {\n    code: 429,\n    message: 'You have exhausted your capacity on this model. Your quota will reset after 14h4m57s.',\n    details: [ [Object], [Object] ]\n  },\n  retryDelayMs: 50697502.505741,\n  reason: 'QUOTA_EXHAUSTED'\n}\n{\n  \"session_id\": \"c2a51f5d-b96a-4463-bf5b-55adb5b3044b\",\n  \"error\": {\n    \"type\": \"Error\",\n    \"message\": \"You have exhausted your capacity on this model. Your quota will reset after 14h4m57s.\",\n    \"code\": 1\n  }\n}",
+      "errorCode": "timeout",
+      "retryable": true,
+      "httpStatus": 429
+    }
+  ],
+  "r1Diversity": 0.8301225868881915,
+  "next_required_action": {
+    "tool": "acceptance",
+    "reason": "After synthesizing, verify synthesis represents worker positions before presenting to user"
+  },
+  "synthesis_checklist": {
+    "comprehend": "Fill unique_contribution, most_unexpected_claim, loss_if_removed for each worker",
+    "evaluate": "Label every factual claim with [x] fact / [ ] unverified. Amplify creative proposals.",
+    "reflect": "Fill Uncertainty, Dismissed, Counterargument — each with a concrete change to the synthesis"
+  }
+}

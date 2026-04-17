@@ -1,0 +1,21 @@
+{
+  "host_actions": [
+    "convergence_score=0.23 status=diverging",
+    "convergence is DIVERSE — proceed to synthesis with full diversity",
+    "self_judge_bias: judge \"anthropic/claude-haiku-4.5\" shares provider \"anthropic\" with at least one worker — convergence and ranking verdicts may be biased toward same-provider models. Re-run with a cross-provider judge for a sanity check."
+  ],
+  "convergence": {
+    "level": "diverse",
+    "reasoning": "All three agree native modules are a major failure point, but diverge completely on the second and third failure conditions—no two analysts propose the same issues beyond #1."
+  },
+  "convergenceScore": {
+    "overall": 0.2339754826223617,
+    "status": "diverging",
+    "components": {
+      "semantic": 0,
+      "diversity": 0.8301225868881915,
+      "evidence": 0,
+      "stability": 1
+    }
+  }
+}

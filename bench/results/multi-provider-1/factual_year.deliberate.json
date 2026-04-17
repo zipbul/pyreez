@@ -1,0 +1,67 @@
+{
+  "roundsExecuted": 1,
+  "totalTokens": {
+    "input": 14118,
+    "output": 478
+  },
+  "totalLLMCalls": 3,
+  "modelsUsed": [
+    "anthropic/claude-haiku-4.5",
+    "xai/grok-4-1-fast",
+    "google/gemini-3.1-pro-preview"
+  ],
+  "protocol": "shared_convergence",
+  "rounds": [
+    {
+      "number": 1,
+      "protocol": "shared_convergence",
+      "responses": [
+        {
+          "model": "anthropic/claude-haiku-4.5",
+          "content": "**2009년**\n\nNode.js는 Ryan Dahl이 2009년 11월에 처음 발표했습니다. JSConf EU에서 공개되었으며, JavaScript를 서버 환경에서 실행할 수 있는 런타임으로 제시되었습니다.\n\n**Confidence: HIGH**\n\n이는 Node.js 공식 역사와 기술 커뮤니티에서 광범위하게 인정된 사실입니다.",
+          "confidence": "high"
+        },
+        {
+          "model": "xai/grok-4-1-fast",
+          "content": "**2009년** (v0.1.0 버전, 2009년 5월 27일 jsconf.eu에서 최초 공개).  \n**Confidence: HIGH** (공식 Node.js 역사 및 Ryan Dahl 발표 기록 기반).",
+          "confidence": "high"
+        },
+        {
+          "model": "google/gemini-3.1-pro-preview",
+          "content": "Node.js was first released in 2009.\n\nConfidence: HIGH",
+          "confidence": "high"
+        }
+      ]
+    }
+  ],
+  "modelSwaps": [
+    {
+      "original": "openai/gpt-5.4-nano",
+      "replacement": "xai/grok-4-1-fast",
+      "round": 1,
+      "error": "codex CLI exited with code 1: ",
+      "errorCode": "server_error",
+      "retryable": false,
+      "httpStatus": 500
+    },
+    {
+      "original": "google/gemini-3.1-flash-lite-preview",
+      "replacement": "google/gemini-3.1-pro-preview",
+      "round": 1,
+      "error": "gemini CLI exited with code 1: [WARN] Skipping unreadable directory: /tmp/snap-private-tmp (EACCES: permission denied, scandir '/tmp/snap-private-tmp')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego')\nYOLO mode is enabled. All tool calls will be automatically approved.\n[WARN] Skipping unreadable directory: /tmp/snap-private-tmp (EACCES: permission denied, scandir '/tmp/snap-private-tmp')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb')\nYOLO mode is enabled. All tool calls will be automatically approved.\nWarning: Could not read directory /tmp/snap-private-tmp: EACCES: permission denied, scandir '/tmp/snap-private-tmp'\nWarning: Could not read directory /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK: EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK'\nWarning: Could not read directory /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb: EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb'\nWarning: Could not read directory /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego: EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego'\nError when talking to Gemini API Full report available at: /tmp/gemini-client-error-Turn.run-sendMessageStream-2026-04-17T15-05-31-005Z.json TerminalQuotaError: You have exhausted your capacity on this model. Your quota will reset after 14h7m14s.\n    at classifyGoogleError (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:274494:18)\n    at retryWithBackoff (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:275105:31)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async GeminiChat.makeApiCallAndProcessStream (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:310999:28)\n    at async GeminiChat.streamWithRetries (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:310837:29)\n    at async Turn.run (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:311329:24)\n    at async GeminiClient.processTurn (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:315405:22)\n    at async GeminiClient.sendMessageStream (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:315518:14)\n    at async file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/gemini.js:10168:26\n    at async main (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/gemini.js:15201:5) {\n  cause: {\n    code: 429,\n    message: 'You have exhausted your capacity on this model. Your quota will reset after 14h7m14s.',\n    details: [ [Object], [Object] ]\n  },\n  retryDelayMs: 50834768.963971004,\n  reason: 'QUOTA_EXHAUSTED'\n}\n{\n  \"session_id\": \"49f312ad-7873-4e70-b187-ddd6cef80b7e\",\n  \"error\": {\n    \"type\": \"Error\",\n    \"message\": \"You have exhausted your capacity on this model. Your quota will reset after 14h7m14s.\",\n    \"code\": 1\n  }\n}",
+      "errorCode": "timeout",
+      "retryable": true,
+      "httpStatus": 429
+    }
+  ],
+  "r1Diversity": 0.7427536231884058,
+  "next_required_action": {
+    "tool": "acceptance",
+    "reason": "After synthesizing, verify synthesis represents worker positions before presenting to user"
+  },
+  "synthesis_checklist": {
+    "comprehend": "Fill unique_contribution, most_unexpected_claim, loss_if_removed for each worker",
+    "evaluate": "Label every factual claim with [x] fact / [ ] unverified. Amplify creative proposals.",
+    "reflect": "Fill Uncertainty, Dismissed, Counterargument — each with a concrete change to the synthesis"
+  }
+}

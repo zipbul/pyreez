@@ -1,0 +1,66 @@
+{
+  "roundsExecuted": 1,
+  "totalTokens": {
+    "input": 14123,
+    "output": 807
+  },
+  "totalLLMCalls": 3,
+  "modelsUsed": [
+    "anthropic/claude-haiku-4.5",
+    "xai/grok-4-1-fast",
+    "google/gemini-3.1-pro-preview"
+  ],
+  "protocol": "shared_convergence",
+  "rounds": [
+    {
+      "number": 1,
+      "protocol": "shared_convergence",
+      "responses": [
+        {
+          "model": "anthropic/claude-haiku-4.5",
+          "content": "**Jarred Sumner** — **Confidence: HIGH**\n\nBun의 창시자이자 주요 개발자는 Jarred Sumner입니다. 그는 2022년 Bun을 공개했으며, 현재 이 프로젝트를 주도하고 있습니다.\n\n**근거:**\n- Bun의 공식 GitHub 저장소와 문서에서 Jarred Sumner이 저자/창시자로 명시되어 있음\n- JavaScript 커뮤니티에서 널리 알려진 사실\n- 다수의 기술 뉴스와 인터뷰에서 확인 가능\n\n**Confidence 평가:**\n- **HIGH**: Bun은 2022년 이후 활발하게 논의되고 있는 프로젝트이며, 창시자 정보는 공식 소스와 신뢰할 수 있는 기술 매체에서 일관되게 문서화되어 있습니다.",
+          "confidence": "high"
+        },
+        {
+          "model": "xai/grok-4-1-fast",
+          "content": "**Bun JavaScript runtime의 창시자는 Jarred Sumner입니다.**  \n- **Evidence**: Bun 공식 사이트(bun.sh)와 GitHub 저장소(oven-sh/bun)에서 Jarred Sumner가 창시자이자 주요 개발자로 명시. 2022년 9월 초 발표 시 그의 트윗(@jarredsumner)과 블로그 포스트에서 직접 확인.  \n- **Confidence: HIGH** (직접적 문서 및 공식 발표 기반).",
+          "confidence": "high"
+        },
+        {
+          "model": "google/gemini-3.1-pro-preview",
+          "content": "Jarred Sumner is the creator of the Bun JavaScript runtime.\n\n**Confidence:** HIGH\n\n**Evidence & Reasoning:**\nJarred Sumner authored the original codebase and architecture for Bun. He subsequently founded Oven, the company that officially backs and funds the ongoing development of the runtime, where he serves as CEO.\n\n**Alternative Considered & Rejected:**\nCould the creation be attributed to a broader team or Oven as an entity? No. While Bun now has multiple core contributors and corporate backing, Jarred Sumner developed the project independently before forming Oven to support its growth, making him the definitive creator."
+        }
+      ]
+    }
+  ],
+  "modelSwaps": [
+    {
+      "original": "openai/gpt-5.4-nano",
+      "replacement": "xai/grok-4-1-fast",
+      "round": 1,
+      "error": "codex CLI exited with code 1: ",
+      "errorCode": "server_error",
+      "retryable": false,
+      "httpStatus": 500
+    },
+    {
+      "original": "google/gemini-3.1-flash-lite-preview",
+      "replacement": "google/gemini-3.1-pro-preview",
+      "round": 1,
+      "error": "gemini CLI exited with code 1: [WARN] Skipping unreadable directory: /tmp/snap-private-tmp (EACCES: permission denied, scandir '/tmp/snap-private-tmp')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego')\nYOLO mode is enabled. All tool calls will be automatically approved.\n[WARN] Skipping unreadable directory: /tmp/snap-private-tmp (EACCES: permission denied, scandir '/tmp/snap-private-tmp')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb')\n[WARN] Skipping unreadable directory: /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego (EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego')\nYOLO mode is enabled. All tool calls will be automatically approved.\nWarning: Could not read directory /tmp/snap-private-tmp: EACCES: permission denied, scandir '/tmp/snap-private-tmp'\nWarning: Could not read directory /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK: EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-logind.service-9A1tNK'\nWarning: Could not read directory /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb: EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-systemd-timesyncd.service-pgM1tb'\nWarning: Could not read directory /tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego: EACCES: permission denied, scandir '/tmp/systemd-private-78414b709d9245b0bdfde26b72abe279-wsl-pro.service-HLxego'\nError when talking to Gemini API Full report available at: /tmp/gemini-client-error-Turn.run-sendMessageStream-2026-04-17T15-05-04-308Z.json TerminalQuotaError: You have exhausted your capacity on this model. Your quota will reset after 14h7m40s.\n    at classifyGoogleError (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:274494:18)\n    at retryWithBackoff (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:275105:31)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async GeminiChat.makeApiCallAndProcessStream (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:310999:28)\n    at async GeminiChat.streamWithRetries (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:310837:29)\n    at async Turn.run (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:311329:24)\n    at async GeminiClient.processTurn (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:315405:22)\n    at async GeminiClient.sendMessageStream (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/chunk-ZTFHMKKJ.js:315518:14)\n    at async file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/gemini.js:10168:26\n    at async main (file:///home/revil/.bun/install/global/node_modules/@google/gemini-cli/bundle/gemini.js:15201:5) {\n  cause: {\n    code: 429,\n    message: 'You have exhausted your capacity on this model. Your quota will reset after 14h7m40s.',\n    details: [ [Object], [Object] ]\n  },\n  retryDelayMs: 50860722.527687,\n  reason: 'QUOTA_EXHAUSTED'\n}\n{\n  \"session_id\": \"148ec377-8c91-4e68-92fa-395e95b9c568\",\n  \"error\": {\n    \"type\": \"Error\",\n    \"message\": \"You have exhausted your capacity on this model. Your quota will reset after 14h7m40s.\",\n    \"code\": 1\n  }\n}",
+      "errorCode": "timeout",
+      "retryable": true,
+      "httpStatus": 429
+    }
+  ],
+  "r1Diversity": 0.7894400966824365,
+  "next_required_action": {
+    "tool": "acceptance",
+    "reason": "After synthesizing, verify synthesis represents worker positions before presenting to user"
+  },
+  "synthesis_checklist": {
+    "comprehend": "Fill unique_contribution, most_unexpected_claim, loss_if_removed for each worker",
+    "evaluate": "Label every factual claim with [x] fact / [ ] unverified. Amplify creative proposals.",
+    "reflect": "Fill Uncertainty, Dismissed, Counterargument — each with a concrete change to the synthesis"
+  }
+}

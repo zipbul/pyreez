@@ -59,24 +59,26 @@ export type ConvergenceStatus = "converged" | "refining" | "diverging";
  * consecutive_rounds_needed concept (default 1) but does not publish
  * specific score thresholds for converged/diverging classification.
  *
- * pyreez measurement (9 task types, single provider xai, single round):
- *   HIGH (semantic 1.0) cases scored 0.623–0.717 (6 cases)
- *   MODERATE (semantic 0.5) cases scored 0.437–0.444 (3 cases)
- *   DIVERSE cases scored: NONE OBSERVED (intentional diverse prompts —
- *     ethics, philosophy, future-tech — still got HIGH/MODERATE judges
- *     on same-provider model trio)
+ * pyreez measurement (13 task types, multi-provider anthropic+openai+google,
+ * single round, judge=anthropic/claude-haiku-4.5):
+ *   HIGH cases (n=10):     0.630–0.680
+ *   MODERATE cases (n=1):  0.431
+ *   DIVERSE cases (n=2):   0.229–0.234
  *
- * 0.60 converged: cleanly separates the two observed classes (gap [0.444,
- *   0.623]). 9/9 cases classified correctly.
- * 0.40 diverging: provisional. NO measurement data below this — likely
- *   requires multi-provider runs (Gemini + Anthropic + xai) to elicit a
- *   true DIVERSE convergence-judge verdict. Treat any score < 0.40 as a
- *   "should not happen" alarm rather than a confident classification.
+ * 0.53 converged: midpoint of HIGH min (0.630) and MODERATE max (0.431).
+ * 0.33 diverging: midpoint of MODERATE min (0.431) and DIVERSE max (0.234).
+ *
+ * Caveat: judge accuracy vs expectedLabel was only 38.5% in this run —
+ * judge tends to over-classify as HIGH (e.g., controversial topics like
+ * ethics/philosophy got HIGH despite expected DIVERSE). The score-based
+ * status may actually be more accurate than the judge level. Use both
+ * signals together; treat single-judge convergence level as one input,
+ * not ground truth.
  *
  * Re-tune as the corpus grows. Override via ClassifyOptions.
  */
-export const DEFAULT_CONVERGED_THRESHOLD = 0.60;
-export const DEFAULT_DIVERGING_THRESHOLD = 0.40;
+export const DEFAULT_CONVERGED_THRESHOLD = 0.53;
+export const DEFAULT_DIVERGING_THRESHOLD = 0.33;
 
 export interface ClassifyOptions {
   convergedThreshold?: number;
