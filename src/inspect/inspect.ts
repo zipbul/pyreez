@@ -19,11 +19,63 @@ import { crossValidate } from "../quality/cross-validate";
 import { createLLMCrossValidator } from "../quality/llm-cross-validator";
 import { computeConvergenceScore, classifyStatus, type ConvergenceStatus } from "../quality/convergence-score";
 import { computeEvidenceOverlap } from "../quality/evidence-overlap";
+import { extractProvider } from "../deliberation/provider-util";
 
 interface DeliberateLike {
-  rounds?: readonly { number: number; responses?: readonly { model: string; content: string; confidence?: string }[] }[];
+  rounds?: readonly { number: number; responses?: readonly { model: string; content: string; confidence?: string; workerIndex?: number }[] }[];
   warnings?: readonly string[];
   r1Diversity?: number | null;
+}
+
+/**
+ * Compute round-over-round stability: 1 - avg pairwise Levenshtein change rate
+ * between matching workers' responses in the last round vs the previous round.
+ * Returns 1.0 if there's no prior round (single-round case = trivially stable).
+ */
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  let prev: number[] = new Array(b.length + 1).fill(0).map((_, i) => i);
+  let curr: number[] = new Array(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1]! + 1, prev[j]! + 1, prev[j - 1]! + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[b.length]!;
+}
+
+function computeRoundStability(
+  rounds: readonly { number: number; responses?: readonly { model: string; content: string; workerIndex?: number }[] }[],
+): number {
+  if (rounds.length < 2) return 1.0;
+  const last = rounds[rounds.length - 1];
+  const prev = rounds[rounds.length - 2];
+  const lastR = last?.responses ?? [];
+  const prevR = prev?.responses ?? [];
+  if (lastR.length === 0 || prevR.length === 0) return 1.0;
+  const prevMap = new Map<string, string>();
+  for (const r of prevR) {
+    const key = r.workerIndex != null ? `idx:${r.workerIndex}` : `model:${r.model}`;
+    prevMap.set(key, r.content);
+  }
+  let sum = 0;
+  let pairs = 0;
+  for (const r of lastR) {
+    const key = r.workerIndex != null ? `idx:${r.workerIndex}` : `model:${r.model}`;
+    const prevContent = prevMap.get(key);
+    if (prevContent === undefined) continue;
+    const maxLen = Math.max(r.content.length, prevContent.length);
+    if (maxLen === 0) continue;
+    sum += levenshteinDistance(r.content, prevContent) / maxLen;
+    pairs++;
+  }
+  if (pairs === 0) return 1.0;
+  return 1 - sum / pairs;
 }
 
 export interface InspectInput {
@@ -33,6 +85,8 @@ export interface InspectInput {
   chat: (model: string, messages: ChatMessage[]) => Promise<{ content: string }>;
   /** Set true when responses likely contain factual claims worth cross-validating. */
   factualLikely?: boolean;
+  /** Skip the always-on convergence-judge call (saves 1 LLM call when caller knows it isn't needed). */
+  skipConvergence?: boolean;
 }
 
 export interface InspectResult {
@@ -73,43 +127,41 @@ export async function runInspection(input: InspectInput): Promise<InspectResult>
   const diversityLow = warnings.some((w) => w.includes("r1_diversity_low"));
   const borderline = diversity !== null && diversity >= BORDERLINE_DIVERSITY_LO && diversity < BORDERLINE_DIVERSITY_HI;
 
-  // Always run convergence-check via LLM judge.
-  // Empirical measurement (7 tasks): text-distance r1Diversity ranges 0.737–0.853
-  // even on math_obvious "2+2=4?" where semantic convergence is HIGH. Text-distance
-  // signals (r1_conformity_suspected, r1_diversity_low, minority_dissent) are
-  // dead in practice; only the LLM judge gives a reliable convergence read.
-  result.convergence = await judgeConvergence(input.judgeModel, input.chat, input.task, candidates);
+  // Convergence-check via LLM judge. Default on; opt-out via skipConvergence
+  // for cost-sensitive runs where the caller knows convergence is irrelevant.
+  // Text-distance signals are dead in practice (measured), so the LLM judge
+  // is the only reliable convergence read.
+  if (!input.skipConvergence) {
+    result.convergence = await judgeConvergence(input.judgeModel, input.chat, input.task, candidates);
 
-  // Multi-component convergence score (Aragora pattern).
-  // semantic: from LLM judge level (HIGH=1.0, MODERATE=0.5, DIVERSE=0.0)
-  // diversity: existing r1Diversity from text-distance (0=identical, 1=different)
-  // evidence: jaccard of citation tokens across responses
-  // stability: 1.0 for single-round (no prior to compare against)
-  const semanticMap: Record<ConvergenceLevel, number> = {
-    high: 1.0,
-    moderate: 0.5,
-    diverse: 0.0,
-    unknown: 0.5,
-    insufficient: 0.0,
-  };
-  const components = {
-    semantic: semanticMap[result.convergence.level],
-    diversity: diversity ?? 0.5,
-    evidence: computeEvidenceOverlap(candidates.map((c) => c.content)),
-    stability: 1.0, // single-round only — caller can extend for multi-round
-  };
-  const overall = computeConvergenceScore(components);
-  const status = classifyStatus(overall, /* consecutive */ 1, /* needed */ 1);
-  result.convergenceScore = { overall, status, components };
-  actions.push(`convergence_score=${overall.toFixed(2)} status=${status}`);
-  if (result.convergence.level === "high") {
-    actions.push("convergence is HIGH — reframe task as failure-conditions question (HOST_QUESTIONING_DEPTH Rule 2) and re-run deliberate");
-  } else if (result.convergence.level === "moderate" && result.convergence.dissenterId) {
-    actions.push(`read ${result.convergence.dissenterId} response FIRST — convergence is moderate with named dissenter`);
-  } else if (result.convergence.level === "moderate") {
-    actions.push("convergence is MODERATE — review minority view before adopting majority");
-  } else if (result.convergence.level === "diverse") {
-    actions.push("convergence is DIVERSE — proceed to synthesis with full diversity");
+    // Multi-component convergence score (Aragora pattern).
+    const semanticMap: Record<ConvergenceLevel, number> = {
+      high: 1.0,
+      moderate: 0.5,
+      diverse: 0.0,
+      unknown: 0.5,
+      insufficient: 0.0,
+    };
+    const components = {
+      semantic: semanticMap[result.convergence.level],
+      diversity: diversity ?? 0.5,
+      evidence: computeEvidenceOverlap(candidates.map((c) => c.content)),
+      stability: computeRoundStability(input.deliberate.rounds ?? []),
+    };
+    const overall = computeConvergenceScore(components);
+    const status = classifyStatus(overall, /* consecutive */ 1, /* needed */ 1);
+    result.convergenceScore = { overall, status, components };
+    actions.push(`convergence_score=${overall.toFixed(2)} status=${status}`);
+
+    if (result.convergence.level === "high") {
+      actions.push("convergence is HIGH — reframe task as failure-conditions question (HOST_QUESTIONING_DEPTH Rule 2) and re-run deliberate");
+    } else if (result.convergence.level === "moderate" && result.convergence.dissenterId) {
+      actions.push(`read ${result.convergence.dissenterId} response FIRST — convergence is moderate with named dissenter`);
+    } else if (result.convergence.level === "moderate") {
+      actions.push("convergence is MODERATE — review minority view before adopting majority");
+    } else if (result.convergence.level === "diverse") {
+      actions.push("convergence is DIVERSE — proceed to synthesis with full diversity");
+    }
   }
   // Suppress unused-variable warnings for dead signals (kept in code for documentation)
   void conformitySuspected; void dissentSuspected; void diversityLow; void borderline;
@@ -140,6 +192,14 @@ export async function runInspection(input: InspectInput): Promise<InspectResult>
   // 4. Standing warnings → actions
   if (warnings.some((w) => w.includes("provider_diversity_low"))) {
     actions.push("provider_diversity_low — note in confidence assessment; re-run with 2+ providers if available");
+  }
+
+  // 5. Self-judge bias check — judge same provider as any worker = self-eval risk.
+  // Cross-provider judging reduces this bias (LLM-as-Judge research).
+  const judgeProvider = extractProvider(input.judgeModel);
+  const workerProviders = new Set(responses.map((r) => extractProvider(r.model)));
+  if (workerProviders.has(judgeProvider)) {
+    actions.push(`self_judge_bias: judge "${input.judgeModel}" shares provider "${judgeProvider}" with at least one worker — convergence and ranking verdicts may be biased toward same-provider models. Re-run with a cross-provider judge for a sanity check.`);
   }
 
   if (actions.length === 0) {

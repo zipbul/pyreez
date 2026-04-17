@@ -145,3 +145,99 @@ describe("runInspection", () => {
     expect(result.host_actions.some((a) => a.includes("reframe"))).toBe(true);
   });
 });
+
+describe("self_judge_bias", () => {
+  it("flags self_judge_bias when judge shares provider with a worker", async () => {
+    const judge = mock(async () => ({ content: "<convergence>HIGH</convergence>" }));
+    const result = await runInspection({
+      task: "task",
+      deliberate: {
+        rounds: [{ number: 1, responses: [
+          { model: "xai/grok-4", content: "a" },
+          { model: "openai/gpt-5", content: "b" },
+        ]}],
+        warnings: [],
+      },
+      judgeModel: "xai/grok-4-1-fast",
+      chat: judge,
+    });
+    expect(result.host_actions.some((a) => a.includes("self_judge_bias"))).toBe(true);
+  });
+
+  it("does NOT flag self_judge_bias when judge provider is unique", async () => {
+    const judge = mock(async () => ({ content: "<convergence>HIGH</convergence>" }));
+    const result = await runInspection({
+      task: "task",
+      deliberate: {
+        rounds: [{ number: 1, responses: [
+          { model: "xai/grok-4", content: "a" },
+          { model: "openai/gpt-5", content: "b" },
+        ]}],
+        warnings: [],
+      },
+      judgeModel: "anthropic/claude-opus-4.6",
+      chat: judge,
+    });
+    expect(result.host_actions.some((a) => a.includes("self_judge_bias"))).toBe(false);
+  });
+});
+
+describe("multi-round stability", () => {
+  it("uses stability=1.0 for single-round runs", async () => {
+    const judge = mock(async () => ({ content: "<convergence>HIGH</convergence>" }));
+    const result = await runInspection({
+      task: "task",
+      deliberate: makeDeliberateOutput({ r1Diversity: 0.7 }),
+      judgeModel: "test/judge",
+      chat: judge,
+    });
+    expect(result.convergenceScore!.components.stability).toBe(1.0);
+  });
+
+  it("computes stability < 1 when last round differs from previous", async () => {
+    const judge = mock(async () => ({ content: "<convergence>HIGH</convergence>" }));
+    const result = await runInspection({
+      task: "task",
+      deliberate: {
+        rounds: [
+          { number: 1, responses: [
+            { model: "a", content: "First answer to the task here", workerIndex: 0 },
+            { model: "b", content: "Different first answer entirely", workerIndex: 1 },
+          ]},
+          { number: 2, responses: [
+            { model: "a", content: "Completely different second answer now", workerIndex: 0 },
+            { model: "b", content: "Yet another revised position", workerIndex: 1 },
+          ]},
+        ],
+        warnings: [],
+      },
+      judgeModel: "test/judge",
+      chat: judge,
+    });
+    expect(result.convergenceScore!.components.stability).toBeLessThan(1.0);
+  });
+
+  it("stability=1.0 when last and prev rounds are identical", async () => {
+    const judge = mock(async () => ({ content: "<convergence>HIGH</convergence>" }));
+    const same = "Identical answer text here.";
+    const result = await runInspection({
+      task: "task",
+      deliberate: {
+        rounds: [
+          { number: 1, responses: [
+            { model: "a", content: same, workerIndex: 0 },
+            { model: "b", content: same, workerIndex: 1 },
+          ]},
+          { number: 2, responses: [
+            { model: "a", content: same, workerIndex: 0 },
+            { model: "b", content: same, workerIndex: 1 },
+          ]},
+        ],
+        warnings: [],
+      },
+      judgeModel: "test/judge",
+      chat: judge,
+    });
+    expect(result.convergenceScore!.components.stability).toBe(1.0);
+  });
+});

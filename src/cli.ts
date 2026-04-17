@@ -340,6 +340,7 @@ async function main(): Promise<void> {
       const judgeModel = flags["judge"];
       if (!judgeModel) die("--judge is required (model id)");
       const factualLikely = flags["factual"] === "true";
+      const skipConvergence = flags["skip-convergence"] === "true";
 
       let deliberate: any;
       try {
@@ -359,6 +360,7 @@ async function main(): Promise<void> {
           return { content: r.content };
         },
         factualLikely,
+        skipConvergence,
       });
       result = { data: inspection };
       break;
