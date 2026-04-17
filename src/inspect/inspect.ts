@@ -17,6 +17,8 @@ import { rankByPairwise } from "../synthesis/pairranker";
 import { createLLMJudge } from "../synthesis/llm-judge";
 import { crossValidate } from "../quality/cross-validate";
 import { createLLMCrossValidator } from "../quality/llm-cross-validator";
+import { computeConvergenceScore, classifyStatus, type ConvergenceStatus } from "../quality/convergence-score";
+import { computeEvidenceOverlap } from "../quality/evidence-overlap";
 
 interface DeliberateLike {
   rounds?: readonly { number: number; responses?: readonly { model: string; content: string; confidence?: string }[] }[];
@@ -36,6 +38,12 @@ export interface InspectInput {
 export interface InspectResult {
   skipped?: boolean;
   convergence?: { level: ConvergenceLevel; dissenterId?: string; reasoning?: string };
+  /** Aragora-style multi-component convergence score (synaptent/aragora CONVERGENCE.md). */
+  convergenceScore?: {
+    overall: number;
+    status: ConvergenceStatus;
+    components: { semantic: number; diversity: number; evidence: number; stability: number };
+  };
   ranking?: readonly { id: string; wins: number; losses: number }[];
   qualityFindings?: readonly { id: string; unsupported: readonly string[]; contradicted: readonly string[] }[];
   host_actions: string[];
@@ -71,6 +79,29 @@ export async function runInspection(input: InspectInput): Promise<InspectResult>
   // signals (r1_conformity_suspected, r1_diversity_low, minority_dissent) are
   // dead in practice; only the LLM judge gives a reliable convergence read.
   result.convergence = await judgeConvergence(input.judgeModel, input.chat, input.task, candidates);
+
+  // Multi-component convergence score (Aragora pattern).
+  // semantic: from LLM judge level (HIGH=1.0, MODERATE=0.5, DIVERSE=0.0)
+  // diversity: existing r1Diversity from text-distance (0=identical, 1=different)
+  // evidence: jaccard of citation tokens across responses
+  // stability: 1.0 for single-round (no prior to compare against)
+  const semanticMap: Record<ConvergenceLevel, number> = {
+    high: 1.0,
+    moderate: 0.5,
+    diverse: 0.0,
+    unknown: 0.5,
+    insufficient: 0.0,
+  };
+  const components = {
+    semantic: semanticMap[result.convergence.level],
+    diversity: diversity ?? 0.5,
+    evidence: computeEvidenceOverlap(candidates.map((c) => c.content)),
+    stability: 1.0, // single-round only — caller can extend for multi-round
+  };
+  const overall = computeConvergenceScore(components);
+  const status = classifyStatus(overall, /* consecutive */ 1, /* needed */ 1);
+  result.convergenceScore = { overall, status, components };
+  actions.push(`convergence_score=${overall.toFixed(2)} status=${status}`);
   if (result.convergence.level === "high") {
     actions.push("convergence is HIGH — reframe task as failure-conditions question (HOST_QUESTIONING_DEPTH Rule 2) and re-run deliberate");
   } else if (result.convergence.level === "moderate" && result.convergence.dissenterId) {
