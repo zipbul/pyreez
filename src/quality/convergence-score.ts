@@ -59,15 +59,19 @@ export type ConvergenceStatus = "converged" | "refining" | "diverging";
  * consecutive_rounds_needed concept (default 1) but does not publish
  * specific score thresholds for converged/diverging classification.
  *
- * Initial pyreez measurement (6 task types: math_obvious, directional,
- * factual_who, tradeoff, opinion, design — single provider, single round):
- *   HIGH (semantic 1.0) cases scored 0.643–0.717 (4 cases)
- *   MODERATE (semantic 0.5) cases scored 0.437–0.444 (2 cases)
- *   gap [0.444, 0.643] → midpoint 0.543
+ * pyreez measurement (9 task types, single provider xai, single round):
+ *   HIGH (semantic 1.0) cases scored 0.623–0.717 (6 cases)
+ *   MODERATE (semantic 0.5) cases scored 0.437–0.444 (3 cases)
+ *   DIVERSE cases scored: NONE OBSERVED (intentional diverse prompts —
+ *     ethics, philosophy, future-tech — still got HIGH/MODERATE judges
+ *     on same-provider model trio)
  *
- * Default 0.60 converged: includes all observed HIGH, excludes all observed
- * MODERATE, with margin from midpoint. 0.40 diverging: kept as-is pending
- * data on DIVERSE-level cases (currently no measurement).
+ * 0.60 converged: cleanly separates the two observed classes (gap [0.444,
+ *   0.623]). 9/9 cases classified correctly.
+ * 0.40 diverging: provisional. NO measurement data below this — likely
+ *   requires multi-provider runs (Gemini + Anthropic + xai) to elicit a
+ *   true DIVERSE convergence-judge verdict. Treat any score < 0.40 as a
+ *   "should not happen" alarm rather than a confident classification.
  *
  * Re-tune as the corpus grows. Override via ClassifyOptions.
  */

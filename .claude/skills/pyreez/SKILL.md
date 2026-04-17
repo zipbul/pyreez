@@ -115,7 +115,8 @@ After `deliberate` returns, read the output signals BEFORE synthesizing. Each si
 - N≥4 workers: adds 2*N*(N-1)/2 calls for ranking (eager position-bias mitigation per "Judging the Judges", Lin Shi et al., Dartmouth — position bias in LLM judges is systematic, swap pass is standard).
 
 **Threshold caveats (be honest about provenance)**:
-- `convergenceScore.overall ≥ 0.60` → "converged", `< 0.40` → "diverging" — these defaults are pyreez measurement-based, NOT from Aragora source. Aragora documents the formula and consecutive_rounds concept but does not publish specific score thresholds. Initial pyreez measurement (6 task types, single provider, single round): HIGH semantic cases scored 0.643–0.717, MODERATE scored 0.437–0.444. 0.60 separates these classes with margin. Re-tune via ClassifyOptions as your corpus grows.
+- `convergenceScore.overall ≥ 0.60` → "converged", `< 0.40` → "diverging" — these defaults are pyreez measurement-based, NOT from Aragora source. Measurement (9 task types, single-provider xai, single-round): HIGH semantic cases 0.623–0.717, MODERATE 0.437–0.444. 0.60 separates these classes (9/9 correct).
+- `< 0.40` diverging threshold is **provisional** — no measurement data below 0.40 in current corpus. Same-provider model trios produce HIGH/MODERATE judges even on intentionally diverse prompts (ethics, philosophy, future-tech). Treat status="diverging" as a "should not happen" alarm. True DIVERSE characterization needs multi-provider runs.
 - Aragora weights (semantic 0.4 + diversity 0.2 + evidence 0.2 + stability 0.2) come from synaptent/aragora docs/algorithms/CONVERGENCE.md but were designed for evidence-heavy domains (specs, policy). On opinion/design tasks where evidence=0, scores skew low and "refining" status may be over-emitted. Read components.semantic alongside the overall score.
 - N≥4 ranking threshold is a pyreez heuristic, NOT from research. Adjust if cost vs. value math changes.
 
