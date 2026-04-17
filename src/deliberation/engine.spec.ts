@@ -2470,3 +2470,122 @@ describe("aggregation confidence_weighted fallback", () => {
     expect(output.aggregation!.weightedScore).toBeUndefined();
   });
 });
+
+// =============================================================================
+// detectConformity
+// =============================================================================
+
+describe("detectConformity", () => {
+  it("returns null for fewer than 2 responses", async () => {
+    const { detectConformity } = await import("./engine");
+    const round = {
+      number: 1,
+      responses: [{ model: "a", content: "x", workerIndex: 0, confidence: "high" as const }],
+    };
+    expect(detectConformity(round)).toBeNull();
+  });
+
+  it("returns null when not all workers report HIGH confidence", () => {
+    const { detectConformity } = require("./engine");
+    const round = {
+      number: 1,
+      responses: [
+        { model: "a", content: "Yes use Bun for performance.", workerIndex: 0, confidence: "high" },
+        { model: "b", content: "Yes use Bun for performance.", workerIndex: 1, confidence: "medium" },
+      ],
+    };
+    expect(detectConformity(round)).toBeNull();
+  });
+
+  it("returns null when responses are very different despite all-HIGH", () => {
+    const { detectConformity } = require("./engine");
+    const round = {
+      number: 1,
+      responses: [
+        { model: "a", content: "Bun is faster and has better DX. Choose Bun.", workerIndex: 0, confidence: "high" },
+        { model: "b", content: "Stick with Node. The ecosystem and stability matter more.", workerIndex: 1, confidence: "high" },
+      ],
+    };
+    expect(detectConformity(round)).toBeNull();
+  });
+
+  it("returns warning when all-HIGH and responses textually similar", () => {
+    const { detectConformity } = require("./engine");
+    const sharedAnswer = "Yes use Bun. It is faster and the ecosystem matures fast. Choose Bun.";
+    const round = {
+      number: 1,
+      responses: [
+        { model: "a", content: sharedAnswer, workerIndex: 0, confidence: "high" },
+        { model: "b", content: sharedAnswer + " (slightly different ending)", workerIndex: 1, confidence: "high" },
+        { model: "c", content: sharedAnswer + " (also different)", workerIndex: 2, confidence: "high" },
+      ],
+    };
+    const w = detectConformity(round);
+    expect(w).not.toBeNull();
+    expect(w).toContain("conformity");
+  });
+
+  it("returns null when any worker has no confidence marker", () => {
+    const { detectConformity } = require("./engine");
+    const sharedAnswer = "Same answer here.";
+    const round = {
+      number: 1,
+      responses: [
+        { model: "a", content: sharedAnswer, workerIndex: 0, confidence: "high" },
+        { model: "b", content: sharedAnswer, workerIndex: 1 }, // no confidence
+      ],
+    };
+    expect(detectConformity(round)).toBeNull();
+  });
+});
+
+// =============================================================================
+// R1 conformity warning integration
+// =============================================================================
+
+describe("R1 conformity warning in deliberate output", () => {
+  it("emits r1_conformity_suspected when R1 responses are HIGH and similar", async () => {
+    const team = makeTeam(2);
+    const input = makeInput({ protocol: "shared_convergence", maxRounds: 1 });
+    const config = makeConfig({ protocol: "shared_convergence" });
+
+    const sharedAnswer = "Yes use Bun. It is faster and the ecosystem matures fast. Choose Bun. confidence: HIGH";
+    let call = 0;
+    const deps = makeDeps({
+      chat: mock(async () => {
+        call++;
+        return {
+          content: sharedAnswer + (call === 2 ? " (slightly different ending)" : ""),
+          inputTokens: 1, outputTokens: 1, finishReason: "stop",
+        };
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+    const warns = output.warnings ?? [];
+    expect(warns.some((w) => w.includes("r1_conformity_suspected"))).toBe(true);
+  });
+
+  it("does NOT emit conformity warning when R1 responses differ", async () => {
+    const team = makeTeam(2);
+    const input = makeInput({ protocol: "shared_convergence", maxRounds: 1 });
+    const config = makeConfig({ protocol: "shared_convergence" });
+
+    let call = 0;
+    const deps = makeDeps({
+      chat: mock(async () => {
+        call++;
+        return {
+          content: call === 1
+            ? "Use Bun for performance. confidence: HIGH"
+            : "Stick with Node for ecosystem. confidence: HIGH",
+          inputTokens: 1, outputTokens: 1, finishReason: "stop",
+        };
+      }),
+    });
+
+    const output = await deliberate(team, input, deps, config);
+    const warns = output.warnings ?? [];
+    expect(warns.some((w) => w.includes("r1_conformity_suspected"))).toBe(false);
+  });
+});

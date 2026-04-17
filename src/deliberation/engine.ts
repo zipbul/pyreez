@@ -234,6 +234,36 @@ export function levenshteinDistance(a: string, b: string): number {
  * Check if all workers have converged (change rate below threshold).
  * Returns true if convergence detected.
  */
+/**
+ * Detect R1 conformity — all workers report HIGH confidence AND their responses
+ * are textually similar (Levenshtein change rate < 0.30 between every pair).
+ *
+ * Signal of the failure mode in arXiv 2509.14034 (ConfMAD): when most agents
+ * agree confidently in R1, debate may be locked in even if the consensus is wrong.
+ * Returns a warning string for the host, or null when the signal is absent.
+ */
+export function detectConformity(round: Round): string | null {
+  const responses = round.responses;
+  if (responses.length < 2) return null;
+  if (!responses.every((r) => r.confidence === "high")) return null;
+
+  const CONFORMITY_THRESHOLD = 0.30;
+  let pairs = 0;
+  for (let i = 0; i < responses.length; i++) {
+    for (let j = i + 1; j < responses.length; j++) {
+      const a = responses[i]!.content;
+      const b = responses[j]!.content;
+      const maxLen = Math.max(a.length, b.length);
+      if (maxLen === 0) continue;
+      const rate = levenshteinDistance(a, b) / maxLen;
+      if (rate >= CONFORMITY_THRESHOLD) return null;
+      pairs++;
+    }
+  }
+  if (pairs === 0) return null;
+  return `r1_conformity_suspected: all ${responses.length} workers reported HIGH confidence with textually similar answers — verify minority dissent was not suppressed (ConfMAD arXiv 2509.14034).`;
+}
+
 function checkConvergence(
   currentRound: Round,
   previousRound: Round,
@@ -1224,6 +1254,13 @@ export async function deliberate(
   const warnings: string[] = [];
   if (providers.size < 2 && usedModelsList.length >= 2) {
     warnings.push(`provider_diversity_low: ${providers.size} provider(s) — minimum 2 recommended`);
+  }
+
+  // R1 conformity signal — only meaningful for protocols that share positions
+  const r1 = allRounds[0];
+  if (r1 && r1.responses.length >= 2 && (cfg.protocol === "shared_convergence" || cfg.protocol === "adversarial_debate")) {
+    const conformityWarning = detectConformity(r1);
+    if (conformityWarning) warnings.push(conformityWarning);
   }
 
   // Build degradation metadata if team shrank
