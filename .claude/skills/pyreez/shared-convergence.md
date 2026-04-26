@@ -10,7 +10,7 @@
 - 단일 모델 blind spot이 비싼 판단성 task
 
 ## When to skip
-- factual lookup → single strong model + self-consistency가 더 싸고 정확
+- factual lookup, 단일 강모델 + self-consistency로 동등 품질 가능 → 단일 모델
 - 단순 코드 생성 → 단일 모델
 - weakness 발굴 → `adversarial_debate`
 - 점수 매기기 → `evaluation_scoring`
@@ -60,9 +60,10 @@
 
 여러 deliberation을 같은 critique 요구로 운영할 때만 worker-instructions로 옮긴다 (한 곳에 두 번 박지 마라).
 
-### 5. False-premise 거부 (high-stakes)
-의료·법률·금융 등에서 LLM은 잘못된 전제도 100% 따르는 경향. task에:
+### 5. False-premise 거부 + Misleader 방어 (high-stakes)
+의료·법률·금융처럼 misleader·잘못된 전제 위험 task에 task 안에 박는다:
 > "전제 중 사실이 아니거나 증명 불가, 숨은 가정이 있으면 답변 전에 식별·거부하라."
+> "각 주요 주장에 외부 evidence(benchmark·official source·production case) 한 개 인용 필수."
 
 ### 6. Few-shot + negative example (복합 출력 시)
 출력 형식이 복합적이면 task 안에 예시. Anthropic은 `<example>`(positive) / `<bad-example>`(negative) 태그 wrap 권고.
@@ -72,10 +73,11 @@
 단순 출력에는 불필요.
 
 ### 7. 자동주입과 중복 금지
-워커에 이미 들어가 있어 또 박으면 over-prompting (최신 모델 품질 저하):
+워커에 이미 들어가 있어 또 박지 마:
 - HIGH/MED/LOW 표기 / "consensus 의존 마라" / "evidence ground" / "검증하라" / "여러 접근 고려" / "강한 반론" / "no preamble"
-- persona ("you are X") — factual에서 효과 없음
-- "be objective" — 의도적 misleader에 prompt-only defense 무효 (외부 evidence citation 같은 구조적 방어가 필요)
+- "think step by step" / "reason carefully" / "let's think this through"
+- persona ("you are X"), pyreez 자동 부여 lens(분석 차원)
+- "be objective" (misleader에 무효 — §5 evidence citation 강제 사용)
 
 ---
 
@@ -116,12 +118,6 @@ XML 구조 이유: pyreez가 task 전체를 `<task>` 태그로 wrap. 내부도 X
 
 ### Good — 단순
 > "Bun 1.3 백엔드(DAU 10만)가 Node.js LTS보다 운영상 나쁜 결과를 내는 구체 조건 3가지. 각 조건마다 (a) 사전 신호 (b) 회피 방법을 한 문단."
-
-### Good — ML/data 도메인
-> "10인 ML 팀, PyTorch 2.5로 1B param LLM fine-tuning. 단일 H100 노드 8개 가용. LoRA(r=16) vs QLoRA(4-bit) vs 전체 파인튜닝 중 단일 추천. 데이터셋 50k instruction pairs, 3-epoch 목표, 1주 내 완료. 추천 외 2개가 본 컨텍스트(8 H100, 50k pairs, 1주)에서 명백히 나쁜 메커니즘을 함께 식별. 마지막 줄: '추천: <기법>'."
-
-### Good — frontend 도메인
-> "30인 프로덕트팀, React 18 + Redux Toolkit 4년차 SPA. 점진 마이그레이션으로 React Server Components(RSC) 도입 검토. 도입이 12개월 후 현 stack 유지보다 나쁜 결과를 내는 구체 조건 3가지. 각 조건마다 도입 직전 식별 가능한 신호 + 회피 방법. 본 컨텍스트(SPA→RSC, Redux 의존, 30인 팀) 한정 메커니즘이어야 함 (일반론 X)."
 
 ### Good — 트레이드오프 평가 (XML)
 ```
@@ -230,7 +226,7 @@ verifiable factual claim이 포함된 task면 inspect에 quality 검증 추가. 
 ### `convergence.level`
 | level | 행동 |
 |---|---|
-| `high` | 응답 직접 read해 evidence quality 확인. heterogeneous에서는 contested topic도 자연 high — high 자체는 sycophancy 신호 X. **단일 confident misleader가 그룹 정확도 10-40% 손상시킬 수 있어 HIGH의 결정적 주장은 외부 도구나 다른 모델로 cross-check** |
+| `high` | 응답 직접 read해 evidence quality 확인. heterogeneous에서는 contested topic도 자연 high — high 자체는 sycophancy 신호 X. **HIGH의 결정적 주장은 외부 도구나 다른 모델로 cross-check** |
 | `moderate` + dissenter | dissenter 응답 **먼저** read. 소수 의견이 결과 뒤집는 경우 많음. **단 두 함정 검증**: (a) judge가 stale round로 라벨하는 경우 — final round에서 dissenter가 입장 변경했는지 직접 확인 (b) dissenter가 라운드마다 입장 flip하면 incoherent — discount하고 다수 합의로 진행 |
 | `moderate` no dissenter | split 명시하며 합성 |
 | `diverse` | (a) 보완적 framing — 다양성 보존하며 합성 (b) 기본 사실 불일치 — task underspec, 재구성 |
@@ -238,7 +234,7 @@ verifiable factual claim이 포함된 task면 inspect에 quality 검증 추가. 
 | `insufficient` | <2 응답 — worker 추가 재실행 |
 
 ### `confidence`
-HIGH/MEDIUM/LOW 자동 파싱 (한국어 `신뢰도:` 포함). 동률 시 보수적인 것. **HIGH는 face value 아님 — 실제 정답률 70-80%**. evidence 약한 HIGH는 red flag.
+HIGH/MEDIUM/LOW 자동 파싱 (한국어 `신뢰도:` 포함). 동률 시 보수적인 것. evidence 약한 HIGH는 red flag — 응답 직접 read해 검증.
 
 ### `host_actions`
 - `provider_diversity_low` — caveat, 가능 시 broader pool 재실행
