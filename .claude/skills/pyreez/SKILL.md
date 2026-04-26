@@ -58,6 +58,7 @@ bun run src/cli.ts deliberate --task "..." --models "m1,m2,m3" --protocol <p> [-
 #   host_interrogation:  --questions "Q1,Q2,Q3"
 #   evaluation_scoring:  --criteria "..." --subject "..."
 bun run src/cli.ts inspect --task "..." --judge <model> --deliberate -    # pipe deliberate JSON
+# stderr를 stdout과 합치지 마. `deliberate ... 2>err.log >out.json` 으로 분리. `2>&1`은 progress 로그가 JSON에 섞여 inspect parse 실패
 bun run src/cli.ts fuse --task "..." --judge <model> --candidates '[{id, content}]' [--ranking '[{id, wins, losses}]']
 bun run src/cli.ts acceptance --task "..." --synthesis "..." --workers '[{model, original_position, alignment?}]'
 ```

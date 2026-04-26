@@ -214,7 +214,7 @@ verifiable factual claim이 포함된 task면 inspect에 quality 검증 추가. 
 | level | 행동 |
 |---|---|
 | `high` | 응답 직접 read해 evidence quality 확인. heterogeneous에서는 contested topic도 자연 high — high 자체는 sycophancy 신호 X. **HIGH의 결정적 주장은 외부 도구나 다른 모델로 cross-check** |
-| `moderate` + dissenter | dissenter 응답 **먼저** read. 소수 의견이 결과 뒤집는 경우 많음. **단 두 함정 검증**: (a) judge가 stale round로 라벨하는 경우 — final round에서 dissenter가 입장 변경했는지 직접 확인 (b) dissenter가 라운드마다 입장 flip하면 incoherent — discount하고 다수 합의로 진행 |
+| `moderate` + dissenter | dissenter 응답 **먼저** read. 소수 의견이 결과 뒤집는 경우 많음. **단 두 함정 검증**: (a) judge가 stale round로 라벨하는 경우 — final round에서 dissenter가 입장 변경했는지 직접 확인 (b) dissenter가 라운드마다 입장 flip(최종 추천 옵션이 round 사이 변경)하면 incoherent — discount하고 다수 합의로 진행. prior error 정정(같은 옵션 유지 + 근거 보완)은 flip 아님 |
 | `moderate` no dissenter | split 명시하며 합성 |
 | `diverse` | (a) 보완적 framing — 다양성 보존하며 합성 (b) 기본 사실 불일치 — task underspec, 재구성 |
 | `unknown` | 응답 직접 read |
@@ -225,11 +225,12 @@ HIGH/MEDIUM/LOW 자동 파싱 (한국어 `신뢰도:` 포함). 동률 시 보수
 
 ### `host_actions`
 - `provider_diversity_low` — caveat, 가능 시 broader pool 재실행
-- `self_judge_bias` — 다른 provider judge로 inspect 재실행
+- `self_judge_bias` — 다른 provider judge로 inspect 재실행. 가용 provider가 모두 worker pool에 있어 회피 불가능 시 두 cross-provider judge 결과(level + ranking) 일치하면 bias 상쇄로 간주, 진행
 - `convergence is HIGH — reframe task as failure-conditions question` — judge가 task 형태를 검사 안 하고 항상 emit한다. **task가 이미 failure-condition framing이면 무시**. 그 경우 HIGH 자체 해석은 위 `convergence.level: high` 행만 적용
 
 ### `convergenceScore`
 `level`과 mismatch (예: `level: high`, `status: diverging`)면 응답 직접 read.
+`components.evidence: 0`인데 응답에 URL·official source·production case 다수 인용되면 형식 mismatch — 응답 직접 read 우선.
 
 ---
 
@@ -242,8 +243,8 @@ high convergence:
 
 moderate/diverse: SKILL.md `Synthesize` 섹션의 generic 패턴 (unique_contribution / loss_if_removed / gap check) 적용.
 
-**Acceptance skip 조건** (호스트 판단):
-- 분석성 task (사용자가 결정/추천만 원함, ratify할 합성이 없음)
+**Acceptance skip 조건** (호스트 판단, default skip):
+- 사용자가 결정·추천·단일 답만 요청, 합성문 ratify를 명시 안 함
 - 다수 워커 강한 수렴 + 잔여 dissenter가 incoherent (라운드별 flip)
 - acceptance 추가 비용이 결론 자체를 바꿀 가능성 없음
 
@@ -279,5 +280,5 @@ moderate/diverse: SKILL.md `Synthesize` 섹션의 generic 패턴 (unique_contrib
 | 모든 워커 fail | `failedWorkers` ≥ 요청 수, `responses.length: 0` | 사용자에게 즉시 보고 (provider outage 또는 task가 모든 모델 reject 트리거 — 후자는 false-premise 의심) |
 | `degradation` 다수 (active < min_viable) | engine이 `TeamDegradedError` throw | 가용 모델 풀 검토 후 narrower pool로 재실행. 동일 에러 재발 시 사용자 escalate |
 | `cooldown` 폭주 (다수 모델 cooldown으로 풀 고갈) | 새 deliberate 호출 시 fallback chain 짧아져 즉시 fail 또는 단일 provider만 남음 | provider auth/quota 점검. 일시적이면 시간 두고 재실행, 반복되면 사용자 escalate |
-| `modelSwaps` 결과가 task의 vendor policy 위반 (예: customer data → forbidden vendor) | `modelSwaps` array에 swap 기록 | 결과 폐기. narrower `--models` 풀로 재실행 |
+| `modelSwaps` 발생 | `modelSwaps` array에 swap 기록 | (a) task에 vendor policy 명시 + 위반 시 결과 폐기, narrower `--models` 풀로 재실행 (b) policy 미명시면 swap 진행 가능. 단 swap으로 같은 family가 워커 풀의 >50% 차지하면 broader pool로 re-run |
 | 결과 JSON에 `convergence`·`convergenceScore` 없음 (inspect 미실행) | deliberate만 호출됨 | inspect 호출 누락 — pipe해서 재해석. SKILL.md workflow 5단계 |
