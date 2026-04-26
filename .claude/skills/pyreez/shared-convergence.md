@@ -93,7 +93,7 @@ task `<output-format>` 안에 박는다:
 - [ ] 자동주입 중복 ("be objective", "indicate confidence") 없음?
 - [ ] secrets/internal paths 마스킹?
 - [ ] >150자면 XML 구조?
-- [ ] 복합 출력이면 positive + negative example 각 1개?
+- [ ] 복합 출력이면 positive + negative example 각 1개? (옵션마다 동일 구조 반복 출력이면 negative만으로 충분)
 
 ---
 
@@ -280,5 +280,5 @@ moderate/diverse: SKILL.md `Synthesize` 섹션의 generic 패턴 (unique_contrib
 | 모든 워커 fail | `failedWorkers` ≥ 요청 수, `responses.length: 0` | 사용자에게 즉시 보고 (provider outage 또는 task가 모든 모델 reject 트리거 — 후자는 false-premise 의심) |
 | `degradation` 다수 (active < min_viable) | engine이 `TeamDegradedError` throw | 가용 모델 풀 검토 후 narrower pool로 재실행. 동일 에러 재발 시 사용자 escalate |
 | `cooldown` 폭주 (다수 모델 cooldown으로 풀 고갈) | 새 deliberate 호출 시 fallback chain 짧아져 즉시 fail 또는 단일 provider만 남음 | provider auth/quota 점검. 일시적이면 시간 두고 재실행, 반복되면 사용자 escalate |
-| `modelSwaps` 발생 | `modelSwaps` array에 swap 기록 | (a) task에 vendor policy 명시 + 위반 시 결과 폐기, narrower `--models` 풀로 재실행 (b) policy 미명시면 swap 진행 가능. 단 swap으로 같은 family가 워커 풀의 >50% 차지하면 broader pool로 re-run |
+| `modelSwaps` 발생 | `modelSwaps` array에 swap 기록 | (a) task에 vendor policy 명시 + 위반 시 결과 폐기, narrower `--models` 풀로 재실행 (b) policy 미명시면 swap 진행 가능. 단 swap으로 같은 family가 워커 풀의 >50% 차지하면 broader pool로 re-run (c) swap이 same-provider 약모델 fallback(예: pro→flash)이면 결과 신뢰도 약화 caveat 명시, 가능 시 broader pool로 re-run |
 | 결과 JSON에 `convergence`·`convergenceScore` 없음 (inspect 미실행) | deliberate만 호출됨 | inspect 호출 누락 — pipe해서 재해석. SKILL.md workflow 5단계 |
