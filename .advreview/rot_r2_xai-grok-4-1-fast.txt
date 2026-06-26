@@ -1,0 +1,25 @@
+Finding 1
+target: Analyst A
+steelman: PostgreSQL logical replication and read replicas are mature, yet unplanned multi-region or 10x write scaling by month 5 requires either Citus or application-level sharding that consumes weeks of DevOps effort a four-person team cannot absorb, whereas MongoDB sharding is a configuration change.
+weakness: The scenario collapses under adversarial customer input received at month 4: a single enterprise prospect demands contractual data residency in two sovereign jurisdictions plus write durability guarantees that force immediate geographic replication. PostgreSQL’s read-only replicas plus Citus introduce foreign-key and transaction boundary failures across shards that must be resolved before the contract can be signed; MongoDB replica sets with zone sharding satisfy the residency clauses in days. The six-month MVP deadline therefore converts an “unplanned scaling” item into a lost deal rather than postponed infrastructure work.
+evidence: Logical replication preserves foreign-key semantics only within a single region; crossing regions requires either two-phase commit emulation or relaxed consistency that the customer explicitly rejects in the RFP, whereas MongoDB zone sharding encodes residency directly in the shard key without altering application transaction boundaries.
+falsification: Present the identical residency clause to both stacks in a one-week contract simulation and measure calendar days until a signed, production-feasible deployment exists; equality falsifies the weakness.
+verdict: high MEDIUM
+
+Finding 2
+target: Analyst B
+steelman: When the unit of work is a single tenant-scoped aggregate, MongoDB avoids relational impedance mismatch and the team ships faster.
+weakness: Adversarial data import arrives at month 5 in the form of a customer CSV containing historical multi-tenant records that must be merged under existing unique constraints and foreign-key relationships already enforced for compliance reporting. PostgreSQL accepts the import inside a single transaction that aborts on any violation; MongoDB requires application-level reconciliation scripts whose correctness cannot be proven before the 6-month launch, producing either data loss or a missed regulatory checkpoint.
+evidence: A relational engine validates uniqueness and referential integrity at ingest time without extra code; a document store can only surface conflicts after separate aggregation queries, shifting the validation burden onto the four-person team already at capacity.
+falsification: Execute the exact customer CSV import on both schemas and record whether any integrity violation is rejected before the data become visible to the application; zero undetected violations falsifies the weakness.
+verdict: medium MEDIUM
+
+Finding 3
+target: Analyst A
+steelman: JSONB plus GIN indexes plus modern ORMs narrow the gap for nested domain structures so that PostgreSQL remains viable.
+weakness: An adversarial product requirement surfaces at month 3.5: the collaborative feature must support arbitrary per-customer plug-in schemas that mutate after documents are already persisted, while preserving atomic append-only history for legal audit. PostgreSQL’s JSONB forces either repeated partial-index rebuilds or a separate audit table whose foreign keys break when the plug-in schema changes; MongoDB accepts schema-per-document plus built-in change streams that emit the audit trail without index churn.
+evidence: GIN index maintenance on a mutating JSONB column triggers full re-indexing on any key addition, whereas MongoDB maintains per-document indexes and change streams without global lock or rebuild.
+falsification: Load 10 000 documents with three successive plug-in schema extensions and compare p99 write latency and index size growth; parity falsifies the weakness.
+verdict: medium LOW
+
+None exists within its constraints.

@@ -1,0 +1,47 @@
+**Weakness 1: Rapid, unplanned schema evolution in early MVP phase**
+
+Steelman: PostgreSQL enforces schema upfront, which is good for production reliability; but an MVP's data model is fundamentally uncertain, and each breaking schema change requires explicit ALTER TABLE migrations, downtime planning, and application-code coordination.
+
+Weakness: A 4-person team discovers mid-development (month 3–4) that the core entity structure is incompatible with their relational design—e.g., they pivoted from single-user to multi-tenant, or added a role-based access system that requires reshaping permissions from a column to a separate table. PostgreSQL forces them to write and test migrations; MongoDB teams add fields and update validators without locking. Under deadline pressure, the cumulative overhead of coordination (testing both old and new schema in parallel, validating migrations on production-like data, rolling back if issues surface) costs developer-hours that exceed MongoDB's schema-on-read complexity. The proposal assumes the schema is stable enough by MVP launch that > 2 major breaking changes are unlikely—a fragile assumption for early-stage products.
+
+Evidence: PostgreSQL's migration friction is real (explicit versioning, rollback testing, DDL locks on growing tables) but mitigated by tools like Alembic or Flyway. However, these tools still require the team to *think about* schema versions and carefully coordinate application deployments. MongoDB's duck-typing side-steps this coordination but introduces its own risk: inconsistent document shapes if validation is loose. The question is which risk profile suits a deadline-driven 4-person team. For teams with poor migration discipline, PostgreSQL's migration cost scales linearly with change frequency; MongoDB's cost is mostly upfront (schema validation infrastructure) then flat.
+
+Falsification: Measure actual developer-hours spent on schema migration planning, testing, and rollout across 4+ unplanned breaking changes in a 6-month window. If PostgreSQL migration overhead averages < 6 hours per breaking change (not including feature coding), this condition does not fire. If overhead averages > 12 hours, it does.
+
+Verdict: **MEDIUM severity, MEDIUM confidence.** Real friction exists, but modern tooling and disciplined processes reduce it. The condition fires only if (a) the team lacks migration discipline, (b) schema changes are truly unplanned (not product-hypothesis refinement), and (c) the team uses neither Alembic nor similar tools.
+
+---
+
+**Weakness 2: Deeply nested, frequently updated domain structures without clear relational decomposition**
+
+Steelman: PostgreSQL's JSONB + GIN indexes can store and query nested data; but if the MVP's core feature involves a tree or DAG (e.g., collaborative document with nested comments, reactions, version history per comment), representing this relationally requires either (a) normalization into 4–5 tables with JOIN overhead on every read, or (b) JSONB with application-layer schema validation and indexed nested-field management, both of which add complexity.
+
+Weakness: MongoDB's native document model allows the entire tree to be stored and updated atomically in a single document. A comment thread with 50 replies + nested reactions + edit history is one document in MongoDB; in PostgreSQL, it's either a JSONB field (requiring custom validation and index management) or a normalized structure (requiring multi-table transactional integrity on every update). The MongoDB path: insert nested comment → atomically append to parent → done. The PostgreSQL path: insert comment row → update parent row's JSONB → re-validate the entire nested structure → re-index. For a 4-person team, the code complexity of maintaining schema consistency in the JSONB case, or managing multi-table atomicity in the relational case, is a silent tax on feature velocity. The proposal assumes the domain model decomposes naturally into tables—an assumption that fails for document-centric products.
+
+Evidence: JSONB + GIN indexes are performant, but they require the application to enforce schema—e.g., if a nested comment must have `{ id, author, text, created_at, reactions }`, PostgreSQL does not validate this shape. MongoDB's schema validation (via JSON Schema) enforces it at the database layer. This asymmetry means PostgreSQL teams either accept inconsistent document shapes (risky) or duplicate validation logic in the application (costly). Modern ORMs (Pydantic, SQLAlchemy with JSONB) reduce this gap, but the friction remains: a JSONB update in FastAPI requires a round-trip to the ORM layer; MongoDB allows direct atomic updates.
+
+Falsification: Prototype both architectures for the MVP's primary feature. Measure (a) query latency (avg, p99) on a tree with 100+ nodes, (b) update latency (avg, p99) when appending a nested comment, and (c) LOC required for schema validation + index management. If PostgreSQL latency is ≤5% slower and LOC is ≤20% higher, this condition does not fire.
+
+Verdict: **MEDIUM severity, MEDIUM-LOW confidence.** The condition is real but marginal; JSONB is a reasonable compromise. Confidence is low because many MVPs don't actually have this pattern, and modern ORMs narrow the gap.
+
+---
+
+**Weakness 3: Unplanned horizontal scaling (geographic replication or write-throughput) within 6-month window**
+
+Steelman: PostgreSQL's logical replication and read replicas are mature; but if the MVP must scale to 2+ regions or 10x write throughput unexpectedly (e.g., viral adoption, new customer requirement), MongoDB's native replica sets and sharding are operationally simpler and faster to deploy than PostgreSQL's options (Citus license + setup, or application-level sharding).
+
+Weakness: By month 5, the team discovers they need multi-region replication or horizontal write-scaling that was not architected at MVP launch. PostgreSQL's scaling path requires either (a) standing up Citus (third-party tool, license cost, learning curve) or (b) implementing application-level sharding (complex, error-prone). MongoDB's path: enable sharding on the collection, choose a shard key, and let the database handle distribution. For a 4-person team without database DevOps experience, the PostgreSQL path is a 3–5 week detour; the MongoDB path is a configuration change. This assumes scaling is *unplanned*—if it's foreseeable, the architecture should account for it from the start. But many early-stage SaaS teams don't anticipate scaling until it happens.
+
+Evidence: PostgreSQL logical replication is well-documented and reliable, but it's read-only on replicas; write-scaling requires Citus or sharding. Citus has operational overhead (monitoring, failover orchestration, cost). MongoDB's sharding is built-in and documented. The cost asymmetry is real: PostgreSQL adds 40–60 hours [unverified] of DevOps work and $500–2000/mo [unverified] licensing or infrastructure cost; MongoDB adds 5–10 hours [unverified] of configuration and similar infrastructure cost. The proposal assumes scaling is not a surprise—i.e., the team had a scaling plan from day 1.
+
+Falsification: Run a deployment scenario: take a single-node PostgreSQL MVP (100GB data, 500 writes/sec) and convert to multi-region or 10x write capacity. Measure (a) calendar time to production, (b) engineer-hours, and (c) total cost of infrastructure + licensing. If PostgreSQL time + cost is ≤ MongoDB's time + cost, this condition does not fire.
+
+Verdict: **MEDIUM severity, MEDIUM confidence.** Realistic scenario (many startups hit hockey-stick growth), but the condition fires only if scaling is truly unplanned and the team is unprepared for DevOps work.
+
+---
+
+**Flawed premise surfaced:** The proposal assumes PostgreSQL's ACID guarantees and relational schema are universally advantageous for an MVP. In reality, for a 6-month MVP where data loss is recoverable (no financial transactions) and the schema is uncertain, MongoDB's schema flexibility and simpler operational model (especially with managed cloud services like Atlas) may be more pragmatic. The "default" should depend on workload shape, team skill, and time-to-market pressure, not on database maturity alone.
+
+---
+
+**Closing condition:** The proposal is acceptable if *all three* of the following hold: (1) the product schema is expected to stabilize within month 2 of development; (2) the domain model is primarily relational (no deeply nested structures updated as atomic units); and (3) scaling to multi-region or 10x write throughput is not anticipated within the 6-month window or is explicitly architected at launch. If any fails, a post-MVP migration path should be designed at the architecture stage.

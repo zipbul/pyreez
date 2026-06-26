@@ -1,0 +1,22 @@
+Finding 1
+steelman: PostgreSQL provides relational integrity and standardized querying from day one, reducing the risk of data anomalies that could surface in production for an early-stage SaaS product.
+weakness: When the MVP requires multiple rapid data-model iterations within the first three months because user feedback forces changes to nested or polymorphic structures, PostgreSQL forces downtime or complex migration scripts while MongoDB accepts the same changes via simple document updates.
+evidence: Each ALTER TABLE plus data backfill in a relational engine must be coordinated with deployment pipelines and tested for constraint violations, whereas a document store applies structural variation at write time without locking; a four-person team lacks dedicated DBA time to script and verify those migrations inside six-month deadlines.
+falsification: Instrument deployment frequency and time-to-first-customer-visible change over a two-week sprint where the schema is altered twice; if PostgreSQL cycle time remains within 20% of MongoDB, the weakness does not hold.
+verdict: critical MEDIUM
+
+Finding 2
+steelman: PostgreSQL’s mature tooling and ecosystem allow a small team to start with a single reliable store instead of adopting a second database later.
+weakness: When the MVP traffic pattern is dominated by high-write, low-consistency event or analytics streams that do not need joins, PostgreSQL’s WAL and vacuum overhead plus connection-pool tuning consume engineering hours that could otherwise ship features, while MongoDB’s document writes scale with less per-operation friction under the same load.
+evidence: Write amplification from full-row logging and autovacuum triggers measurable CPU spikes once insert rates exceed a few hundred per second on modest VPS instances; a four-person team without prior PostgreSQL production experience must either accept the overhead or spend cycles on configuration that a document database defers.
+falsification: Run identical write-heavy load tests on identically sized cloud instances for 48 hours and compare sustained insert latency plus developer time spent on tuning; if PostgreSQL requires no extra configuration effort, the weakness fails.
+verdict: high MEDIUM
+
+Finding 3
+steelman: PostgreSQL’s JSONB column type supplies enough flexibility to mimic document storage while retaining the option of relational constraints when needed.
+weakness: When the team’s primary language and ORMs are JavaScript-first and the six-month schedule leaves no calendar time for learning GIN indexes, JSONB query planning, or migration frameworks, the cognitive and integration overhead exceeds that of a native document store whose drivers match the application stack directly.
+evidence: Each developer must master an additional query dialect and index strategy for JSONB paths; with only four people splitting backend, frontend, DevOps, and customer work, context-switching cost delays feature completion past the launch window, whereas MongoDB queries map one-to-one with JavaScript objects.
+falsification: Track total hours spent on database-related learning and debugging during the first eight weeks of development; if the PostgreSQL track consumes fewer than 1.5× the MongoDB track, the condition does not materialize.
+verdict: medium LOW
+
+None exists within its constraints.

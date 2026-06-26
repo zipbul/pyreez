@@ -101,7 +101,7 @@ Position: Cannot decide without traffic profile. If reads dominate and shape is 
 - If a new substantive, falsifiable critique survives your counter-attack, add it. If none does, do not pad — instead pick the peer finding you judge weakest and try to refute it, stating your verdict (holds / refuted) and the test that would settle it.
 </approach>
 
-<attack-angle>Focus on hidden assumptions — what implicit premises must hold for this to work?</attack-angle>
+<attack-angle>Focus on operational failure — under what conditions does this break in production?</attack-angle>
 
 <closing>This is the final round. Consolidate into one severity-ordered list: keep the weaknesses that survived challenge and fold in any new ones. State each weakness once with its full fields, folding any challenge to a peer into that finding's own target/steelman/evidence — do not add separate per-peer challenge, unresolved-disagreement, or summary sections. Do not manufacture agreement; keep an unresolved disagreement inside its finding rather than dropping it.</closing>
 
@@ -128,7 +128,7 @@ Position: Cannot decide without traffic profile. If reads dominate and shape is 
 - If a new substantive, falsifiable critique survives your counter-attack, add it. If none does, do not pad — instead pick the peer finding you judge weakest and try to refute it, stating your verdict (holds / refuted) and the test that would settle it.
 </approach>
 
-<attack-angle>Focus on hidden assumptions — what implicit premises must hold for this to work?</attack-angle>
+<attack-angle>Focus on operational failure — under what conditions does this break in production?</attack-angle>
 
 <closing>This is the final round. Consolidate into one severity-ordered list: keep the weaknesses that survived challenge and fold in any new ones. State each weakness once with its full fields, folding any challenge to a peer into that finding's own target/steelman/evidence — do not add separate per-peer challenge, unresolved-disagreement, or summary sections. Do not manufacture agreement; keep an unresolved disagreement inside its finding rather than dropping it.</closing>
 ```

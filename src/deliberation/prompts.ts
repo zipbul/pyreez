@@ -419,7 +419,10 @@ export function buildAdversarialDebateR2(
   userParts.push(ADVERSARIAL_APPROACH_PEER);
 
   if (workerIndex != null) {
-    const angle = ATTACK_ANGLES[workerIndex % ATTACK_ANGLES.length]!;
+    // Rotate the angle by round so a later round forces a FRESH weakness-frame (anti template
+    // lock-in) instead of re-injecting each worker's R1 angle unchanged.
+    const shift = roundInfo?.current ? roundInfo.current - 1 : 0;
+    const angle = ATTACK_ANGLES[(workerIndex + shift) % ATTACK_ANGLES.length]!;
     userParts.push(`<attack-angle>${angle}</attack-angle>`);
   }
 
@@ -458,7 +461,9 @@ export function buildAdversarialDebateFollowUp(
   parts.push(ADVERSARIAL_APPROACH_PEER);
 
   if (workerIndex != null) {
-    const angle = ATTACK_ANGLES[workerIndex % ATTACK_ANGLES.length]!;
+    // Rotate by round (same as R2) so session-continuation rounds get a fresh weakness-frame.
+    const shift = roundInfo?.current ? roundInfo.current - 1 : 0;
+    const angle = ATTACK_ANGLES[(workerIndex + shift) % ATTACK_ANGLES.length]!;
     parts.push(`<attack-angle>${angle}</attack-angle>`);
   }
 
