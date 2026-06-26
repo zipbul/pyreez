@@ -51,3 +51,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # pyreez tracked files (DO NOT ignore):
 # .pyreez/models.jsonc — model definitions + benchmark data
 # .pyreez/config.jsonc — routing config
+
+# multi-model review measurement scratch (captures, judge reports, introspection)
+.advreview/
