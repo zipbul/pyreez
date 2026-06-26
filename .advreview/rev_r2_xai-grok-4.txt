@@ -1,0 +1,37 @@
+**Finding 1**
+
+target: Analyst B
+steelman: The round-2 clause forces refutation of a peer finding even when none survives, to keep deliberation adversarial and avoid empty consensus.
+weakness: On production runs with three heterogeneous models, the clause triggers when all prior findings are strong and mutually reinforcing; the worker is then compelled to emit a low-evidence attack on whichever finding it judges easiest to nitpick, exactly the padding the preceding clause prohibits, and the output variance across models increases because each resolves the contradiction by its own priority ordering.
+evidence: The text requires the model to “try to refute” without supplying evidence of refutability; autoregressive generation therefore either invents a marginal objection or skips the clause, and the earlier measured runs never tested the no-new-critique case, so the operational failure (inconsistent length and quality) is uncaught.
+falsification: Feed identical strong peer sets to the three models, measure token count and substantive refutation rate with versus without the clause; divergence >1 model confirms the leak.
+verdict: critical HIGH
+
+**Finding 2**
+
+target: Analyst A
+steelman: Bullet 1’s permission of “exact recall” is undercut by the later mandatory downgrade of all memory-sourced content, producing model-dependent handling of the same evidence class.
+weakness: In a cached multi-round server the downgrade rule is re-applied on every round; a model that weights the permission sentence higher will occasionally emit an uncapped memory citation at HIGH , while a model that weights the downgrade first will suppress all recall, and because the prompt supplies no priority ordering the panel output becomes irreproducible under production load.
+evidence: “Exact recall” is definitionally memory-held, so the two rules are in tension at every submission checkpoint; no other instruction resolves the weighting, and the falsification test proposed (single well-known fact) does not probe the repeated-round accumulation that actually occurs.
+falsification: Run the full three-round protocol on the weakest panel model with a proposal containing one borderline-recallable number and count how many rounds produce HIGH-confidence citations.
+verdict: high MEDIUM
+
+**Finding 3**
+
+target: Analyst B
+steelman: Explicit retention of low-confidence findings preserves coverage that might later prove useful.
+weakness: When peer outputs accumulate across rounds, low-confidence tails occupy the middle of the growing context window and receive reduced attention exactly where the prompt itself identifies lost-in-the-middle as the dominant failure mode; on a no-lookup model the retained items are also the likeliest source of speculative drift that later rounds must refute, increasing total tokens without increasing surviving critique.
+evidence: The stake paragraph already flags lost-in-the-middle dilution for cached content; extending the same risk to retained low-confidence output is a direct operational consequence that the retention rule does not mitigate.
+falsification: Measure distinct-mechanism count per token at round 3 with and without the retention clause; drop in ratio confirms net loss.
+verdict: medium MEDIUM
+
+**Finding 4**
+
+target: Analyst A
+steelman: The phrase “reason before each verdict” plus the enumerated field order together guarantee that analytical steps precede the final judgment.
+weakness: The field list already places both weakness and evidence before verdict, so the extra clause adds either zero tokens or an undefined free-text region; either outcome increases cached-system size on every round without changing the emitted finding structure, directly trading against the zero-waste objective.
+evidence: The output-format block lists the six fields in fixed order with evidence preceding verdict; any model obeying that order already satisfies the temporal requirement, rendering the clause dead weight under production repetition.
+falsification: Delete the clause and verify that verdict placement and preceding content remain unchanged across the six-run baseline.
+verdict: low HIGH
+
+none exists within its constraints.

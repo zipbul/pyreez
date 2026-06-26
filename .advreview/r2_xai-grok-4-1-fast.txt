@@ -1,0 +1,25 @@
+Finding 1
+target: Analyst B
+steelman: PostgreSQL is still the safer default because it preserves data integrity, keeps future relational options open, and can store semi-structured fields when needed.
+weakness: In production, a 4-person team rolling out tenant-specific fields under time pressure will hit lock contention or dual-write inconsistencies on every ALTER TABLE or JSONB expansion; the resulting blocked deploys or data-reconciliation incidents directly extend the six-month window, whereas MongoDB accepts the shape change on the next insert without coordination.
+evidence: Each schema revision forces sequential migration execution plus staging validation plus release coupling; under weekly pivots this compounds to measurable deployment queueing that MongoDB sidesteps by design.
+falsification: Instrument the next three production deploys and count blocked releases attributable to schema coordination; zero blocks falsifies the scenario.
+verdict: critical MEDIUM
+
+Finding 2
+target: Analyst A
+steelman: PostgreSQL's read-replica architecture and mature ecosystem are proven at scale and more operationally transparent than MongoDB's eventual-consistency tradeoffs.
+weakness: When the MVP reaches early traction (month 4-5) on a single primary node, any write-throughput saturation forces either manual sharding code or Citus re-architecture that the four developers cannot complete without halting feature work, creating a production outage or user-loss event that MongoDB's native sharding avoids.
+evidence: Write scaling in PostgreSQL requires application-level shard-key logic or extension adoption; both introduce new failure surfaces and coordination overhead exactly when the team has no spare capacity.
+falsification: Replay production write traffic at 3× expected volume on a single Postgres instance and measure time to first saturation alert; sustained operation past launch date falsifies the break.
+verdict: high MEDIUM
+
+Finding 3
+target: Analyst B
+steelman: PostgreSQL is operationally mature, so it should reduce risk for a small team that cannot afford surprises.
+weakness: Under continuous product discovery with no dedicated schema owner, every index regression or query-plan change becomes an on-call incident that competes with feature delivery; the overhead turns database maintenance into the critical path for the MVP launch, whereas MongoDB absorbs shape and indexing changes with lower operational coordination.
+evidence: Schema rigidity plus tuning responsibility create per-change overhead proportional to iteration rate; when the team size is four and discovery is ongoing, that overhead directly delays experiments.
+falsification: Run a two-sprint simulation that logs all database-related interrupts; if they consume under 5 % of developer time the failure mode does not apply.
+verdict: medium LOW
+
+None exists within its constraints.

@@ -1,0 +1,22 @@
+**1. Schema churn is high and the shape is still unknown**
+- **steelman:** The MVP’s core entities are sparse, nested, and likely to keep changing every sprint, so the team wants the database to tolerate frequent field additions, deletions, and renames without blocking releases.
+- **weakness:** If the product is still discovering its data model, PostgreSQL can become the slower path because each structural change tends to trigger migration work, query updates, and coordination around constraints. That is manageable when the schema stabilizes quickly; it is a drag when the schema is a moving target. In that case, MongoDB’s document-first model is simply less friction for the first 6 months.
+- **evidence:** Mechanism: relational design rewards stable shapes and explicit relationships. When the shape changes often, the team either keeps running migrations or hides variability in JSON-like columns, which reduces some pain but does not eliminate the need to manage indexing, validation, and query behavior. MongoDB lets the team store the evolving shape directly, so the main loop is product iteration rather than schema maintenance.
+- **falsification:** Implement one real domain object and ship three plausible schema changes against both stacks; if PostgreSQL needs materially more code changes, migrations, or rework, this weakness holds.
+- **verdict:** high, MEDIUM
+
+**2. Most hot-path operations are whole-document reads/writes with few joins**
+- **steelman:** The MVP mainly fetches and saves one aggregate at a time per request, and cross-record invariants are rare or can be deferred.
+- **weakness:** Under that access pattern, PostgreSQL’s relational advantages are mostly unused. A normalized design adds joins, schema design decisions, and more moving parts than the workload needs, while MongoDB matches the workload’s shape more directly. If the team is not yet doing cross-entity reporting, multi-row transactions, or strong relational constraints, Postgres can be slower to build against and no better at the actual job.
+- **evidence:** Mechanism: when the app mostly manipulates one aggregate per request, the database is behaving like a document store. Postgres can approximate that, but the team still pays for relational modeling decisions, or it gives them up by leaning on semi-structured columns. MongoDB lets the aggregate live as a document, so implementation and query paths stay shorter.
+- **falsification:** Trace the top request types and count how many actually need joins or cross-document consistency; if the majority are single-document operations, this condition is real.
+- **verdict:** high, MEDIUM
+
+**3. The team cannot commit to a stable relational model early enough to avoid rework**
+- **steelman:** A 4-person team launching in 6 months may care more about PMF discovery than long-term data hygiene, and it may not yet know the right entity boundaries.
+- **weakness:** If the team is still guessing at entity boundaries and cannot lock a schema early, PostgreSQL can increase churn: model revisions, migration backfills, ORM reshaping, and constraint edits all consume scarce engineer time. MongoDB pushes more of that cost later, which is better when the main objective is to learn quickly and avoid over-committing to the wrong structure.
+- **evidence:** Mechanism: relational systems force earlier design choices. When those choices keep changing, rework compounds. For a tiny team, that rework is not abstract debt; it is feature delay. MongoDB reduces the penalty for being wrong early, so it can be the less harmful default while the product shape is still uncertain.
+- **falsification:** Time-box the schema design for one core slice; if the team can stabilize the model quickly and keep it stable for several sprints, this failure mode largely disappears.
+- **verdict:** medium, LOW
+
+Acceptable only if the MVP already has a stable relational core, low schema churn, and a real need for joins or transaction-heavy consistency; otherwise these failure modes remain live.

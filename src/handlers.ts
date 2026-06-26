@@ -92,6 +92,8 @@ export async function handleDeliberate(
     subject?: string;
     aggregation?: string;
     file_access?: boolean;
+    web_access?: boolean;
+    reasoning_effort?: DeliberateInput["reasoning_effort"];
   },
 ): Promise<HandlerResult> {
   return logRun(config, "deliberate", async () => {
@@ -132,6 +134,8 @@ export async function handleDeliberate(
         ...(args.aggregation ? { aggregation: args.aggregation as DeliberateInput["aggregation"] } : {}),
         ...(args.onRound ? { onRound: args.onRound } : {}),
         ...(args.file_access ? { fileAccess: true } : {}),
+        ...(args.web_access ? { webAccess: true } : {}),
+        ...(args.reasoning_effort ? { reasoning_effort: args.reasoning_effort } : {}),
       };
 
       const result = await config.deliberateFn(input);

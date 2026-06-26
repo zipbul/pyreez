@@ -32,7 +32,7 @@ import {
   createSharedContext,
   addRound,
 } from "./shared-context";
-import { extractProvider } from "./provider-util";
+import { extractProvider, providerGetsWebTools } from "./provider-util";
 import { classifyError, findLLMClientError, isRetryableError, normalizeErrorMessage, type CooldownEntry, type CooldownErrorType, type CooldownManager } from "./cooldown";
 
 import type { RoundInfo } from "./prompts";
@@ -128,14 +128,19 @@ export interface EngineDeps {
     messages: ChatMessage[],
     params?: GenerationParams,
   ) => Promise<ChatResult>;
-  /** Build R1 messages for a protocol. */
+  /**
+   * Build R1 messages for a protocol. `webAccess` is per-worker (the engine gates the global
+   * flag by provider capability), so a tool-less provider gets the no-lookup prompt even in a
+   * --web-access run. Protocols other than adversarial_debate ignore it.
+   */
   readonly buildR1Messages: (
     ctx: SharedContext,
     instructions?: string,
     roundInfo?: RoundInfo,
     workerIndex?: number,
+    webAccess?: boolean,
   ) => ChatMessage[];
-  /** Build R2+ messages with other workers' responses (full rebuild). */
+  /** Build R2+ messages with other workers' responses (full rebuild). `webAccess` is per-worker. */
   readonly buildR2Messages?: (
     ctx: SharedContext,
     otherResponses: readonly WorkerResponse[],
@@ -143,6 +148,7 @@ export interface EngineDeps {
     instructions?: string,
     roundInfo?: RoundInfo,
     workerIndex?: number,
+    webAccess?: boolean,
   ) => ChatMessage[];
   /** Build follow-up message for session continuation in R2+. */
   readonly buildFollowUp?: (
@@ -182,7 +188,12 @@ export function parseConfidence(text: string): "high" | "medium" | "low" | undef
   const normalized = text.toLowerCase();
   // Match patterns: "HIGH confidence", "confidence: HIGH", "HIGH:", "[HIGH]", "**HIGH**",
   // Korean labels: "신뢰도: HIGH" (confidence-related Korean labels only)
-  const pattern = /\b(high|medium|low)\s*(?:confidence|:)|\bconfidence\s*:\s*(high|medium|low)\b|\[(high|medium|low)\]|\*\*(high|medium|low)\*\*|신뢰도\s*:\s*(high|medium|low)\b/gi;
+  // Alternatives 2 and 5 tolerate optional markdown emphasis (**bold**/__/_) around the label and
+  // value (e.g. "**confidence**: HIGH"), with word boundaries to block substrings like
+  // "overconfidence:" or value "lower"/"mediumship".
+  // The two lookbehinds block a letter before the label even across markdown emphasis, so
+  // "overconfidence:" AND "over**confidence**:" are both rejected, while "**confidence**:" passes.
+  const pattern = /\b(high|medium|low)\s*(?:confidence|:)|(?<![a-z])(?<![a-z][*_]{1,2})[*_]{0,2}confidence[*_]{0,2}\s*:\s*\[?[*_]{0,2}(high|medium|low)\b|\[(high|medium|low)\]|\*\*(high|medium|low)\*\*|[*_]{0,2}신뢰도[*_]{0,2}\s*:\s*\[?[*_]{0,2}(high|medium|low)\b/gi;
   const counts = { high: 0, medium: 0, low: 0 };
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(normalized)) !== null) {
@@ -239,11 +250,8 @@ export function levenshteinDistance(a: string, b: string): number {
  * all worker responses. 0.0 = identical, 1.0 = maximally different.
  * Returns null when fewer than 2 responses or all responses are empty.
  *
- * Demystifying MAD (arXiv 2601.19921, Jan 2026): initial answer diversity
- * correlates with debate success. Low R1 diversity is a leading indicator that
- * heterogeneous models converged before debate even started — usually because
- * the question pre-determined the answer. Host should reframe (see
- * HOST_QUESTIONING_DEPTH Rule 2).
+ * Low R1 diversity signals that workers converged before debate even started —
+ * typically because the question pre-determined the answer. Host should reframe.
  */
 export function computeR1Diversity(round: Round): number | null {
   const responses = round.responses;
@@ -268,10 +276,6 @@ export function computeR1Diversity(round: Round): number | null {
  * Detect minority dissent — when N-1 workers cluster on the same answer and
  * one outlier disagrees with HIGH confidence, surface the outlier so the host
  * doesn't auto-trust the majority.
- *
- * Defense against debate hacking (arXiv 2510.20963) and the "majority pressure
- * suppresses correct minority" failure documented in arXiv 2509.11035 (ConfMAD)
- * and "Can LLM Agents Really Debate?" (arXiv 2511.07784).
  *
  * Heuristic: requires N≥3. Compute each response's average distance to peers.
  * If exactly one response has avg distance > 0.50 AND all the rest cluster
@@ -321,16 +325,16 @@ export function detectMinorityDissent(round: Round): string | null {
   const outlier = responses[outlierIdx]!;
   if (outlier.confidence !== "high") return null;
 
-  return `minority_dissent: worker ${outlier.model} (HIGH confidence) disagrees with the majority cluster — review the dissent before adopting the majority position. Majority pressure can suppress correct minority answers (ConfMAD arXiv 2509.11035, debate hacking arXiv 2510.20963).`;
+  return `minority_dissent: worker ${outlier.model} (HIGH confidence) disagrees with the majority cluster — review the dissent before adopting the majority position. Majority pressure can suppress correct minority answers.`;
 }
 
 /**
  * Detect R1 conformity — all workers report HIGH confidence AND their responses
  * are textually similar (Levenshtein change rate < 0.30 between every pair).
  *
- * Signal of the failure mode in arXiv 2509.14034 (ConfMAD): when most agents
- * agree confidently in R1, debate may be locked in even if the consensus is wrong.
- * Returns a warning string for the host, or null when the signal is absent.
+ * Signal that when most agents agree confidently in R1, debate may be locked
+ * in even if the consensus is wrong. Returns a warning string for the host, or
+ * null when the signal is absent.
  */
 export function detectConformity(round: Round): string | null {
   const responses = round.responses;
@@ -351,7 +355,7 @@ export function detectConformity(round: Round): string | null {
     }
   }
   if (pairs === 0) return null;
-  return `r1_conformity_suspected: all ${responses.length} workers reported HIGH confidence with textually similar answers — verify minority dissent was not suppressed (ConfMAD arXiv 2509.14034).`;
+  return `r1_conformity_suspected: all ${responses.length} workers reported HIGH confidence with textually similar answers — verify minority dissent was not suppressed.`;
 }
 
 function checkConvergence(
@@ -507,6 +511,10 @@ async function callWithFallback(
 
   // Build messages — session continuation if history exists and model unchanged, full rebuild otherwise
   const buildMessages = (): ChatMessage[] => {
+    // Per-worker web access: a global --web-access run only actually grants tools to providers
+    // that support them (claude). Gate the verify-with-tools PROMPT on the SAME capability so a
+    // tool-less swapped-in/non-anthropic worker gets the no-lookup contract, not "fetch the page".
+    const workerWebAccess = (input.webAccess ?? false) && providerGetsWebTools(currentModel);
     // Session continuation: append follow-up to existing history (only if same model)
     if (isR2Plus && activeHistory && deps.buildFollowUp) {
       const lastRound = ctx.rounds[ctx.rounds.length - 1];
@@ -523,9 +531,9 @@ async function callWithFallback(
       const ownPrevious = lastRound
         ? lastRound.responses.find((r) => r.workerIndex === workerIndex)
         : undefined;
-      return deps.buildR2Messages(ctx, otherResponses, ownPrevious, input.workerInstructions, roundInfo, workerIndex);
+      return deps.buildR2Messages(ctx, otherResponses, ownPrevious, input.workerInstructions, roundInfo, workerIndex, workerWebAccess);
     }
-    return deps.buildR1Messages(ctx, input.workerInstructions, roundInfo, workerIndex);
+    return deps.buildR1Messages(ctx, input.workerInstructions, roundInfo, workerIndex, workerWebAccess);
   };
 
   // Try original model

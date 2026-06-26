@@ -210,6 +210,26 @@ describe("ClaudeCliProvider", () => {
     expect(args).toContain("Read,Glob,Grep,Bash(git:*)");
   });
 
+  it("should enable web tools (WebSearch,WebFetch) when webAccess is true; cwd stays /tmp", async () => {
+    setSpawnResult(JSON.stringify({ result: "ok", is_error: false }));
+    const provider = new ClaudeCliProvider();
+    await provider.chat({ model: "anthropic/claude-opus-4.6", messages: [{ role: "user", content: "Hi" }], webAccess: true });
+    const args = spawnMod.spawnWithIdleTimeout.mock.calls[0]![0] as string[];
+    const toolsIdx = args.indexOf("--tools");
+    expect(args[toolsIdx + 1]).toBe("WebSearch,WebFetch");
+    const opts = spawnMod.spawnWithIdleTimeout.mock.calls[0]![1] as { cwd: string };
+    expect(opts.cwd).toBe("/tmp"); // web tools don't need the project dir
+  });
+
+  it("should combine file + web tools when both are set", async () => {
+    setSpawnResult(JSON.stringify({ result: "ok", is_error: false }));
+    const provider = new ClaudeCliProvider();
+    await provider.chat({ model: "anthropic/claude-opus-4.6", messages: [{ role: "user", content: "Hi" }], fileAccess: true, webAccess: true });
+    const args = spawnMod.spawnWithIdleTimeout.mock.calls[0]![0] as string[];
+    const toolsIdx = args.indexOf("--tools");
+    expect(args[toolsIdx + 1]).toBe("Read,Glob,Grep,Bash(git:*),WebSearch,WebFetch");
+  });
+
   // -- Error: non-zero exit --
 
   it("should throw LLMClientError when CLI exits with non-zero code", async () => {
@@ -287,5 +307,83 @@ describe("ClaudeCliProvider", () => {
     await provider.chat({ model: "anthropic/claude-opus-4.6", messages: [{ role: "user", content: "Hi" }] });
     const opts = spawnMod.spawnWithIdleTimeout.mock.calls[0]![1] as { env: Record<string, string | undefined> };
     expect(opts.env.CLAUDECODE).toBeUndefined();
+  });
+
+  // -- Token usage / cache observability --
+
+  it("should expose token usage from claude CLI output", async () => {
+    setSpawnResult(JSON.stringify({
+      result: "ok",
+      is_error: false,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_creation_input_tokens: 200,
+        cache_read_input_tokens: 1500,
+      },
+    }));
+    const provider = new ClaudeCliProvider();
+    const res = await provider.chat({
+      model: "anthropic/claude-opus-4.6",
+      messages: [{ role: "user", content: "Hi" }],
+    });
+    expect(res.usage).toBeDefined();
+    expect(res.usage!.completion_tokens).toBe(50);
+    // prompt_tokens = uncached + cache_creation + cache_read (all are input)
+    expect(res.usage!.prompt_tokens).toBe(1800);
+    expect(res.usage!.total_tokens).toBe(1850);
+    expect(res.usage!.cached_tokens).toBe(1500);
+  });
+
+  it("should handle missing usage gracefully (no usage field)", async () => {
+    setSpawnResult(JSON.stringify({ result: "ok", is_error: false }));
+    const provider = new ClaudeCliProvider();
+    const res = await provider.chat({
+      model: "anthropic/claude-opus-4.6",
+      messages: [{ role: "user", content: "Hi" }],
+    });
+    expect(res.usage).toBeUndefined();
+  });
+
+  it("forwards reasoning_effort via --effort flag", async () => {
+    setSpawnResult(JSON.stringify({ result: "ok", is_error: false }));
+    const provider = new ClaudeCliProvider();
+    await provider.chat({
+      model: "anthropic/claude-opus-4.7",
+      messages: [{ role: "user", content: "Hi" }],
+      reasoning_effort: "high",
+    });
+    const args = spawnMod.spawnWithIdleTimeout.mock.calls[0]![0] as string[];
+    const idx = args.indexOf("--effort");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("high");
+  });
+
+  it("omits --effort when reasoning_effort not set", async () => {
+    setSpawnResult(JSON.stringify({ result: "ok", is_error: false }));
+    const provider = new ClaudeCliProvider();
+    await provider.chat({
+      model: "anthropic/claude-opus-4.7",
+      messages: [{ role: "user", content: "Hi" }],
+    });
+    const args = spawnMod.spawnWithIdleTimeout.mock.calls[0]![0] as string[];
+    expect(args).not.toContain("--effort");
+  });
+
+  it("should handle partial usage (only input_tokens + output_tokens, no cache)", async () => {
+    setSpawnResult(JSON.stringify({
+      result: "ok",
+      is_error: false,
+      usage: { input_tokens: 80, output_tokens: 20 },
+    }));
+    const provider = new ClaudeCliProvider();
+    const res = await provider.chat({
+      model: "anthropic/claude-opus-4.6",
+      messages: [{ role: "user", content: "Hi" }],
+    });
+    expect(res.usage!.prompt_tokens).toBe(80);
+    expect(res.usage!.completion_tokens).toBe(20);
+    expect(res.usage!.total_tokens).toBe(100);
+    expect(res.usage!.cached_tokens).toBeUndefined();
   });
 });

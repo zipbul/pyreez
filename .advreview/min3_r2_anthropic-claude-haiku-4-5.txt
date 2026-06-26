@@ -1,0 +1,67 @@
+No preamble.
+
+---
+
+**Finding 1: Schema Churn Under Unvalidated Product Model**
+
+Target: Analyst B
+
+Steelman: PostgreSQL enforces schema discipline and prevents inconsistent data, mitigating the risk of unvalidated records entering the system.
+
+Weakness: When the MVP faces 2+ significant product pivots in the 6-month window, each requiring schema changes (new entities, field additions, relationship restructuring), PostgreSQL imposes a cumulative time cost through migrations, rollbacks, and re-validation that exceeds MongoDB's schemaless tolerance. A 4-person team without dedicated database personnel absorbs [unverified] 2–6 hours per major schema iteration (design, test, backfill, deploy, monitor), totaling 8–24 hours [unverified] over the runway. MongoDB absorbs field churn via sparse documents and zero-downtime deploys, preserving feature velocity.
+
+Evidence: Schema changes in PostgreSQL require ALTER TABLE operations (blocking or online migration), foreign-key adjustments, ORM updates, and constraint validation. A single overlooked index or constraint violation forces rollback and re-testing. Analyst B claims this is "critical" severity with "HIGH" confidence, asserting that repeated schema changes add "days per iteration." However, B's deterministic check—measuring calendar days from decision to deployed code—is contingent on team practices (migration tooling, CI/CD maturity, code-review cadence), not inherent to PostgreSQL. HIGH confidence requires a deterministic outcome the database itself determines; here, calendar impact varies from hours (experienced teams with PostgreSQL 11+ DDL optimizations and proper CI/CD) to days (inexperienced teams with manual migration processes). Severity should be "high," not "critical," because modern PostgreSQL versions (11+) optimize ADD COLUMN and similar operations to avoid full table rewrites. Analyst A's falsification (count schema changes in planned sprints and measure deployment time per change) is immediately actionable and sound.
+
+Falsification: Document the three most likely product pivots and measure calendar days from decision to stable deployment for each. If all average under 1 day using PostgreSQL 11+ and automated CI/CD pipelines, this weakness does not apply.
+
+Verdict: high | MEDIUM
+*Applies only if: (a) unvalidated product direction with 2+ likely pivots in 6 months, (b) no pre-locked schema, (c) team lacks migration tooling or DevOps infrastructure.*
+
+---
+
+**Finding 2: Operational Complexity Tax Without Specialist Support**
+
+Steelman: PostgreSQL's monitoring ecosystem, connection management, and configuration tools provide a mature operational foundation that prevents data corruption and concurrency bugs.
+
+Weakness: A 4-person engineering team without a DevOps engineer or prior PostgreSQL production experience allocates [unverified] 5–15% of capacity to database administration: connection pool sizing, query plan analysis and index tuning, autovacuum/vacuum configuration, WAL management, and monitoring setup. Across 6 months (~1000 person-hours for 4 engineers), this consumes [unverified] 50–150 hours of non-feature work. This overhead is acute when the MVP handles concurrent user-generated document uploads (high write churn) without an ops engineer: autovacuum latency spikes and the default connection limit (100) is breached, causing "too many connections" outages that require 2–4 hours of diagnostic and tuning work per incident. MongoDB's managed replica sets and default configuration reduce the operational surface area without specialized tuning.
+
+Evidence: Connection pool misconfiguration is a documented failure mode in small PostgreSQL deployments; default pool sizes (pgBouncer defaults or application-level pooling) require load-based tuning that teams rarely perform before launch. Autovacuum tuning is mandatory for high-write workloads (Analyst B proposed the specific condition of 80% JSON-heavy writes); misconfiguration leads to bloat, lock contention, and latency spikes. Analyst B's load-test falsification (48-hour test at projected peak traffic with high write volume, checking for connection warnings and autovacuum alerts) is concrete but contingent on teams running load tests pre-launch—many small teams do not. The broader time cost (5–15% of capacity) is [unverified] but aligns with known patterns; actual costs depend on monitoring infrastructure and incident response speed.
+
+Falsification: (1) Run a 48-hour load test at projected MVP peak traffic with observed write/read ratio; absence of connection-limit and autovacuum-latency warnings falsifies the high-write case. (2) For the general case, measure actual DB-ops time in the first 2 sprints (configuration, monitoring, incident response); if it averages under 3 hours/week, this weakness is overstated.
+
+Verdict: high | MEDIUM
+*Applies only if: (a) no DevOps engineer on the 4-person team, (b) no prior production PostgreSQL experience, (c) non-trivial write load or expected connection concurrency.*
+
+---
+
+**Finding 3: Document-Centric Query Patterns and Denormalization Overhead**
+
+Steelman: PostgreSQL's normalized schema prevents data anomalies, enables relational queries (JOINs), and reduces application-layer inconsistency bugs.
+
+Weakness: If the MVP's primary access pattern is document-shaped—returning User + Comments + Tags + Metadata as a single JSON response for REST endpoints or real-time features—PostgreSQL's normalized schema forces one of three anti-patterns: (1) JOINs + reassembly, producing Cartesian-explosion row sets that the application reassembles, which is slow and error-prone; (2) N+1 queries, fetching comments and tags in separate calls, adding round-trip latency; or (3) denormalization anyway, storing comments/tags in JSONB columns and abandoning normalization's promised benefits. MongoDB stores documents natively: one query, one document, no reassembly. For a 4-person team without ORM/query-optimization expertise, this is faster to implement and debug.
+
+Evidence: REST APIs and real-time applications almost always return documents, not normalized row sets; the impedance mismatch is well-documented. Both Analyst A and B identified this pattern as real. Without prior ORM experience (SQLAlchemy, Django ORM, Prisma), a team may not know to use eager loading, query caching, or query-specific denormalization, leading to N+1 failures at moderate scale (tens of thousands of rows). Analyst B's falsification (measure p95 query latency at 10k and 50k rows) is concrete and achievable; if PostgreSQL with standard JOINs stays under 150 ms without extra denormalization, the weakness does not apply.
+
+Falsification: Measure p95 query latency for the three most common user-facing document queries at 10k and 50k rows: PostgreSQL with standard JOINs, PostgreSQL with JSONB denormalization, and MongoDB with native documents. If Postgres (standard JOINs) stays under 150 ms and requires less application code to produce the same output, the weakness is refuted.
+
+Verdict: medium | MEDIUM
+*Applies only if: (a) API-first or document-centric querying dominates access patterns, (b) team lacks prior ORM/query-optimization experience, (c) relational queries are not the core product value (e.g., analytics, reporting).*
+
+---
+
+**Finding 4: Automatic Data Expiry and Time-Based Lifecycle Management**
+
+Steelman: PostgreSQL provides robust data persistence and query consistency, requiring explicit cleanup logic for records that should expire.
+
+Weakness: If the MVP includes product-critical data that must expire automatically—sessions (invalidate after 30 min), temporary inbox items (discard after 7 days), event logs (purge after 30 days)—MongoDB's TTL index feature removes this burden from the application layer. PostgreSQL requires either scheduled batch jobs (cron or cloud scheduler) that delete old records at intervals, adding a separate operational concern, or partition-rotation strategies (e.g., DROP PARTITION after TTL), which is complex and error-prone for small teams. For a 4-person team already strapped for operational bandwidth, MongoDB's built-in TTL removes a moving part.
+
+Evidence: TTL is a native feature of MongoDB; PostgreSQL has no equivalent built-in support. Analyst A identified this as a real edge case for session-heavy applications or real-time feeds where stale data creates user-facing bugs or compliance issues. The falsification is sound: if batch cleanup jobs are acceptable and the product can tolerate records lingering for hours without visible defect, this weakness does not apply.
+
+Falsification: Enumerate all product-critical data that must expire. For each, ask: (1) Can a daily batch job safely remove stale records? (2) If cleanup fails for 24 hours, does the product experience a visible defect or compliance violation? If all answers are "batch jobs are safe," this weakness does not apply.
+
+Verdict: medium | MEDIUM
+*Applies only if: (a) product-critical data (not just convenience data) requires automatic expiry, (b) batch cleanup jobs are unacceptable (compliance risk or user-facing impact), (c) team cannot use external caching (Redis) to sidestep the problem.*
+
+---
+
+PostgreSQL is acceptable as the default only if the team has (DevOps expertise OR prior production Postgres experience) AND the schema is pre-locked AND the query model is relational-focused AND automatic expiry is not required; otherwise, MongoDB's lower operational burden and iteration velocity better serve a 6-month MVP.

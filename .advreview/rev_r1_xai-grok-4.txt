@@ -1,0 +1,31 @@
+**Finding 1**
+
+weakness: The output-format line "reason before each verdict" directly conflicts with the role line "No preamble before the first finding" and the strict field order that follows. On a no-lookup model this produces an extra sentence or clause before the first steelman/weakness block, violating the one-line-per-field discipline and injecting filler that the rest of the prompt never cancels.
+
+evidence: The role block opens with an explicit no-preamble rule; output-format then mandates "reason before each verdict" yet immediately prescribes the six-field sequence that already contains an "evidence" slot for the reasoning chain. No other instruction deletes or overrides the extra-text directive, so weaker models emit the mandated "reason" as free text.
+
+falsification: Remove the words "reason before each verdict" from output-format; re-run the identical worker prompt on the same three models for two rounds and confirm zero tokens appear before the first "steelman:" label.
+
+verdict: critical MEDIUM
+
+**Finding 2**
+
+weakness: The approach line "Every finding must be substantive and falsifiable" duplicates the role block's instruction to "attack each, drop any your own counter-attack defeats" plus the evidence-and-confidence rule that forces a concrete falsification field. The duplicate adds no new constraint on a no-lookup model yet is re-sent every round.
+
+evidence: Role already requires enumerating failure modes, attacking them, and retaining only those that survive counter-attack; the per-finding template then mandates an explicit falsification slot. Approach merely restates the conjunction.
+
+falsification: Delete the entire approach bullet; run two rounds on the same model set and verify that every emitted finding still contains a falsification line and that no new unfalsifiable claims appear.
+
+verdict: high MEDIUM
+
+**Finding 3**
+
+weakness: In round-2+ the fourth approach bullet ("If a new substantive, falsifiable critique survives your counter-attack, add it. If none does, do not pad") is already enforced by the role sentence "drop any your own counter-attack defeats or that only fire under conditions the proposal rules out, and keep the rest". The bullet adds no observable behavior change while increasing token count on every subsequent round.
+
+evidence: Role text plus the output-format rule to order by severity already tell the model what to retain and what to omit; the bullet simply paraphrases the same retention logic.
+
+falsification: Strip the fourth approach bullet, re-inject the shortened prompt in round 2, and confirm that retained findings and total token count are statistically indistinguishable from the full-prompt baseline.
+
+verdict: medium LOW
+
+none exists within its constraints.

@@ -1,0 +1,22 @@
+1. target: Analyst A and Analyst B
+steelman: Postgres is the safer default because it keeps data consistent, gives transactions and constraints, and can still represent semi-structured values when needed.
+weakness: If the MVP is still discovering its domain and the team expects repeated non-backward-compatible shape changes, PostgreSQL turns each pivot into a coordinated code-plus-schema event. MongoDB is better in that specific phase because new fields and nested shapes can coexist without forcing the team to redesign tables, backfill rows, or lock in normalization decisions too early.
+evidence: The failure mode is product-discovery churn, not “Postgres is bad at schema changes” in the abstract. Even when Postgres can apply changes online, the team still has to decide the schema boundary, update application code, and often backfill or reindex if the new shape must be queried efficiently. MongoDB removes one layer of forced coordination when the model is still unstable.
+falsification: Track how many sprint items require a schema decision plus coordinated deploy. If the model stabilizes quickly and most changes are additive and backward-compatible, this condition does not hold.
+verdict: high, MEDIUM
+
+2. target: Analyst A and Analyst B
+steelman: Postgres should still win by default because it supports stronger integrity and leaves more room for future reporting and joins if the product grows.
+weakness: If the app is mostly document-centric CRUD on one aggregate at a time, with little need for cross-record constraints or joins during the MVP, PostgreSQL adds normalization and query-planning work without much payoff. MongoDB fits better when the natural unit of work is a nested object or payload and the team does not yet need relational decomposition.
+evidence: This is an access-pattern mismatch. When most reads and writes stay inside one self-contained aggregate, the relational shape becomes ceremony rather than leverage. Postgres can emulate document storage, but then the team is carrying relational overhead without using the main advantage of the relational model.
+falsification: Trace the top endpoints and jobs. If most of them touch multiple entities, rely on joins, or need strong cross-entity constraints, this weakness disappears. If most operations stay within one aggregate, it stands.
+verdict: medium, MEDIUM
+
+3. target: Analyst B
+steelman: Postgres plus JSON support should be enough for event-style or configuration-heavy MVP data, while preserving stronger consistency and future query power.
+weakness: If the MVP is dominated by high-velocity event/config payloads and the team does not yet know which nested fields will matter operationally, PostgreSQL forces earlier modeling choices than MongoDB. That means either wide sparse tables or JSON blobs that still need later shape decisions for indexing and querying, which slows a small team that is still learning what the product actually needs.
+evidence: The issue is not storage capacity, it is queryability under uncertainty. If the access pattern is unknown, Postgres makes the team bet earlier on the structure they will want to filter and aggregate later. MongoDB postpones more of that commitment until the query shape settles.
+falsification: If the key queries are already known, or the payloads converge quickly to a small fixed shape, this condition fails and Postgres is not disadvantaged here.
+verdict: medium, LOW
+
+Acceptable only if the MVP’s schema stabilizes early, the workload is mostly relational or constraint-heavy, and the team already has enough SQL and migration fluency to absorb the overhead.

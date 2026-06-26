@@ -1,0 +1,31 @@
+Steelman: PostgreSQL’s relational model and ACID guarantees deliver better long-term data integrity and query power than MongoDB’s flexible documents for most SaaS workloads.
+
+Weakness: When a 4-person team must change the data model weekly while shipping an MVP inside six months, the cost of writing and running migrations, updating foreign keys, and adjusting application queries exceeds the time saved by MongoDB’s schemaless writes.
+
+Evidence: Each new field or relationship in PostgreSQL forces an ALTER TABLE plus ORM or query changes; a single migration that touches production data requires review, testing, and potential downtime windows, all executed by the same four developers already handling product, frontend, backend, and ops.
+
+Falsification: Track total hours spent on schema-related commits versus feature commits over the first eight weeks; if the ratio stays below 15 % the claimed velocity penalty disappears.
+
+Verdict: critical MEDIUM
+
+Steelman: PostgreSQL’s typed columns and JOINs prevent the data-quality drift that document stores permit when multiple developers touch the same collections.
+
+Weakness: A small team without a dedicated data modeler ships an MVP whose entities start as simple JSON blobs (user preferences, audit logs, feature flags) that later require nested arrays or polymorphic references; modeling these in PostgreSQL demands either JSONB columns plus manual validation code or a proliferation of tables and join tables, both of which slow iteration compared with native MongoDB documents.
+
+Evidence: The development loop becomes “change app code → update migration → run migration on staging → fix query that now needs LEFT JOIN or lateral” rather than “change app code → deploy”, adding at least one extra deploy cycle per iteration.
+
+Falsification: Instrument the time from “new data shape requested” to “feature live in production”; if the PostgreSQL path consistently exceeds the MongoDB path by more than one day per change the overhead is confirmed.
+
+Verdict: high MEDIUM
+
+Steelman: PostgreSQL’s mature ecosystem and single-binary operation reduce operational surprises versus running a separate document store.
+
+Weakness: The team chooses a Node/TypeScript stack and relies on Prisma or TypeORM; the generated migration files and type-safety overhead become bottlenecks when two backend engineers are simultaneously fixing production bugs and building new endpoints, whereas Mongoose or the native driver allows direct document updates without a separate migration step.
+
+Evidence: Each Prisma migration edit plus generated client rebuild adds minutes to every local test run and forces coordination when two pull requests touch overlapping schema files, an overhead absent when collections accept arbitrary shapes.
+
+Falsification: Measure median time from “git pull” to “local server accepts a request exercising the changed model”; if the difference is under ten minutes the tooling claim is falsified.
+
+Verdict: medium LOW
+
+None exists within its constraints.

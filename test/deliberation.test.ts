@@ -414,10 +414,8 @@ describe("Deliberation E2E", () => {
     const capturedR2Messages: string[] = [];
     const chatFn = mock(async (_model: string, messages: ChatMessage[]) => {
       callNum++;
-      if (callNum > 3) { // R2 messages — get last user message (follow-up)
-        const userMessages = messages.filter((m) => m.role === "user");
-        const lastUser = userMessages[userMessages.length - 1]?.content ?? "";
-        capturedR2Messages.push(lastUser);
+      if (callNum > 3) { // R2 messages — capture the full message set the worker receives
+        capturedR2Messages.push(messages.map((m) => m.content).join("\n"));
       }
       return chatResult(`Response call ${callNum} ${"x".repeat(callNum * 40)}`);
     });

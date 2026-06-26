@@ -1,0 +1,22 @@
+Finding 1
+steelman: PostgreSQL supplies strict schemas, ACID transactions and mature relational integrity that prevent data corruption and ease reporting even during rapid early development.
+weakness: When the MVP data model must change weekly because customer feedback forces new fields and nesting levels inside documents, the requirement to author, test and deploy migrations repeatedly consumes engineering hours that would otherwise ship features.
+evidence: Each structural change needs an explicit ALTER TABLE or jsonb migration script plus corresponding application updates; a four-person team under a six-month deadline therefore either slows release cadence or accepts accumulating technical debt in unapplied migrations, whereas MongoDB permits in-place document evolution without schema coordination.
+falsification: Measure cumulative engineer-days spent on migration work versus feature work across two identical feature sets, one using enforced migrations and one using schemaless collections; a result showing migration overhead below 10 % of total effort would falsify the finding.
+verdict: critical MEDIUM
+
+Finding 2
+steelman: PostgreSQL’s JSONB plus full SQL gives both flexible storage and powerful joins, making it suitable for mixed relational and document workloads without needing a second database.
+weakness: When the application’s primary workload consists of deeply nested, variable-shape configuration or analytics events arriving from external APIs, repeated normalization or complex jsonb queries become necessary, increasing both write-path latency and the surface area for query bugs under production load.
+evidence: MongoDB stores and indexes the incoming nested structures directly; Postgres requires either repeated jsonb operators or EAV-style tables, each adding either CPU cost per write or extra joins that surface only after real usage volume appears, conditions that a small team may encounter only after launch.
+falsification: Run the same ingestion and retrieval workload against both engines on representative nested payloads and compare p95 latency plus error rate; if Postgres stays within 20 % of MongoDB on both metrics the condition is falsified.
+verdict: high MEDIUM
+
+Finding 3
+steelman: PostgreSQL is the safer long-term default because its tooling, replication and backup ecosystem is mature and avoids the operational surprises historically associated with eventually-consistent stores.
+weakness: When the four-person team lacks prior operational experience with replication and point-in-time recovery, the additional setup steps and mental model for streaming replication plus WAL archiving create longer time-to-first-production and higher risk of misconfiguration that only manifests after user data begins to accumulate.
+evidence: MongoDB Atlas or a single-replica set can be running with managed backups inside hours via a UI; achieving comparable durability in Postgres requires configuring pg_basebackup, archiving and monitoring separately, an overhead that delays the MVP launch date or leaves the initial production instance under-protected.
+falsification: Record calendar days from project start until a durable, monitored production instance is live for each choice; if Postgres reaches that state in equal or fewer days the finding is falsified.
+verdict: medium LOW
+
+None exists within its constraints.

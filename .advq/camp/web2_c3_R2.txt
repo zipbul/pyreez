@@ -1,0 +1,243 @@
+---
+
+## Challenges Against Analyst A
+
+---
+
+### Challenge 1 — Analyst A Finding 1: Mechanistic Misstatement Inflates Apparent Severity
+
+**target:** Analyst A
+
+**steelman:** Dead-tuple accumulation from pinned MVCC horizons is the dominant long-term failure mode for PostgreSQL job queues. Once bloat exceeds autovacuum's cleaning rate, the queue degrades into a pathological state where claim latency exceeds the polling interval.
+
+**weakness:** Analyst A characterizes the outcome as jobs becoming "invisible for arbitrarily long periods — functionally equivalent to lost." This conflates two distinct phenomena and the mechanism is wrong in one direction: jobs are not invisible to SKIP LOCKED scans — they are present and accessible in the heap. What degrades is *scan performance* because the scan must traverse dead heap tuples and dead index entries to reach live pending rows. The practical consequence is high claim latency and reduced throughput, not invisibility. This matters because the falsification condition Analyst A proposes (dead tuples < 10× live tuples, p99 claim latency < 50ms) is correctly framed — but the severity label "critical" is carried by a mechanical description that overstates the failure: true job invisibility would require a corrupted or missing row, which MVCC bloat does not produce. Additionally, the postgrespro.com thread evidence that Analyst A cites — "LIMIT 300 queries took over an hour" — involved `ORDER BY created_at` with a large batch size, not `LIMIT 1` without ordering. These are categorically different query plans: `LIMIT 300` with `ORDER BY` forces the scan to walk the entire index range to collect 300 candidate rows across 50 workers; `LIMIT 1` terminates as soon as the first unlocked live tuple is found. Analyst A's evidence does not directly support the claimed severity for the specific deployment described (LIMIT 1 implied by per-row dispatch).
+
+**evidence:** The alexstoica.com article (fetched this session) states that large numbers of locked rows cause performance to "noticeably drop" toward sequential scan territory, and recommends "only lock a small number of records in one transaction" — confirming that batch size is a critical variable. The postgrespro.com thread evidence is specific to LIMIT 300 + ORDER BY, not LIMIT 1. This is Analyst A's own sourced evidence, re-read against the actual query pattern. The PlanetScale article (fetched prior round) does confirm a latency cliff at high dead-tuple counts regardless of batch size, but the threshold numbers (383,000 dead tuples to reach 300ms lock time) suggest the queue operates for a meaningful period before collapse — not an instant jump from functional to invisible.
+
+**falsification:** Run the exact LIMIT 1 query (no ORDER BY) under dead-tuple load and measure claim latency. If latency at 100,000 dead tuples is under 10ms for LIMIT 1 but over 1 second for LIMIT 300, the severity belongs to the query pattern, not the architecture generally.
+
+**severity:** high (not critical — the mechanism causes latency degradation, not job disappearance; the severity label should match the actual failure)
+**confidence:** HIGH
+
+---
+
+### Challenge 2 — Analyst A Finding 2: Conflated Failure Modes Yield an Incoherent Severity
+
+**target:** Analyst A
+
+**steelman:** Once a worker commits a status transition to `processing` and then fails, the job is permanently orphaned because SKIP LOCKED will never re-select a row not in `pending` state. This is a genuine critical gap in the proposed design.
+
+**weakness:** Analyst A's Finding 2 title says "Double Processing" but the primary scenario described (worker crashes after commit, job stuck in `processing`) is permanent job *loss*, not double processing. Double processing only enters the picture in the *conditional* path: "If the team adds a reaper... and the original worker was merely slow (not dead)." Analyst A assigns a single severity label ("high") to what are structurally two distinct failure modes with different severities: (a) permanent job sticking with no reaper = critical (silent loss, never recoverable without manual intervention); (b) double processing when reaper + slow-worker coincide = medium (recoverable if idempotent, avoidable with heartbeats). By blending them, Analyst A's HIGH confidence is accurate for the category but the single severity label misleads the response. A team reading "high" will likely implement a reaper and consider the problem solved — without recognizing that a poorly-calibrated reaper converts their critical loss problem into a double-processing problem they may not detect.
+
+**evidence:** Reasoning chain from first principles: the two failure modes have different preconditions (no-reaper vs. reaper-exists), different detection signatures (stuck `processing` rows vs. duplicate side effects), and different mitigations (add a reaper vs. tune timeout + add heartbeats). Combining them under one severity suppresses the more severe sub-case. This is a logical gap in Analyst A's analysis, not a factual dispute.
+
+**falsification:** Analyst A's own falsification condition — "show that every job's side effect is either fully contained within the same transaction or idempotent" — correctly resolves the double-processing sub-case. It does not resolve the permanent loss sub-case if there is no reaper. A complete falsification would additionally require: show that a reaper exists AND its timeout is validated against P99 job duration.
+
+**severity:** critical (for permanent loss sub-case) / medium (for double-processing sub-case) — Analyst A's "high" is a lossless approximation only if both sub-cases are weighted equally, which they are not
+**confidence:** HIGH
+
+---
+
+### Challenge 3 — Analyst A Finding 3: Evidence Base Is for a Categorically Different Query
+
+**target:** Analyst A
+
+**steelman:** With 50 workers each polling at 100ms, 500 queries/second of structural baseline overhead exists regardless of queue state. This overhead competes for shared memory, buffer pool, and CPU — driving up latency for all co-located queries.
+
+**weakness:** Analyst A assigns MEDIUM confidence to Finding 3 with the caveat that "pure LIMIT 1 with a clean index may be cheaper" — which is correct but undersells how different the two cases are. The primary evidence cited (postgrespro.com: "60 concurrent connections saturated 80 CPU cores") involved LIMIT 300 with ORDER BY, which forces each of 60 workers to evaluate and lock up to 300 candidate rows before finding non-locked ones. LIMIT 1 with no ORDER BY terminates at the first unlocked pending row found by the index scan and performs exactly one row lock. The scan cost for LIMIT 1 scales with *how many locked rows the scan encounters before finding a free one* — which at 50 workers with a healthy queue (more pending rows than workers) is typically O(1). Analyst A's MEDIUM label may actually be too high given the evidence mismatch; LOW would be more defensible for the catastrophic CPU saturation claim. The 500 queries/second pure overhead finding does survive (the polling cost exists regardless of batch size), but the severity should be driven by the idle-queue case, not the CPU-saturation evidence that doesn't apply to LIMIT 1.
+
+**evidence:** Search results (alexstoica.com, fetched this session): the overhead of FOR UPDATE SKIP LOCKED for LIMIT 1 is "tuple header checks, replacing index-only scans with regular index scans plus heap fetches" — meaningful but not catastrophic per-query. The catastrophic case in postgrespro required LIMIT 300 + ORDER BY. Analyst A's own MEDIUM confidence label already signals this uncertainty.
+
+**falsification:** Benchmark the specific query — `SELECT id FROM jobs WHERE status = 'pending' LIMIT 1 FOR UPDATE SKIP LOCKED` — under 50 concurrent workers on a live table with 10,000 pending rows. If per-query time stays under 2ms and CPU stays under 20%, the postgrespro evidence is not applicable to this deployment.
+
+**severity:** medium (not high — the idle-polling overhead exists but the CPU-saturation scenario requires different query patterns)
+**confidence:** HIGH (that the evidence doesn't support the severity; the finding itself is MEDIUM confidence)
+
+---
+
+### Challenge 4 — Analyst A Finding 6: Bug Is Confirmed, Condition Is Under-Specified
+
+**target:** Analyst A
+
+**steelman:** PostgreSQL's SKIP LOCKED throws an unhandled error rather than skipping rows that migrate between partitions during concurrent updates — a genuine implementation gap that breaks worker retry logic.
+
+**weakness:** The finding is confirmed real (the PostgreSQL mailing list thread is explicit: error persists across versions v9.6–v12, the expected behavior is to skip not error). However, Analyst A's falsification condition is underspecified: "if the partitioning strategy never causes row movement (e.g., partition by creation date, never updated), this bug is not triggered." The far more important unaddressed variable is: does the *current proposal* use partitioning at all? Analyst A frames this as a risk of applying the standard bloat mitigation, but the proposal being analyzed doesn't mention partitioning. The finding is therefore conditional on a future architectural decision, not the current design. More critically, Analyst A does not address whether any PostgreSQL version released after 16 (current as of 2026) has patched this behavior. A confirmed bug on v9.6–v12 that may be fixed in v15+ is not the same severity as an active unfixed bug.
+
+**evidence:** PostgreSQL mailing list thread (fetched this session): error message confirmed as "tuple to be locked was already moved to another partition due to concurrent update"; confirmed on v9.6 and v12; no fix version mentioned in the thread. No evidence found this session that it was fixed in v15 or v16 — but absence of a patch mention in a 2020-era thread does not confirm it remains unfixed in 2026.
+
+**falsification:** Check `pg_release_notes` for versions 13–17 for any mention of SKIP LOCKED + partitioned table fix. If patched in version N and the deployment runs ≥ version N, Finding 6 is fully mitigated. If unpatched, the finding applies only if partitioning is adopted.
+
+**severity:** low (conditional on both adopting partitioning *and* using a mutable partition key *and* running an unpatched version — three independent preconditions)
+**confidence:** MEDIUM
+
+---
+
+## Consolidated Final Severity-Ordered List
+
+*(Findings that survived all challenges; sub-modes separated where Analyst A conflated them; new findings added)*
+
+---
+
+### F1 — MVCC Horizon Pinning → Dead Tuple Accumulation → Latency Cliff
+
+**steelman:** SKIP LOCKED is designed for high-concurrency dispatch; under normal operation, VACUUM reclaims completed-job dead tuples continuously, keeping scan performance stable.
+
+**weakness:** Any long-running transaction — analytics query, slow worker holding an `idle in transaction` connection, external call inside the claim transaction — pins the `xmin` horizon and blocks VACUUM from reclaiming dead tuples. At 50 workers × 10 polls/sec, write churn is high; dead tuples accumulate faster than autovacuum can clean them once any horizon-pinning transaction exists. PlanetScale documented a latency cliff at ~383,000 dead tuples (produced by 800 jobs/sec + 40-second analytics queries): lock time exceeded 300ms and backlog hit 155,000 jobs. The failure is superlinear: more dead tuples → slower scans → more pending jobs → more dead tuples per unit time.
+
+**evidence:** PlanetScale blog (fetched prior round): baseline lock time 1.3–3ms; spiked to 180ms at high dead-tuple counts; exceeded 300ms at 383,000 dead tuples. Root cause stated as VACUUM blockage from long-running transactions. URL: https://planetscale.com/blog/keeping-a-postgres-queue-healthy
+
+**falsification:** Monitor `pg_stat_user_tables.n_dead_tup` for 24 hours under production load including any analytics queries. If dead tuples remain below 5,000 at steady state with no unbounded trend, the failure mode does not apply.
+
+**severity:** critical
+**confidence:** HIGH
+
+---
+
+### F2a — Worker Crash After Commit: Permanent Job Loss (No Reaper)
+
+**steelman:** SKIP LOCKED releases the row lock at transaction commit; a rollback-on-crash restores the row atomically.
+
+**weakness:** The rollback-on-crash guarantee holds only if the claim transaction stays open for the full job duration. The standard two-transaction pattern (claim → commit → work → complete) — used by virtually all documented implementations because holding a transaction open for minutes exhausts connection slots — leaves the job in `status='processing'` after commit with no lock. A crash between commit and completion permanently orphans the job. Without a timeout-based reaper sweep, the job never re-enters the queue. At 50 workers, mean time between crashes is non-negligible under sustained production load.
+
+**evidence:** Reasoning chain, verified by inspection of standard implementations (aminediro, dbpro.app, neon.com guides found in search this session) all showing the two-transaction pattern as standard. No counter-evidence found of the proposal including stale-job reaping.
+
+**falsification:** Inspect the implementation: either (a) the claim transaction is held open for the full job duration with a dedicated connection, or (b) a documented reaper query reclaims `status='processing'` rows older than a verified threshold.
+
+**severity:** critical
+**confidence:** HIGH
+
+---
+
+### F2b — Slow Worker + Overeager Reaper: Double Processing
+
+**steelman:** A timeout-based reaper is the standard mitigation for stuck jobs. Setting the timeout to 2× the average job duration provides a safe margin.
+
+**weakness:** With 50 workers polling at 100ms, a re-claim fires within 100ms of timeout expiry. A slow-but-alive worker that stalls past its visibility timeout has its job stolen by a second worker, with both executing concurrently. At 50 workers under load, P99 stalls (GC, network, resource contention) exceeding even generous timeouts occur regularly. No stated visibility timeout or job duration distribution in the proposal makes it impossible to verify the required invariant: `timeout > P999(job_duration)`.
+
+**evidence:** Reasoning chain: SKIP LOCKED releases at commit; re-claim fires ≤100ms after expiry; no heartbeat mechanism mentioned in proposal.
+
+**falsification:** Measure P999 job execution time under actual workload; confirm `locked_until` timeout > P999 + heartbeat extension interval. If heartbeat exists and extends timeout during execution, double-processing is bounded.
+
+**severity:** medium
+**confidence:** MEDIUM
+
+---
+
+### F3 — Algorithmic Explosion in Heap Scan at High Worker Concurrency
+
+**steelman:** SKIP LOCKED is designed for concurrent dispatch and handles worker-to-worker row skipping internally.
+
+**weakness:** SKIP LOCKED's scan cost is proportional to rows the scan must examine and discard — including dead tuples, non-matching rows, and currently locked rows — not just live pending rows. PostgreSQL core developer Thomas Munro: scanning "gets a bit explosive once you have such high numbers of workers." A user report in the same thread: at 128 concurrent workers, a single SKIP LOCKED query caused 100% CPU across 80 cores and waited 10–20 minutes. 50 workers is not far from this boundary, and any burst — autoscaling overlap, rolling restart — crosses it.
+
+**evidence:** Direct quotes from PostgreSQL mailing list (fetched prior round): Munro: "It all gets a bit explosive once you have such high numbers of workers." Jim Jarvie: CPU spiked to 100% across 80 cores, "select processes wait for multiple minutes (10-20 minutes) before completing." URL: https://www.postgresql.org/message-id/CA+hUKGKri4MSsOa+5FxduxO4Cd2kt9gwYn+9tCYkLpwyxngcsw@mail.gmail.com. **Caveat (surviving my own challenge):** that thread involved LIMIT 300 + ORDER BY; LIMIT 1 without ORDER BY has a lower per-query cost since it terminates at the first available row. The 50-worker explosive threshold for LIMIT 1 is not directly verified — Thomas Munro's general characterization applies, but the specific worker count at which it manifests for LIMIT 1 is empirically unknown.
+
+**falsification:** Run a controlled benchmark with exactly 50 workers issuing `LIMIT 1` SKIP LOCKED against a table with 10,000 pending rows. Measure `pg_stat_activity` wait events under `LWLock:MultiXactMemberSLRU`. If per-query time stays under 5ms and no SLRU wait events appear, the 50-worker deployment is below the explosion threshold for this query pattern.
+
+**severity:** high
+**confidence:** MEDIUM (Munro's general characterization is verified; the LIMIT 1 specific threshold is not — confidence downgraded from prior round to reflect the LIMIT 300 evidence mismatch identified in this round's challenge)
+
+---
+
+### F4 — 500 Queries/Second Idle Polling Overhead, No Backoff
+
+**steelman:** Fixed 100ms polling gives predictably low job pickup latency; the implementation complexity of adaptive polling or LISTEN/NOTIFY is non-trivial.
+
+**weakness:** 50 workers × 10 polls/sec = 500 queries/second structural floor regardless of queue state. Each query acquires a snapshot, performs an index scan, checks lock states, and releases. Under PostgreSQL's process-per-connection model this produces sustained context-switching overhead. The recommended optimal active connection count for an 8-core server (PostgreSQL wiki formula: (core_count × 2) + effective_spindle_count ≈ 18) is well below 50. Empty-queue polling competes with INSERT (new job enqueueing) for index root/leaf page locks.
+
+**evidence:** Brandur.org (fetched prior round): ~5MB per-backend baseline memory overhead; 50 workers ≈ 250MB floor. PostgreSQL wiki optimal connection formula (found in search, prior round). The 500 queries/sec overhead is a verified arithmetic consequence of the stated parameters.
+
+**falsification:** Add LISTEN/NOTIFY or exponential backoff during empty-queue periods. Measure idle CPU and index contention before and after. If idle CPU drops to near zero and co-located query latency is unaffected, the polling architecture is the cause.
+
+**severity:** high
+**confidence:** HIGH
+
+---
+
+### F5 — Retry Storms During Downstream Outages Produce Self-Amplifying Bloat
+
+**steelman:** Transient failures are rare; for most workloads, the retry rate is negligible relative to throughput.
+
+**weakness:** When a downstream dependency fails (API, SMTP, payment gateway), all 50 workers claim jobs, fail, and either re-queue them or mark them failed. At 500 claim attempts/sec: each failed job generates ≥2 UPDATEs (claim + re-queue), producing ≥1,000 dead tuples/second. Over 10 minutes of downstream outage: 600,000 dead tuples from retries alone — enough to push past the PlanetScale-documented latency cliff (383,000 dead tuples → 300ms lock time). This directly amplifies F1: a downstream outage that would otherwise be a service interruption becomes a queue degradation that persists for hours after the outage resolves (until VACUUM cleans the bloat backlog). The proposal makes no mention of exponential backoff, dead-letter state, or per-job retry counters.
+
+**evidence:** Arithmetic verified: 50 workers × 10 polls/sec = 500 claims/sec × 2 UPDATEs/failed-job = 1,000 dead tuples/sec × 600 seconds (10 min outage) = 600,000 dead tuples. PlanetScale threshold (prior round): 383,000 dead tuples produced 300ms lock time spikes. The 600,000 figure exceeds this threshold. Analyst A's F5 reasoning chain is correct; I am adopting it with the PlanetScale threshold as cross-validation.
+
+**falsification:** Confirm the schema includes `retry_count` and `next_retry_at` columns with exponential backoff logic. If workers implement backoff that reduces polling frequency after failures, the dead-tuple rate during outages is bounded well below the PlanetScale threshold.
+
+**severity:** high
+**confidence:** HIGH
+
+---
+
+### F6 — Visibility Timeout Race: Double Processing
+
+*(see F2b — consolidated above, not duplicated)*
+
+---
+
+### F7 — Index Bloat Compounds SKIP LOCKED Scan Cost Independently of Live Row Count
+
+**steelman:** Standard B-tree indexes on `(status, created_at)` provide efficient access to pending jobs; bloat is manageable with routine maintenance.
+
+**weakness:** Each completed job leaves a dead index entry in every covering index. Under MVCC horizon pinning (F1), these accumulate without reclamation. SKIP LOCKED following an index scan encounters dead index entries, must follow the heap pointer to verify visibility, finds the tuple dead, and discards it — one random heap I/O per dead index entry. The index itself does not shrink when VACUUM reclaims dead heap tuples; only `VACUUM FULL` or `pg_repack` rebuilds it. Long-running production systems without index maintenance will have an ever-growing index regardless of live job count.
+
+**evidence:** richyen.com (fetched prior round): job queue tables "can grow to tens of gigabytes when the actual live data was only a few megabytes." Reasoning: dead index entries force random heap I/O to confirm deadness — worst-case access pattern for storage-bound systems.
+
+**falsification:** Monitor `pg_size_pretty(pg_relation_size('jobs_status_idx'))` weekly against `n_live_tup`. If index size grows faster than live rows, schedule `REINDEX CONCURRENTLY`. If a maintenance schedule exists and is validated, this risk is mitigated.
+
+**severity:** medium
+**confidence:** HIGH
+
+---
+
+### F8 — MultiXact SLRU Contention Under 50-Worker Concurrent Locking
+
+**steelman:** PostgreSQL's internal MultiXact mechanism is designed to handle concurrent row locking; at 50 workers it is within normal operational parameters.
+
+**weakness:** When workers share overlapping views of locked rows, PostgreSQL stores composite lock sets as MultiXact IDs in fixed-size SLRU buffers. With 50 workers frequently encountering each other's locks, the working MultiXact set may exceed the SLRU cache. Cache misses serialize behind `LWLock:MultiXactSLRU`, causing all concurrent SKIP LOCKED scans to queue behind a single cache-fill operation. richyen.com identifies this wait event as a signature of this failure mode.
+
+**evidence:** richyen.com (fetched prior round): MultiXact SLRU contention identified as a critical bottleneck at high worker counts. Default SLRU cache size [unverified exact value]. The 50-worker deployment is below the 128-worker documented collapse point but the threshold depends on row contention density.
+
+**falsification:** Monitor `pg_stat_activity` for `wait_event = 'MultiXactSLRU'` under production load. If this constitutes <1% of total wait time, SLRU is not the bottleneck at 50 workers.
+
+**severity:** medium
+**confidence:** MEDIUM
+
+---
+
+### F9 — SKIP LOCKED + Partitioned Tables: Unhandled Error on Row Migration
+
+**steelman:** Table partitioning by creation date is the standard mitigation for queue table bloat — old partitions can be dropped instantly, bypassing VACUUM entirely.
+
+**weakness:** If the team adopts partitioning as a bloat mitigation (directly recommended for F1), any concurrent update that moves a row to a different partition causes SKIP LOCKED to throw `ERROR: tuple to be locked was already moved to another partition due to concurrent update` rather than silently skipping the row. Workers receive an unhandled exception requiring rollback and retry. This only triggers if rows change their partition key — which happens when `status` is used as a partition column. Confirmed on PostgreSQL v9.6–v12; no patch version documented in the mailing list thread.
+
+**evidence:** PostgreSQL mailing list (fetched this session): exact error message confirmed. Postgrespro.com thread (fetched this session): same error reported with practical workarounds (rollback + retry). No fix version confirmed in the thread; whether v15–17 patches this is unverified.
+
+**falsification:** Check PostgreSQL release notes for versions 13–17 for a fix. If patched and deployment runs that version, the finding is closed. Alternatively, partition by immutable creation date (not `status`) to prevent row migration entirely.
+
+**severity:** low (three independent preconditions: adopting partitioning, using a mutable partition key, running an unpatched version)
+**confidence:** MEDIUM
+
+---
+
+### Unresolved Disagreements
+
+- **Analyst A F1 severity (critical) vs. my challenge (high):** The disagreement rests on whether "jobs invisible = lost" (Analyst A) or "scan degrades but jobs remain accessible" (my position). The PlanetScale data supports a latency cliff, not disappearance. I hold that "critical" is appropriate for the *system-level* consequence (queue effectively halted) but the *mechanism* is latency degradation, not job loss — and this distinction matters for choosing the right mitigation (VACUUM tuning vs. row reaping). Unresolved without a direct benchmark of LIMIT 1 under high dead-tuple counts.
+
+- **Analyst A F3 severity (high) vs. my challenge (medium):** The evidence basis (postgrespro LIMIT 300 + ORDER BY) does not directly support catastrophic failure for LIMIT 1. Analyst A's own MEDIUM confidence label is appropriate; my challenge argues the severity should follow the confidence downward. This is unresolved pending an empirical LIMIT 1 benchmark at 50 workers.
+
+---
+
+**Condition under which the proposal is acceptable:** The proposal is acceptable if and only if: (a) all transactions against the jobs table — including analytics — are bounded by a hard statement timeout shorter than autovacuum's cleaning cycle and the jobs table has per-table autovacuum tuning applied (`autovacuum_vacuum_scale_factor` ≤ 0.01, `autovacuum_vacuum_cost_delay` = 0); (b) a stale-job reaper exists with a documented timeout validated against measured P999 job duration, and workers implement a heartbeat that extends the timeout during execution; (c) exponential backoff and a dead-letter state are implemented so downstream outages cannot generate unbounded dead-tuple storms; (d) a controlled 30-minute load test at exactly 50 workers demonstrates that `pg_stat_user_tables.n_dead_tup` is stable (not trending) and per-query claim latency stays under 10ms at the 99th percentile; and (e) worker count is architecturally capped with no burst path beyond 50 concurrent connections.
+
+---
+
+**Sources:**
+- [Keeping a Postgres Queue Healthy — PlanetScale](https://planetscale.com/blog/keeping-a-postgres-queue-healthy)
+- [CPU hogged by concurrent SELECT FOR UPDATE SKIP LOCKED — PostgreSQL mailing list (Thomas Munro)](https://www.postgresql.org/message-id/CA+hUKGKri4MSsOa+5FxduxO4Cd2kt9gwYn+9tCYkLpwyxngcsw@mail.gmail.com)
+- [SKIP LOCKED + partitioned table "moved to another partition" error — PostgreSQL mailing list](https://www.postgresql.org/message-id/CANbGkDhq9gZnEouo2PZHP3HGMAJKk7fZf3eU3Q8g46Y-1uGZ-w@mail.gmail.com)
+- [SKIP LOCKED + partitioned table bug thread — Postgres Professional](https://postgrespro.com/list/thread-id/2498983)
+- [CPU hogged thread — Postgres Professional](https://postgrespro.com/list/thread-id/2505440)
+- [Potential Consequences of Using Postgres as a Job Queue — richyen.com](https://richyen.com/postgres/2026/05/04/postgres_job_queue.html)
+- [What is FOR UPDATE SKIP LOCKED and how it can impact your query plans — alexstoica.com](https://www.alexstoica.com/blog/postgres-select-for-update-perf)
+- [How to Manage Connections Efficiently in Postgres — brandur.org](https://brandur.org/postgres-connections)
+- [Number of Database Connections — PostgreSQL Wiki](https://wiki.postgresql.org/wiki/Number_Of_Database_Connections)

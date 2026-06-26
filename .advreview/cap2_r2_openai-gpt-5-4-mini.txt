@@ -1,0 +1,22 @@
+- **target:** Analyst A
+- **steelman:** PostgreSQL can handle MVP churn if the team is disciplined. A mature migration workflow means schema changes are manageable, and the relational model gives long-term correctness that MongoDB does not.
+- **weakness:** This breaks when the MVP is still discovering its core shape and the changes are not just additive. If the team keeps changing existing records in non-backward-compatible ways, PostgreSQL forces coordinated DDL, backfills, deployment sequencing, and rollback planning; MongoDB lets the document shape evolve with the code instead of turning every change into release work.
+- **evidence:** The mechanism is straightforward: relational systems require explicit schema evolution when existing structures change, while document stores tolerate optional and evolving fields with much less ceremony. The weak point in the peer claim is the implied threshold and timing cost; the exact “8+ changes” and hour estimates are not established, but the underlying bottleneck does not depend on those numbers.
+- **falsification:** Classify the next few planned product changes as additive or non-additive. If almost all of them are additive column additions or isolated new tables, and none require backfills or coordinated rollout, this failure mode is not real.
+- **verdict:** high, MEDIUM
+
+- **target:** Analyst B
+- **steelman:** PostgreSQL with JSONB can store semi-structured data safely, and if the team is careful, it can cover many document-like MVP needs without giving up ACID guarantees.
+- **weakness:** This breaks when the MVP’s dominant data shape is deeply nested, variable, and usually handled as one aggregate at a time, with little need for joins, cross-record reporting, or strict relational constraints in the first six months. In that case PostgreSQL makes the team choose between over-normalizing a document-shaped problem or hiding it inside JSONB, and both routes add modeling and query overhead that MongoDB avoids.
+- **evidence:** PostgreSQL’s advantage is relational structure. If the product is mostly single-object CRUD over nested configuration, workflows, or integration payloads, the relational model buys little and the team pays for schema design, query design, and index strategy anyway. JSONB reduces friction but does not remove the need to reason about shape, indexing, and query paths. The peer’s numeric performance threshold is not supported; the real test is whether the product’s actual access pattern is document-centric.
+- **falsification:** Build the top few endpoints both ways and compare the time to add a nested field, the complexity of the reads/writes, and the number of schema artifacts required. If PostgreSQL is just as direct on the real product flows, this condition does not hold.
+- **verdict:** high, MEDIUM
+
+- **target:** Analyst A
+- **steelman:** PostgreSQL on a managed service can be operationally safe, and a team with a clear owner can keep migrations and tuning under control.
+- **weakness:** This only bites if the team will not use a fully managed PostgreSQL setup and no one is actually owning migrations, backups, pooling, and query tuning. Under that bootstrap condition, PostgreSQL’s operational and discipline burden becomes the worse default for a 4-person team because it eats time the team cannot afford during MVP launch.
+- **evidence:** The peer claim overreaches when it treats operational pain as universal. Managed Postgres narrows the gap substantially, so the finding only survives if the team is self-hosting or minimally managing the database and trying to learn the operational model at the same time as they are shipping the product. That is a real condition, but it is contingent, not default.
+- **falsification:** Check the actual deployment plan. If the database is on a fully managed service and one person is already responsible for schema changes and restore testing, this weakness largely disappears.
+- **verdict:** medium, LOW
+
+Acceptable only if the MVP has a stable or only lightly changing relational core, the team will use managed PostgreSQL, and someone owns schema and operational discipline end to end.

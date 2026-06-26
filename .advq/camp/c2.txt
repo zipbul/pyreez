@@ -1,0 +1,1 @@
+A 40-engineer team will adopt a monorepo with a single CI pipeline that runs the full test suite on every pull request. Identify the concrete conditions under which this CI strategy fails or becomes unworkable.

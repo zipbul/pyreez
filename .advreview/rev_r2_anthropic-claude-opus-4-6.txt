@@ -1,0 +1,171 @@
+## Consolidated Final List (Severity-Ordered)
+
+---
+
+### 1. Round-2 Bullet 4: Within-Sentence Contradiction
+
+**target:** Analyst A (Finding 1) — agreeing and strengthening
+
+**steelman:** The clause *"If none does, do not pad — pick the peer finding you judge weakest and try to refute it"* prevents empty consensus rounds and keeps the adversarial dynamic alive even when no new critique survives.
+
+**weakness:** The two halves of this sentence are logically contradictory when the model genuinely holds no counter-evidence against any peer. "Do not pad" forbids low-value generation; "pick the weakest and try to refute it" mandates generation regardless. Analyst A correctly identifies the mechanism → break → consequence chain: mandatory refutation without a live target → contrarian filler → wasted tokens and noisier synthesis. I add: the word "weakest" is itself ambiguous — it could mean "lowest-quality peer finding" (most worth dropping) or "peer finding most vulnerable to attack" (easiest to refute). These are often different findings. A model resolving the ambiguity one way attacks a strong finding badly; the other way attacks a weak finding redundantly. Across a 3-model panel, inconsistent resolution of both the contradiction *and* the ambiguity means this single sentence introduces two axes of cross-model divergence.
+
+**evidence:** Direct textual analysis of the sentence. "Do not pad" is a prohibition. "Pick the peer finding you judge weakest and try to refute it" is a mandatory action. When the condition "none [new critique] does [survive]" is true AND all peer findings are strong, the mandatory action can only produce content that violates the prohibition. The measured runs (6 responses) may not have triggered this because peer findings happened to contain at least one weak one each time — this is a conditional failure that fires precisely when peer quality is uniformly high, which is the most valuable state of the debate.
+
+**falsification:** Feed three strong, mutually reinforcing, non-overlapping peer findings to all three models under the "none survives" condition. If ≥2 of 3 models produce output that the evaluator classifies as padding/nitpicking for the mandatory-refutation segment, the contradiction is confirmed.
+
+**verdict:** high severity · HIGH confidence
+
+---
+
+### 2. Anti-Herding Rule Blocks Peer Evidence Integration
+
+**target:** Analyst A (Finding 2) — accepting with caveats
+
+**steelman:** *"Revise your own position only when your own evidence falsifies it — never because another analyst sounded confident"* prevents herding, a well-documented failure mode in multi-agent deliberation where independent voices collapse into premature consensus.
+
+**weakness:** The contrastive structure "your own evidence" vs. "another analyst sounded confident" creates a false dichotomy. In this protocol, peer evidence is text in the shared context — it is directly inspectable, not merely an appeal to authority. A peer can surface a concrete textual contradiction in the proposal that the current worker missed. Under the current rule, the worker must re-derive that evidence independently ("your own") before revising. This wastes tokens on redundant re-derivation and, worse, risks the worker failing to re-derive it (especially on weaker models), thereby maintaining a falsified position. Analyst A's rewrite — *"Revise only when evidence in the record, including a peer's concrete evidence, falsifies your prior claim; never because another analyst sounded confident"* — preserves anti-herding while permitting evidence-based revision.
+
+**evidence:** The hidden premise: self-generated evidence is epistemically superior to peer-supplied evidence in a text-based protocol. This is false when both are reasoning chains over the same shared input. The prompt's own bullet 3 (*"Weigh others' evidence against their stated confidence"*) in the round-2 approach *already tells models to evaluate peer evidence quality* — directly contradicting the revision rule's implication that peer evidence should be discounted. These two instructions pull in opposite directions: "weigh their evidence" (engage with it) vs. "revise only on your own evidence" (ignore it for revision purposes).
+
+**falsification:** Construct a case where Analyst X has an incorrect finding, and Analyst Y surfaces a direct textual contradiction from the proposal text. Under the current rule, check whether X retracts. Under Analyst A's rewrite, check if X retracts. If retraction rate is higher under the rewrite without increasing herding (measured by models adopting peer *conclusions* without engaging peer *evidence*), the rewrite is superior.
+
+**verdict:** high severity · MEDIUM confidence
+
+---
+
+### 3. "Exact Recall" Authorized Then Universally Downgraded
+
+**steelman:** Permitting "exact recall" alongside reasoning chains broadens the evidence base; separately requiring memory-based content to be downgraded protects against hallucination. Together, they let memory in but gate its confidence.
+
+**weakness:** Bullet 1 says *"reasoning chains (mechanism → break → consequence) or exact recall only"* — establishing "exact recall" as an equal first-class evidence source. Bullet 5 then says *"Before submitting, downgrade any source/number/quote held by memory alone."* Every "exact recall" item is by definition held by memory alone (no lookups are permitted). The effect is that bullet 1 authorizes a category that bullet 5 universally downgrades. The *intended* behavior is presumably: "You may cite remembered facts, but mark them [unverified] and cap confidence at MEDIUM." But this is never stated as a single coherent rule — it must be inferred from two bullets in tension. Models with strong instruction-following will over-apply one bullet or the other. A model prioritizing bullet 1 will cite memory at HIGH confidence; a model prioritizing bullet 5 will avoid memory citations entirely (since they'll all be downgraded anyway, why bother?). Neither outcome is optimal.
+
+**evidence:** Set-theoretic: {exact recall items} ⊂ {items held by memory alone}. Bullet 5's downgrade applies to all members of the set that bullet 1 authorizes as evidence. The two bullets encode a permit-then-restrict pattern that should be a single conditional: "Memory-sourced facts are permitted but must be marked [unverified] and never assigned HIGH confidence." This saves tokens, eliminates the cross-bullet inference, and works identically across models.
+
+**falsification:** Prompt all three panel models with a proposal containing a verifiable, well-known factual claim (e.g., a widely-known algorithmic complexity bound). Check whether each model (a) cites it at HIGH, (b) cites it at MEDIUM/[unverified], or (c) avoids citing it. If behavior diverges across models, the tension is confirmed to cause inconsistency.
+
+**verdict:** medium severity · HIGH confidence
+
+---
+
+### 4. Enumerate-Drop Assumes Internal Scratchpad
+
+**steelman:** *"Enumerate candidate failure modes, attack each, drop any your own counter-attack defeats"* enforces breadth-then-pruning, guaranteeing the output contains only surviving critiques.
+
+**weakness:** This is a generate-then-filter procedure. Autoregressive generation is left-to-right; emitted tokens cannot be retracted. The instruction requires either (a) an extended-thinking/scratchpad phase where enumeration and pruning happen before output, or (b) the model silently pre-plans before emitting. Models with thinking blocks (Claude's extended thinking, certain OpenAI models) can do this; standard completion models cannot. The prompt is deployed across a 3-model panel and is model-agnostic — it does not know which models have scratchpad capability. For models without it, the instruction either becomes dead weight (the model just emits survivors directly, making the "enumerate and drop" framing meaningless) or, worse, is followed literally: the model emits a visible list including dropped items, wasting output tokens on content it was told to exclude.
+
+**evidence:** Autoregressive token generation is sequential and non-retractable. "Drop" requires either pre-generation internal planning or post-generation editing. The prompt's architecture-agnostic deployment means it must work on models that lack both capabilities. The hidden premise is that all panel models can perform internal breadth-first enumeration before emitting output.
+
+**falsification:** Run the prompt on a model without extended thinking. If it (a) emits candidate failure modes marked "dropped," it wastes tokens; if (b) it silently filters, the instruction's generate-then-prune framing is dead weight vs. simply saying "Only emit failure modes that survive your own counter-attack." Either outcome confirms the instruction is suboptimal for that model class.
+
+**verdict:** medium severity · MEDIUM confidence
+
+---
+
+### 5. No Output-Length Guidance Risks Context Blowup
+
+**steelman:** Leaving output unconstrained avoids artificial truncation of valid critique, maximizing coverage.
+
+**weakness:** The protocol is multi-round with 3 models. Each model's round-N output becomes peer context in round N+1. Without any output budget (even soft guidance like "≤ N findings" or "prioritize depth over breadth"), total context grows as O(models × rounds × avg_output). The system block is cached and re-sent; peer outputs accumulate. By round 3, if each model emits 1500 tokens, peer context alone is ~13,500 tokens (3 models × 3 rounds × 1500), plus the system block. This pushes early-round findings into the "middle" of context, where attention is weakest — exactly the lost-in-the-middle effect the prompt's own stake section identifies as the primary risk. The prompt addresses this risk for its *own* text but applies no mitigation to the *output* it generates, which is the larger and growing contributor.
+
+**evidence:** The stake section: *"Every redundant line is re-sent each round and dilutes attention (lost-in-the-middle)."* This correctly diagnoses the risk but only for the system prompt. Output accumulation is the bigger vector: the system block is fixed-size; output accumulates multiplicatively. The hidden premise is that controlling system-block size is sufficient to prevent lost-in-the-middle effects, when output volume is the dominant and growing factor.
+
+**falsification:** Measure total input context at round 3 across all models. If any model's input exceeds 80% of its context window, or if an evaluator finds that round-1 findings receive systematically less engagement than round-2 findings in round-3 output, the leak is confirmed.
+
+**verdict:** medium severity · MEDIUM confidence
+
+---
+
+### 6. Challenge: Analyst B Finding 1 Is Severity-Inflated
+
+**target:** Analyst B (Finding 1)
+
+**steelman:** Analyst B argues that *"reason before each verdict"* directly conflicts with *"No preamble before the first finding,"* producing extra free text that violates the field-per-line discipline, and rates this critical.
+
+**weakness of Analyst B's claim:** These two instructions operate at different scopes. "No preamble before the first finding" governs the *response-level* structure — don't start with "Sure, I'll analyze this proposal..." or "Here are my findings:". "Reason before each verdict" governs *within-finding* structure — put the analytical reasoning before the severity judgment. A model can comply with both simultaneously by starting directly with the first finding's steelman field (no preamble) and placing evidence/weakness before the verdict within each finding (reasoning before verdict). The scope distinction means there is no conflict. However, Analyst B is partially right that "reason before each verdict" is *redundant* with the field ordering (steelman → weakness → evidence → falsification → verdict), which already places reasoning before the verdict structurally. The defect is redundancy (low severity), not conflict (critical). Analyst B's critical rating is unsupported by the evidence chain.
+
+**evidence:** "Preamble" in the context of structured output universally refers to introductory text before the substantive content begins — not to within-entry reasoning. "No preamble before the first finding" + "reason before each verdict" = "start with finding 1; within each finding, put reasoning first." These are compatible. Analyst B's evidence ("weaker models emit the mandated 'reason' as free text") is speculative — the measured runs (6 responses, 3 models, 2 rounds) showed format adherence, which would not be possible if these instructions conflicted at the model level.
+
+**falsification:** Analyst B's own proposed test works: remove "reason before each verdict" and check for behavioral change. If no change, it's redundant (my finding), not conflicting (their finding). If models *do* add free-text reasoning blocks when the clause is present, Analyst B's concern has merit — but at "low" severity (redundancy + minor format noise), not "critical."
+
+**verdict on Analyst B's claim:** Their severity is inflated from low to critical. The underlying observation (redundancy of "reason before each verdict") is valid at low severity, HIGH confidence.
+
+---
+
+### 7. Challenge: Analyst A Finding 4 Overstates Redundancy of Downgrade Rule
+
+**target:** Analyst A (Finding 4)
+
+**steelman:** Analyst A argues that *"Before submitting, downgrade any source/number/quote held by memory alone"* duplicates *"Never invent sources, identifiers, quotes, or numbers"* and *"When uncertain, don't assert it,"* and should be cut to just *"Before submitting, fix self-contradictory findings."*
+
+**weakness of Analyst A's claim:** The three rules cover different epistemic states. "Never invent" addresses cases where the model *knows* it doesn't know (pure fabrication). "When uncertain, don't assert" addresses cases where the model *recognizes* uncertainty. The downgrade rule uniquely addresses cases where the model *feels* confident from memory but may be wrong — it triggers a self-review pass that the other two rules don't. This is especially important for no-lookup models, which cannot verify their memory. Cutting the downgrade rule removes the only instruction that tells the model to distrust its own confident memory, which is precisely where hallucination risk is highest (confident confabulation, not recognized uncertainty). Analyst A's proposed cut would weaken the anti-hallucination defense at the most dangerous point.
+
+**evidence:** The downgrade rule's unique function: it operates as a *review pass* ("before submitting"), not a *generative constraint*. It catches items that passed through the generative constraints because the model was confident during generation. Neither "never invent" nor "when uncertain" catches a model that is confidently wrong — only the review-pass downgrade does, by requiring categorical treatment of all memory-sourced items regardless of felt confidence. Analyst A's own stated HIGH confidence is a red flag given this gap in their reasoning.
+
+**falsification:** Remove only the downgrade clause, keeping other anti-fabrication rules. Run on the weakest panel model with a proposal containing plausible-but-wrong facts near the model's training data. If confident-but-incorrect citations increase, the downgrade rule was not redundant.
+
+**verdict on Analyst A's claim:** Their redundancy claim is partially refuted. The first half of the downgrade rule ("downgrade any source/number/quote held by memory alone") serves a distinct function from the earlier rules. However, there *is* tension with the "exact recall" authorization (my Finding 3 above), which should be resolved by merging both into a single coherent rule. Severity of Analyst A's finding should be downgraded from medium to low.
+
+---
+
+### 8. Challenge: Analyst B Finding 3 Misidentifies Duplication
+
+**target:** Analyst B (Finding 3)
+
+**steelman:** Analyst B argues the round-2 fourth approach bullet (*"If a new substantive, falsifiable critique survives your counter-attack, add it. If none does, do not pad"*) is already enforced by the role sentence *"drop any your own counter-attack defeats or that only fire under conditions the proposal rules out, and keep the rest."*
+
+**weakness of Analyst B's claim:** The role sentence governs the worker's *initial* analysis — enumerate failure modes against the proposal, attack them, keep survivors. The round-2 bullet governs a different phase: incorporating critiques *discovered during peer review*. These are temporally and functionally distinct operations. The role sentence fires during the worker's solo analysis; the round-2 bullet fires when the worker encounters peer outputs it hasn't considered before. Analyst B's evidence ("Role text plus output-format rule already tell the model what to retain and what to omit") conflates two different retention decisions at two different protocol stages.
+
+**evidence:** The role sentence uses "enumerate candidate failure modes" — this refers to the worker's own generation pass. The round-2 bullet says "If a *new* substantive, falsifiable critique" — "new" explicitly marks this as concerning critiques not present in the worker's initial enumeration, i.e., those arising from peer interaction. Different inputs, different decision points, different instructions. Not duplicative.
+
+**falsification:** Remove the round-2 fourth bullet. If workers in round 2 still correctly handle the question "should I add this peer-inspired critique or not?" at the same rate, Analyst B is right. If they fail to distinguish peer-inspired new critiques from their own initial enumeration, the bullet was doing unique work.
+
+**verdict on Analyst B's claim:** Likely refuted. The round-2 bullet serves a phase-specific function the role sentence does not cover. Analyst B's LOW confidence was appropriately calibrated; the finding should be dropped.
+
+---
+
+### 9. No Merge Rule for Overlapping Survivors
+
+**target:** Analyst A (Finding 5) — accepting at stated confidence
+
+**steelman:** The enumerate-drop cycle removes false positives but has no instruction to merge true positives that share the same underlying mechanism.
+
+**weakness:** Two findings describing the same root cause in different surface forms can both survive counter-attack (neither is *wrong*), producing redundant entries that waste output tokens and dilute the severity ranking. The final-round closing says "Consolidate into one severity-ordered list" — but "consolidate" means "bring together," not necessarily "deduplicate by mechanism." Analyst A's suggested addition — *"Merge overlapping survivors by mechanism; keep only the strongest wording once"* — adds a distinct behavioral instruction at minimal token cost (~12 tokens).
+
+**evidence:** The prompt's self-attack step eliminates findings that are *wrong*; it does not address findings that are *redundant*. These are different failure modes requiring different instructions. The prompt's own stake section treats redundancy as a first-class concern ("Every redundant line... dilutes attention"), yet applies no anti-redundancy rule to the output.
+
+**falsification:** Score final consolidated outputs for mechanism-level distinctness. If near-duplicate findings appear in ≥1 of 3 models' final lists, the merge instruction would have helped.
+
+**verdict:** low severity · LOW confidence (Analyst A's original calibration was appropriate)
+
+---
+
+### 10. "Reason Before Each Verdict" Is Redundant with Field Ordering
+
+**steelman:** The clause ensures models understand that analytical rigor, not just field-filling, is expected.
+
+**weakness:** The output format specifies: steelman → weakness → evidence → falsification → verdict. The reasoning (weakness, evidence) structurally precedes the verdict by field order. The clause *"reason before each verdict"* either restates what the field order enforces (redundancy) or asks for additional free-text reasoning outside the defined fields (ambiguity — where does it go?). In a prompt that charges every token for re-sending across rounds, 5 redundant tokens per round across all workers is a small but real waste, and the ambiguous interpretation risks minor format drift.
+
+**evidence:** Field ordering is deterministic: models following the prescribed order must produce reasoning before verdict. The clause adds no behavioral delta under the redundancy interpretation. Under the ambiguity interpretation, it creates an undefined structural slot.
+
+**falsification:** Delete *"reason before each verdict"*; run 6 responses. If output structure and verdict quality are unchanged, redundancy is confirmed.
+
+**verdict:** low severity · HIGH confidence
+
+---
+
+### 11. Partial Redundancy: "Keep the Rest" (Role) and "Keep Low-Confidence Findings" (Bullet 3)
+
+**steelman:** Restating the retention norm in both role and calibration sections ensures it isn't missed.
+
+**weakness:** Role: *"keep the rest — weak-but-plausible ones at low confidence."* Bullet 3: *"Keep low-confidence findings; never inflate."* The first clause of bullet 3 is a semantic duplicate. Only *"never inflate"* adds new content. In a prompt optimized for zero redundancy, this duplication costs ~6 tokens per round. Rewriting bullet 3 to *"Never inflate confidence."* preserves the unique instruction and saves the redundant prefix.
+
+**evidence:** Same directive, same semantic content ("retain low-confidence items"), two locations in the cached system block. Token cost is small but the prompt's own standard is zero redundancy.
+
+**falsification:** Rewrite bullet 3 to *"Never inflate confidence."* Run 6 responses. If low-confidence findings still appear, the "Keep" prefix was redundant.
+
+**verdict:** low severity · HIGH confidence
+
+---
+
+**Acceptability condition:** The prompt is acceptable when: (1) the round-2 bullet 4 sentence is resolved — either make the weakest-peer refutation explicitly optional ("If you hold counter-evidence against a peer finding, present it; otherwise state that no new critique survived and stop") or delete the forced-refutation clause entirely; (2) the anti-herding rule is rewritten to permit revision on directly inspectable peer evidence while still blocking confidence-based herding (Analyst A's rewrite is a viable replacement); (3) the "exact recall" authorization and the memory-downgrade review pass are collapsed into a single coherent rule (e.g., "Use reasoning chains as primary evidence; memory-sourced facts are permitted but must be marked [unverified] and capped at MEDIUM confidence"); and (4) the minor redundancies ("reason before each verdict," "Keep low-confidence findings" prefix) are trimmed. Items 1–3 are required; item 4 is recommended.

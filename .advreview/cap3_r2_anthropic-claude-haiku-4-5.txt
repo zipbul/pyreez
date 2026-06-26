@@ -1,0 +1,92 @@
+## Surviving Findings (Severity-Ordered)
+
+### 1. High Schema Volatility Creates Cumulative Migration Overhead
+
+**Weakness**: If product requirements evolve rapidly (≥3 major pivots per 6 months, or weekly structural changes), PostgreSQL's migration tax—each ALTER TABLE operation, migration testing, rollout sequencing, and validation—consumes 2-5 hours [estimated] per change, totaling 10-50 hours [estimated] of non-feature work. MongoDB's schemaless model allows the same pivot as pure application code, deployed in <1 hour with zero database-layer coordination. Under rapid iteration, this overhead compounds into material feature delay for a 4-person team.
+
+**How it survived peer challenge**: Analyst A1 and B1 both reinforce this finding. Analyst A1 correctly identifies that the proposal assumes schema stability without checking whether it holds for a typical MVP. Analyst B1 frames it as CRITICAL with weekly churn; I downgrade to HIGH for typical 1-3 pivots per month, which is more realistic but still painful. B1's falsification test (migration overhead <10% of total effort) is testable and raises severity if churn is proven weekly. However, the proposal does not specify churn rate, so this remains conditional.
+
+**Falsification**: Implement one realistic domain object and execute three schema changes (e.g., add field, rename field, refactor relationship) on both platforms, measuring: engineering hours from decision to 100% of code using new shape. If PostgreSQL consistently completes in ≤2 hours per change including testing and rollback validation, downgrade to MEDIUM.
+
+**Verdict**: **HIGH severity, MEDIUM confidence.** Holds only if actual schema churn exceeds 1 per quarter (typical for locked MVPs) and reaches 1+ per sprint (early-stage discovery).
+
+---
+
+### 2. Document-Shaped Access Patterns Make Relational Overhead Uncompensated
+
+**Weakness**: If the MVP's core workload is single-aggregate-per-request (fetch user + settings, save order + line items, retrieve campaign + variants), PostgreSQL's normalized schema forces joins, query complexity, and ORM impedance mismatch that MongoDB avoids by storing documents directly. The relational design's primary advantage—enforcing multi-entity constraints—provides no value when cross-aggregate queries are rare or deferred. In this case, the team pays for relational overhead without corresponding benefit, and each field addition or relationship reshape triggers ORM or schema coordination that MongoDB doesn't require.
+
+**How it survived peer challenge**: Analyst A2 correctly identifies this as a distinct dimension from schema churn. I initially missed this condition entirely. The falsification test (trace top request types; if majority are single-document operations) is concrete and actionable. This is not a team-capability issue (like A3); it's a fundamental workload-mismatch problem.
+
+**Falsification**: Instrument the MVP for one week post-launch and measure: what percentage of requests touch exactly one logical aggregate (user, order, campaign, etc.) without needing joins or cross-aggregate reads? If ≥70% are single-document, this finding holds; if <40%, PostgreSQL's relational design is earning its cost.
+
+**Verdict**: **HIGH severity, MEDIUM confidence.** Holds if workload is demonstrably document-shaped. Many early-stage SaaS products (engagement, configuration, CMS) fit this pattern; others (analytics, marketplace) do not.
+
+---
+
+### 3. Nested or Frequently Variable-Shape Data Workloads Increase Latency and Operational Complexity
+
+**Weakness**: If the MVP ingests or stores deeply nested, frequently changing data shapes (e.g., SaaS webhook events, user-generated structured configs, ML training data payloads), PostgreSQL's jsonb operators and semi-structured-column approach force either: (a) complex jsonb queries with nested operators that add CPU cost per write/read, or (b) normalization into EAV-style tables that require extra joins surfacing only under real load. These costs appear deferred (after launch) when they should have been visible in design. MongoDB stores the incoming nested structure directly, indexes it natively, and evolves it without query rewriting. Under high-volume nested ingestion, the latency and operational-bug surface area favor MongoDB.
+
+**How it survived peer challenge**: Analyst B2 correctly flags this as a distinct condition (nested/variable-shape workloads) that I did not identify. B2's falsification test (p95 latency within 20%, error rate parity) is concrete. However, B2 assumes the MVP will ingest high-volume nested data without establishing that as typical for 4-person SaaS in the first 6 months. Most early MVPs are user-facing CRUD, not data-pipeline-heavy. This finding is valid but conditional on workload type.
+
+**Falsification**: Design one realistic data ingestion scenario (e.g., 100 webhook events/minute, each with 5-10 levels of nesting and changing fields). Implement on both platforms and measure: write-path latency (p50, p95, p99), read-path query latency for common aggregations (e.g., "events where $.metadata.user_id = X"), and debugging effort when a query returns unexpected structure. If PostgreSQL stays within 20% of MongoDB on all three, downgrade to LOW severity.
+
+**Verdict**: **MEDIUM-HIGH severity, MEDIUM confidence.** Holds if workload is confirmed as nested/variable-shaped; evaporates if workload is flat or relational.
+
+---
+
+### 4. Operational Readiness: Setup Overhead and Time-to-Production Confidence
+
+**Weakness**: If the team has no prior DevOps or database operations experience AND uses raw PostgreSQL (not managed RDS), critical setup tasks compound: connection pooling tuning (misconfiguration → exhaustion), backup strategy validation (untested backups are useless), monitoring/alerting configuration, AUTOVACUUM and parameter tuning. This totals 18-34 hours [estimated] of pre-launch, non-feature work. These cannot be deferred; misconfigured backups discovered *after* data loss is catastrophic. MongoDB Atlas (managed service) ships production-ready with automated backups, replica sets, and monitoring pre-configured in <1 hour. RDS narrows the gap to 2-4 hours [estimated] but still requires parameter-group tuning for MVP workloads that RDS defaults don't anticipate [unverified specifics].
+
+**How it survived peer challenge**: Analyst B3 raises this finding with LOW confidence, correctly noting it's team-dependent. My Finding 2 (now Finding 4) is more nuanced: the gap between RDS and Atlas exists but is smaller than between raw Postgres and Atlas. B3 doesn't distinguish between raw Postgres and managed RDS, overstating the severity. However, the finding holds: a team without ops expertise still pays a setup tax with PostgreSQL that MongoDB Atlas avoids entirely.
+
+**Falsification**: Starting from zero infrastructure knowledge, provision a durable, monitored production instance on both: managed RDS PostgreSQL and MongoDB Atlas, via Terraform/IaC. Measure: calendar days to (a) backups tested and restorable, (b) monitoring firing correctly, (c) connection pooling in place and not bottlenecking, (d) team confirming operational confidence. If RDS reaches parity with Atlas in ≤4 hours total, downgrade to LOW severity.
+
+**Verdict**: **MEDIUM severity, MEDIUM confidence.** Holds if team lacks ops expertise AND uses raw PostgreSQL. Evaporates if using RDS (gap narrows to hours) or if team has ops background.
+
+---
+
+### 5. Backward-Incompatible Schema Changes in Months 3–5: Coordination Risk and Downtime Exposure
+
+**Weakness**: If the MVP discovers a critical data-model change during months 3–5 that is backward-incompatible (e.g., single `user.permissions` string → `user.roles[{name, scope}]` array), PostgreSQL requires a multi-phase coordinated deployment: (1) deploy new code reading both old and new schema, (2) run blocking migration (ALTER TABLE or slow UPDATE), (3) ensure all replicas complete before (4) deploying code that reads only new schema. This 3–7 day orchestration window creates rollback risk and blocks one team member on coordination. MongoDB allows asynchronous migration: deploy dual-read logic, background-rewrite old documents lazily, retire dual-read logic later. Zero coordination, zero downtime, zero rollback complexity.
+
+**How it survived peer challenge**: This was my Finding 3 initially. Neither peer challenged it directly, though Analyst B1's migration-overhead concern overlaps. The finding holds but is lower severity than schema churn (Finding 1) because it's localized to a single event, whereas churn is cumulative. The severity drops further if the change affects a non-critical domain (engagement, not payments); critical-domain changes justify PostgreSQL's atomicity.
+
+**Falsification**: Simulate a production system with 1–5M rows [estimated MVP scale]. Execute a real backward-incompatible change (single field → nested array with new semantics) on both platforms while measuring: wall-clock time from "deploy new code" to "all reads use new shape" to "all old-schema data migrated", plus any downtime observed. If PostgreSQL achieves zero-downtime migration in ≤4 hours with no rollback incident, downgrade to LOW.
+
+**Verdict**: **MEDIUM severity, MEDIUM confidence.** Holds for non-critical-path changes; evaporates if change is in a domain (payments, audit) where atomicity is a non-negotiable requirement.
+
+---
+
+### 6. Team Prioritization of Feature Velocity Over Data Hygiene (Deferred Schema Debt)
+
+**Weakness**: If the 4-person team prioritizes PMF discovery over data architecture, they may accumulate technical debt (orphaned migrations, denormalized schema, unapplied design patterns) to avoid PostgreSQL's coordination overhead. This defers cost but increases future rework. MongoDB lets the team avoid this choice by storing variable shapes directly; they never face the "run migration now or accept debt" dilemma.
+
+**How it survived peer challenge**: Analyst A3 raises this finding with LOW confidence, appropriately. It's speculative because disciplined teams can lock schema by month 2 and avoid the dilemma entirely. However, the finding holds as a *risk*: many early-stage teams do choose velocity over hygiene, and MongoDB's schemaless model is more forgiving of that choice. Confidence should remain LOW because it depends on team behavior and priorities, not on technical constraints.
+
+**Falsification**: Survey N early-stage SaaS teams (3–10 people) at 6-month post-launch: did they run planned schema migrations on time, or did they defer/skip migrations to ship features? If ≥60% ran migrations on schedule, this finding is refuted (teams do prioritize hygiene); if ≥60% deferred, it holds.
+
+**Verdict**: **MEDIUM severity (indirect), LOW confidence.** Holds as a behavioral risk but is not deterministic; depends on team discipline.
+
+---
+
+## Challenge to Peer Positions
+
+**Analyst B1** rates schema churn as CRITICAL; I rate it HIGH. The difference turns on churn frequency: if schema changes weekly (26+ per 6 months), it's CRITICAL; if 1–3 per month, it's HIGH. B1 does not establish the weekly baseline. I've kept HIGH unless churn is proven ≥weekly.
+
+**Analyst B3** understates the advantage of managed PostgreSQL over raw Postgres. RDS with automated backups + parameter tuning can reach production-readiness in 2–4 hours [estimated], not the "days" B3 implies. The gap between RDS and MongoDB Atlas is real but narrow. Severity: MEDIUM, not B3's suggested understatement of "LOW."
+
+---
+
+## Condition for Acceptability
+
+PostgreSQL is acceptable as the default **if and only if ALL of the following hold:**
+
+1. **Workload is not document-shaped**: MVP requires cross-aggregate queries, joins, or multi-entity relational constraints (fintech, reporting, marketplace). Single-aggregate-per-request access is <40% of requests.
+2. **Schema is locked early**: Product definition stabilizes by end of month 1; schema pivots ≤1 per quarter thereafter.
+3. **Operations capability exists or is outsourced**: Team has prior DevOps/database expertise, OR commits to managed RDS and accepts 2–4 hours [estimated] of parameter tuning.
+4. **Data is not nested/variable-shaped**: MVP does not ingest or heavily store deeply nested or frequently changing data (API webhooks, user configs, ML training data are <20% of workload).
+
+**If any condition fails, MongoDB (with managed Atlas) is superior for the 6-month MVP constraint.**

@@ -1,0 +1,1 @@
+A fintech stores idempotency keys for payment requests in Redis with a 24-hour TTL to dedupe retries. Identify the concrete conditions under which this design causes double-charges or lost/duplicate payments.

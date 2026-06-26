@@ -1,17 +1,11 @@
 /**
- * Deliberation prompt builders — heterogeneous multi-model deliberation.
+ * Deliberation prompt builders.
  *
- * Design principles (2025-2026 research-backed):
- *   - Responsibility separation: pyreez owns harness (anti-conformity, steelmanning,
- *     formatting, sharing). Host owns semantic payload (task, workerInstructions).
- *   - No role differentiation: diversity from heterogeneous models, not assigned roles
- *   - Over-prompting hurts on latest models (Anthropic/OpenAI/Google consensus)
- *   - XML tags for cross-model compatibility (3-provider consensus)
- *   - Task at end of user message (Lost-in-the-Middle, MIT 2025)
- *   - 3rd person for other positions reduces sycophancy (cross-verified)
- *   - CONSTRAINTS drive 42.7% of quality (sinc-LLM)
- *   - Steelmanning + 3rd person for anti-sycophancy (63.8% improvement)
- *   - System = fixed (caching), User = variable
+ * Each protocol exposes R1 / R2+ / FollowUp builders that return ChatMessage[]
+ * (system + user). The engine passes the result verbatim to LLM providers.
+ *
+ * Interpolated values (task, instructions, ownPrevious, otherResponses) are
+ * XML-escaped before being inserted between tags.
  *
  * @module Deliberation Prompts
  */
@@ -28,11 +22,17 @@ export interface RoundInfo {
 
 // -- Core Prompt Fragments --
 
-// Global depth: applies to ALL protocols. GOAL-only, no PROCESS prescription.
-const GLOBAL_DEPTH = `Ground factual claims in specific evidence. For speculative ideas, state the reasoning chain.
-If a premise is flawed, reject it — do not build on a broken foundation.
-Express uncertainty where it exists. Do not force confidence on ambiguous points.
-Before finishing, verify your key claims.`;
+// Applies to all protocols.
+const GLOBAL_DEPTH = `<grounding>
+- Every factual claim must point to specific evidence: a benchmark, a versioned spec, a production incident, or a measurable signal.
+- For speculative reasoning, state the chain explicitly so it can be checked.
+- Reject a flawed premise outright — do not build on a broken foundation.
+- Express uncertainty where it exists; never force confidence on an ambiguous point.
+</grounding>
+
+<completion-check>
+Before submitting, verify every major claim carries both evidence and a confidence marker. Drop any claim that fails this check.
+</completion-check>`;
 
 // Protocol-specific depth extensions (additive to GLOBAL_DEPTH)
 const DEPTH_EXPLORE = `Consider multiple approaches before committing. Discard the weakest before finalizing.
@@ -46,13 +46,6 @@ const ANTI_CONFORMITY = `Assess discrepancies between your analysis and others' 
 Change your position only when evidence against your analysis is clear.
 State what specific evidence or logic led you to agree or disagree.
 Do not rely on conformity, consensus, or social pressure.
-When others report their confidence, weigh their evidence against their stated certainty: high-confidence claims with weak evidence are red flags; low-confidence claims with strong evidence deserve attention.`;
-
-const ANTI_CONFORMITY_ADVERSARIAL = `For every position you encounter, identify its weakest point with specific evidence.
-Before criticizing, restate the opposing argument in its strongest form (steelman).
-Concede points where the opposing evidence is genuinely stronger than yours.
-State what you concede and why, with the specific evidence that convinced you.
-Do not agree to reach consensus. Do not soften criticism.
 When others report their confidence, weigh their evidence against their stated certainty: high-confidence claims with weak evidence are red flags; low-confidence claims with strong evidence deserve attention.`;
 
 const CONFIDENCE_AND_UNCERTAINTY = `For each major claim, indicate your confidence:
@@ -85,8 +78,7 @@ function escapeXmlContent(text: string): string {
 }
 
 /**
- * Format other workers' responses in 3rd person (sycophancy reduction).
- * Includes confidence when reported (ConfMAD: agents condition updates on others' confidence).
+ * Format other workers' responses in 3rd person, with reported confidence inline.
  */
 function formatOtherPositions(responses: readonly WorkerResponse[], workerIndex?: number): string {
   return responses
@@ -98,38 +90,26 @@ function formatOtherPositions(responses: readonly WorkerResponse[], workerIndex?
     .join("\n\n");
 }
 
-// -- Digest Helper (retained for external use) --
-
 /**
- * Extract debate-relevant digest from a worker response as plain text.
- *
- * Extraction priority:
- * 1. <position> and <evidence> tags (backward compat)
- * 2. Last non-empty line as summary heuristic
- * 3. First 3 lines as fallback
+ * Format peer positions for adversarial challenge with turn-local "Analyst A/B" labels.
+ * Labels are local to this turn — the visible subset changes per round via sparse sharing, so
+ * they are NOT stable across rounds; they only let a worker reference distinct peers in this turn.
  */
-export function extractDebateDigest(content: string): string {
-  const position = content.match(/<position>([\s\S]*?)<\/position>/);
-  const evidence = content.match(/<evidence>([\s\S]*?)<\/evidence>/);
-  const alternatives = content.match(/<alternatives>([\s\S]*?)<\/alternatives>/);
+function formatChallengePositions(responses: readonly WorkerResponse[]): string {
+  return responses
+    .map((r, i) => {
+      const label = `Analyst ${String.fromCharCode(65 + (i % 26))}`;
+      const conf = r.confidence ? ` (their confidence: ${r.confidence.toUpperCase()})` : "";
+      return `${label} argues${conf}:\n${escapeXmlContent(r.content)}`;
+    })
+    .join("\n\n");
+}
 
-  if (position?.[1] || evidence?.[1] || alternatives?.[1]) {
-    const parts: string[] = [];
-    if (position?.[1]) parts.push(`Position: ${position[1].trim()}`);
-    if (evidence?.[1]) parts.push(`Evidence: ${evidence[1].trim()}`);
-    if (alternatives?.[1]) parts.push(`Alternatives: ${alternatives[1].trim()}`);
-    return parts.join("\n");
-  }
+/** Final-round consolidation signal for adversarial debate (no forced convergence). */
+const ADVERSARIAL_CLOSING = `<closing>This is the final round. Consolidate into one severity-ordered list: keep the weaknesses that survived challenge and fold in any new ones. State each weakness once with its full fields, folding any challenge to a peer into that finding's own target/steelman/evidence — do not add separate per-peer challenge, unresolved-disagreement, or summary sections. Do not manufacture agreement; keep an unresolved disagreement inside its finding rather than dropping it.</closing>`;
 
-  const lines = content.trim().split("\n").filter((l) => l.trim().length > 0);
-  if (lines.length > 3) {
-    const lastLine = lines[lines.length - 1]!.trim();
-    if (lastLine.length > 10 && lastLine.length < 500 && !lastLine.startsWith("```")) {
-      return lastLine;
-    }
-  }
-
-  return content.split("\n").slice(0, 3).join("\n").trim();
+function isFinalRound(roundInfo?: RoundInfo): boolean {
+  return roundInfo != null && roundInfo.current === roundInfo.max && roundInfo.max > 1;
 }
 
 // ============================================================
@@ -143,7 +123,7 @@ const SHARED_CONVERGENCE_SYSTEM = buildSystemPrompt(
   DEPTH_EXPLORE,
 );
 
-// -- R1 Diversity Lenses (DMAD-inspired: diverse reasoning per worker) --
+// -- R1 Diversity Lenses --
 
 const DIVERSITY_LENSES = [
   "Prioritize practical constraints: cost, timeline, team capability, migration effort. What looks good on paper but fails in practice?",
@@ -157,7 +137,7 @@ const DIVERSITY_LENSES = [
 
 /**
  * Build R1 messages for shared_convergence (independent analysis).
- * Each worker gets a different analysis lens (DMAD-inspired diversity).
+ * Each worker gets a different analysis lens by workerIndex.
  */
 export function buildSharedConvergenceR1(
   ctx: SharedContext,
@@ -169,9 +149,9 @@ export function buildSharedConvergenceR1(
 
   const userParts: string[] = [];
 
-  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
 
-  // Assign diversity lens per worker (DMAD: diverse reasoning methods prevent mental set)
+  // Assign one of the DIVERSITY_LENSES per worker (cycles by workerIndex).
   if (workerIndex != null && roundInfo && roundInfo.max > 1) {
     const lens = DIVERSITY_LENSES[workerIndex % DIVERSITY_LENSES.length]!;
     userParts.push(`<analysis-lens>${lens}</analysis-lens>`);
@@ -181,7 +161,7 @@ export function buildSharedConvergenceR1(
   if (roundInfo && roundInfo.current === 1 && roundInfo.max > 1) {
     userParts.push("Explore broadly. Do not converge prematurely.");
   }
-  userParts.push(`<task>${ctx.task}</task>`);
+  userParts.push(`<task>${escapeXmlContent(ctx.task)}</task>`);
 
   return [
     { role: "system", content: system },
@@ -204,14 +184,14 @@ export function buildSharedConvergenceR2(
 
   const userParts: string[] = [];
 
-  // Reference data (long content) at top — Lost-in-the-Middle: push to start
+  // Reference data first, task last.
   if (otherResponses.length > 0) {
     const others = formatOtherPositions(otherResponses);
     if (others) userParts.push(`<other-positions>\n${others}\n</other-positions>`);
   }
 
   if (ownPrevious) {
-    userParts.push(`<your-previous>${ownPrevious.content}</your-previous>`);
+    userParts.push(`<your-previous>${escapeXmlContent(ownPrevious.content)}</your-previous>`);
   } else if (ctx.rounds.length > 0) {
     // Cold join: full transcript
     const transcript = ctx.rounds.map((r) => {
@@ -224,7 +204,7 @@ export function buildSharedConvergenceR2(
   }
 
   // Instructions and constraints at bottom — close to task for recall
-  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
 
   // Restore R1 diversity lens in R2+ (prevents lens loss across rounds)
   if (workerIndex != null && roundInfo && roundInfo.max > 1) {
@@ -239,7 +219,7 @@ export function buildSharedConvergenceR2(
     userParts.push("This is the final round. Commit to your strongest position.");
   }
 
-  userParts.push(`<task>${ctx.task}</task>`);
+  userParts.push(`<task>${escapeXmlContent(ctx.task)}</task>`);
 
   return [
     { role: "system", content: system },
@@ -251,70 +231,142 @@ export function buildSharedConvergenceR2(
  * Build follow-up message for session continuation in shared_convergence.
  */
 export function buildSharedConvergenceFollowUp(
-  ctx: SharedContext,
+  _ctx: SharedContext,
   otherResponses: readonly WorkerResponse[],
-  instructions?: string,
+  _instructions?: string,
   roundInfo?: RoundInfo,
   workerIndex?: number,
 ): ChatMessage {
+  // FollowUp runs in session-continuation mode (engine.ts callWithFallback).
+  // The full R1 message[1] — host-instructions, CONFIDENCE anchor, <task> — is
+  // already in history. We only emit deltas: new opposing positions, the
+  // adversarial-style constraints for this round, the per-worker analysis
+  // lens, and the final-round commit signal (none of which are in history).
   const parts: string[] = [];
 
-  // Reference data at top
   if (otherResponses.length > 0) {
     const others = formatOtherPositions(otherResponses);
     if (others) parts.push(`<other-positions>\n${others}\n</other-positions>`);
   }
 
-  // Instructions and constraints at bottom
-  if (instructions) parts.push(`<host-instructions>${instructions}</host-instructions>`);
-
-  // Restore R1 diversity lens
   if (workerIndex != null && roundInfo && roundInfo.max > 1) {
     const lens = DIVERSITY_LENSES[workerIndex % DIVERSITY_LENSES.length]!;
     parts.push(`<analysis-lens>${lens}</analysis-lens>`);
   }
 
   parts.push(`<constraints>\n${ANTI_CONFORMITY}\n</constraints>`);
-  parts.push(CONFIDENCE_AND_UNCERTAINTY);
 
   if (roundInfo && roundInfo.current === roundInfo.max && roundInfo.max > 1) {
     parts.push("This is the final round. Commit to your strongest position.");
   }
 
-  parts.push(`<task>${ctx.task}</task>`);
   return { role: "user", content: parts.join("\n\n") };
 }
 
 // -- 2. Adversarial Debate --
 
-const ADVERSARIAL_SYSTEM = buildSystemPrompt(
-  "Think deeply, present concisely. No preamble — lead with your position. You are seeing other analysts' positions. Your goal is to find weaknesses.",
-  DEPTH_EXPLORE,
-);
+// Standing reference (static). NOT built via buildSystemPrompt: adversarial does not use
+// GLOBAL_DEPTH/DEPTH_EXPLORE — its evidence/confidence/output rules live here, once.
+// Role + output-format are shared; the evidence block swaps on webAccess (no-lookup discipline
+// vs verify-with-tools).
+const ADVERSARIAL_ROLE = `<role>
+You are one of several independent analysts stress-testing a proposal. Surface its strongest, evidence-backed weaknesses. Enumerate candidate failure modes, attack each, drop any your own counter-attack defeats or that only fire under conditions the proposal rules out, and keep the rest — weak-but-plausible ones at low confidence. No preamble before the first finding.
+</role>`;
 
-// Adversarial stance lenses removed: heterogeneous models already provide
-// perspective diversity. Assigning per-worker stances conflated two variables
-// (model difference × question difference), and frame-rejecting lenses (3 of 7)
-// produced outputs the synthesis/acceptance pipeline could not handle.
-// Adversarial dynamics come from R2+ challenge structure + ANTI_CONFORMITY_ADVERSARIAL.
+// No-lookup: the worker cannot verify, so the discipline is recall-honesty + abstention.
+// NOTE: adversarial confidence uses a falsifier-decisiveness scale (HIGH = a cheap deterministic check
+// settles it) INTENTIONALLY distinct from the shared CONFIDENCE_AND_UNCERTAINTY (evidence-strength) used by
+// the other protocols. The labels (HIGH/MEDIUM/LOW) collide but the semantics differ — do not "dedupe" the
+// two definitions. (Measured: the falsifier rubric is reliably judgeable, kappa 0.60.)
+const ADVERSARIAL_EVIDENCE_NOLOOKUP = `<evidence-and-confidence>
+- No lookups: reasoning chains (mechanism → break → consequence) or exact recall only. Never invent sources, identifiers, quotes, or numbers, and never emit a URL, "Sources" list, or line/section number — without a lookup you cannot confirm those.
+- When a specific is uncertain — existence, attribution, identifier, venue/year, wording, or figure — don't assert it: describe the capability without naming it, drop quotes, give a direction or order-of-magnitude range for numbers, and mark [unverified]. An operational number you estimated rather than recall (hours, %, throughput, counts) must carry [unverified] — never state it as a measured fact.
+- Confidence: HIGH = one cheap deterministic check decides it; MEDIUM = needs a benchmark/load test/other contingent evidence, or the reasoning has a gap, or it only bites under particular load/timing/config; LOW = speculative or [unverified]. Never inflate.
+- A flawed premise is itself a weakness — surface it; never build on it or refuse.
+- Before submitting, re-verify each cited source, number, and quote in isolation; drop and mark [unverified] any you cannot confirm from memory. Fix self-contradictory findings.
+</evidence-and-confidence>`;
+
+// Web-enabled: the worker CAN verify, so the discipline is verify-before-asserting.
+const ADVERSARIAL_EVIDENCE_WEB = `<evidence-and-confidence>
+- You have web search and fetch tools. Before asserting any source, exact number, quoted string, or named identifier (command/flag/function/API/config-key and its default value), VERIFY it: search for it, fetch the page, and confirm the source exists and actually states that claim/value/identifier. Cite what you verified, with the URL.
+- A quoted string must be the verbatim text you fetched; a number or default must be the value the source states; a named identifier must be one you confirmed exists. If a lookup cannot confirm it, write [unverified] and give your reasoning instead — never assert an unverified specific.
+- ANTI-FABRICATION (most common failure with tools): put quotation marks ONLY around words you copied from a page you actually fetched THIS session and can see contain that exact string. If you are reconstructing the gist, do NOT use quotation marks — paraphrase. Never write "(verified)" next to a claim unless the page you fetched literally states it, and list every URL you cite in a Sources section. A real URL beside an invented quote is worse than no citation — it manufactures false authority.
+- Your reasoning chain (mechanism → why it breaks → consequence) is valid evidence, but it does not by itself earn HIGH. Confidence per finding: HIGH = a fetched source you verified confirms it, or one cheap deterministic check decides it; MEDIUM = needs a benchmark/load test, or the reasoning has a gap, or it only bites under particular load/timing/config; LOW = speculative or [unverified]. Never inflate.
+- If a premise is flawed, surface it as a weakness with reasoning — do not silently build on it, and do not refuse the task.
+- Before submitting, re-read each finding for an internal contradiction (a label/severity its own text undercuts) and resolve it.
+</evidence-and-confidence>`;
+
+const ADVERSARIAL_OUTPUT_FORMAT = `<output-format>
+Follow host-format if given; otherwise use this. Order findings by severity, most critical first. Per finding, in this field order:
+- target (only when challenging a peer): the analyst you are challenging, e.g. "Analyst B"
+- steelman: strongest form of the position you attack (1-2 sentences)
+- weakness: the scenario/condition under which it breaks (one paragraph)
+- evidence: your reasoning chain, or an exact-recall citation (per the rules above)
+- falsification: the cheapest concrete test that would change your mind
+- verdict: severity (critical | high | medium | low) and confidence (HIGH | MEDIUM | LOW)
+End with one line: the condition under which the proposal is acceptable, or state none exists within its constraints.
+</output-format>`;
+
+/** Adversarial system message. webAccess swaps the no-lookup discipline for verify-with-tools. */
+function adversarialSystem(webAccess = false): string {
+  return [
+    ADVERSARIAL_ROLE,
+    webAccess ? ADVERSARIAL_EVIDENCE_WEB : ADVERSARIAL_EVIDENCE_NOLOOKUP,
+    ADVERSARIAL_OUTPUT_FORMAT,
+  ].join("\n\n");
+}
+
+// Drift-sensitive directives, re-injected into the user turn so late-round conformity pressure cannot
+// erode them. Split by round: R1 has no peers/prior, so peer-relative lines (consensus, weighing others,
+// not-restating) would be dead weight; they appear only from R2. Steelmanning lives in the output-format
+// steelman field, not here.
+const ADVERSARIAL_APPROACH_R1 = `<approach>
+Do not soften your criticism. Every finding must be substantive and falsifiable.
+</approach>`;
+
+const ADVERSARIAL_APPROACH_PEER = `<approach>
+- Steelman each peer before attacking it. Do not soften criticism, and do not agree merely to reach consensus.
+- Revise your prior position only when evidence in the record — including a peer's concrete evidence — falsifies it; never because another analyst sounded confident.
+- Weigh others' evidence against their stated confidence: high confidence on weak evidence is a red flag; low confidence on strong evidence deserves attention.
+- If a new substantive, falsifiable critique survives your counter-attack, add it. If none does, do not pad — instead pick the peer finding you judge weakest and try to refute it, stating your verdict (holds / refuted) and the test that would settle it.
+</approach>`;
+
+// Per-worker R1 attack-angle: each worker is steered toward a distinct
+// weakness-search frame at R1, so the round opens with five different angles
+// of critique instead of five copies of the same critique.
+const ATTACK_ANGLES = [
+  "Focus on hidden assumptions — what implicit premises must hold for this to work?",
+  "Focus on evidence gaps — what is asserted without measurable support?",
+  "Focus on operational failure — under what conditions does this break in production?",
+  "Focus on edge cases and adversarial input — what scenarios make this fall apart?",
+  "Focus on incentive misalignment — whose interests does this serve vs whose does it harm?",
+];
 
 /**
  * Build R1 for adversarial_debate.
- * All workers receive the same prompt — diversity comes from heterogeneous models.
+ * Shared system + per-worker attack-angle: diversity comes from heterogeneous models AND a
+ * distinct weakness-search frame per worker (workerIndex-keyed).
  */
 export function buildAdversarialDebateR1(
   ctx: SharedContext,
   instructions?: string,
   _roundInfo?: RoundInfo,
-  _workerIndex?: number,
+  workerIndex?: number,
+  webAccess = false,
 ): ChatMessage[] {
-  const system = ADVERSARIAL_SYSTEM;
+  const system = adversarialSystem(webAccess);
 
   const userParts: string[] = [];
-  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
 
-  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
-  userParts.push(`<task>${ctx.task}</task>`);
+  userParts.push(ADVERSARIAL_APPROACH_R1);
+
+  if (workerIndex != null) {
+    const angle = ATTACK_ANGLES[workerIndex % ATTACK_ANGLES.length]!;
+    userParts.push(`<attack-angle>${angle}</attack-angle>`);
+  }
+
+  userParts.push(`<task>${escapeXmlContent(ctx.task)}</task>`);
 
   return [
     { role: "system", content: system },
@@ -330,38 +382,50 @@ export function buildAdversarialDebateR2(
   otherResponses: readonly WorkerResponse[],
   ownPrevious: WorkerResponse | undefined,
   instructions?: string,
-  _roundInfo?: RoundInfo,
-  _workerIndex?: number,
+  roundInfo?: RoundInfo,
+  workerIndex?: number,
+  webAccess = false,
 ): ChatMessage[] {
-  const system = ADVERSARIAL_SYSTEM;
+  const system = adversarialSystem(webAccess);
 
   const userParts: string[] = [];
 
   // Reference data at top
   if (otherResponses.length > 0) {
-    const others = formatOtherPositions(otherResponses);
+    const others = formatChallengePositions(otherResponses);
     if (others) userParts.push(`<positions-to-challenge>\n${others}\n</positions-to-challenge>`);
   }
 
   if (ownPrevious) {
-    userParts.push(`<your-previous>${ownPrevious.content}</your-previous>`);
+    userParts.push(`<your-previous>${escapeXmlContent(ownPrevious.content)}</your-previous>`);
   } else if (ctx.rounds.length > 0) {
+    // Cold join: full transcript with turn-local labels + confidence.
     const transcript = ctx.rounds.map((r) => {
       const workers = r.responses
-        .map((resp) => `One analyst argues:\n${escapeXmlContent(resp.content)}`)
+        .map((resp, i) => {
+          const label = `Analyst ${String.fromCharCode(65 + (i % 26))}`;
+          const conf = resp.confidence ? ` (their confidence: ${resp.confidence.toUpperCase()})` : "";
+          return `${label} argues${conf}:\n${escapeXmlContent(resp.content)}`;
+        })
         .join("\n\n");
       return `### Round ${r.number}\n${workers}`;
     }).join("\n\n");
     userParts.push(`<debate-so-far>\n${transcript}\n</debate-so-far>`);
   }
 
-  // Instructions and constraints at bottom
-  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  // A swapped (cold-rebuild) model lacks history, so re-send host-instructions here.
+  if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
 
-  userParts.push(`<constraints>\n${ANTI_CONFORMITY_ADVERSARIAL}\n</constraints>`);
-  userParts.push(CONFIDENCE_AND_UNCERTAINTY);
+  userParts.push(ADVERSARIAL_APPROACH_PEER);
 
-  userParts.push(`<task>${ctx.task}</task>`);
+  if (workerIndex != null) {
+    const angle = ATTACK_ANGLES[workerIndex % ATTACK_ANGLES.length]!;
+    userParts.push(`<attack-angle>${angle}</attack-angle>`);
+  }
+
+  if (isFinalRound(roundInfo)) userParts.push(ADVERSARIAL_CLOSING);
+
+  userParts.push(`<task>${escapeXmlContent(ctx.task)}</task>`);
 
   return [
     { role: "system", content: system },
@@ -373,27 +437,33 @@ export function buildAdversarialDebateR2(
  * Build follow-up for adversarial_debate session continuation.
  */
 export function buildAdversarialDebateFollowUp(
-  ctx: SharedContext,
+  _ctx: SharedContext,
   otherResponses: readonly WorkerResponse[],
-  instructions?: string,
-  _roundInfo?: RoundInfo,
-  _workerIndex?: number,
+  _instructions?: string,
+  roundInfo?: RoundInfo,
+  workerIndex?: number,
 ): ChatMessage {
+  // Session-continuation mode. The system block (rules/output-format/confidence taxonomy) and the
+  // R1 user turn (<host-instructions>, <task>) are already in history. Emit only deltas: new
+  // positions, the re-injected drift-sensitive <approach>, the per-worker attack-angle, and the
+  // final-round closing. Task is intentionally NOT re-anchored (consistent with shared_convergence
+  // session-continuation) — it lives in history.
   const parts: string[] = [];
 
-  // Reference data at top
   if (otherResponses.length > 0) {
-    const others = formatOtherPositions(otherResponses);
+    const others = formatChallengePositions(otherResponses);
     if (others) parts.push(`<positions-to-challenge>\n${others}\n</positions-to-challenge>`);
   }
 
-  // Instructions and constraints at bottom
-  if (instructions) parts.push(`<host-instructions>${instructions}</host-instructions>`);
+  parts.push(ADVERSARIAL_APPROACH_PEER);
 
-  parts.push(`<constraints>\n${ANTI_CONFORMITY_ADVERSARIAL}\n</constraints>`);
-  parts.push(CONFIDENCE_AND_UNCERTAINTY);
+  if (workerIndex != null) {
+    const angle = ATTACK_ANGLES[workerIndex % ATTACK_ANGLES.length]!;
+    parts.push(`<attack-angle>${angle}</attack-angle>`);
+  }
 
-  parts.push(`<task>${ctx.task}</task>`);
+  if (isFinalRound(roundInfo)) parts.push(ADVERSARIAL_CLOSING);
+
   return { role: "user", content: parts.join("\n\n") };
 }
 
@@ -421,13 +491,13 @@ export function buildHostInterrogationMessages(
 
   if (previousExchanges && previousExchanges.length > 0) {
     const exchanges = previousExchanges.map((ex) =>
-      `<question>${ex.question}</question>\n<your-answer>${ex.answer}</your-answer>`
+      `<question>${escapeXmlContent(ex.question)}</question>\n<your-answer>${escapeXmlContent(ex.answer)}</your-answer>`
     ).join("\n\n");
     userParts.push(`<previous-exchange>\n${exchanges}\n</previous-exchange>`);
   }
 
-  userParts.push(`<question>${question}</question>`);
-  userParts.push(`<context>${task}</context>`);
+  userParts.push(`<question>${escapeXmlContent(question)}</question>`);
+  userParts.push(`<context>${escapeXmlContent(task)}</context>`);
 
   return [
     { role: "system", content: HOST_INTERROGATION_SYSTEM },
@@ -462,9 +532,9 @@ export function buildSequentialRefinementMessages(
   }
 
   const userParts: string[] = [];
-  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
-  userParts.push(`<previous-version>\n${previousWorkerOutput}\n</previous-version>`);
-  userParts.push(`<task>${ctx.task}</task>`);
+  if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
+  userParts.push(`<previous-version>\n${escapeXmlContent(previousWorkerOutput)}\n</previous-version>`);
+  userParts.push(`<task>${escapeXmlContent(ctx.task)}</task>`);
 
   return [
     { role: "system", content: SEQUENTIAL_REFINEMENT_SYSTEM },
@@ -505,10 +575,10 @@ export function buildEvaluationScoringMessages(
   instructions?: string,
 ): ChatMessage[] {
   const userParts: string[] = [];
-  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
-  userParts.push(`<evaluation-criteria>\n${criteria}\n</evaluation-criteria>`);
-  userParts.push(`<subject>\n${subject}\n</subject>`);
-  userParts.push(`<task>${task}</task>`);
+  if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
+  userParts.push(`<evaluation-criteria>\n${escapeXmlContent(criteria)}\n</evaluation-criteria>`);
+  userParts.push(`<subject>\n${escapeXmlContent(subject)}\n</subject>`);
+  userParts.push(`<task>${escapeXmlContent(task)}</task>`);
 
   return [
     { role: "system", content: EVALUATION_SCORING_SYSTEM },
@@ -547,11 +617,11 @@ export function buildRedTeamGeneratorMessages(
   previousAttackResults?: string,
 ): ChatMessage[] {
   const userParts: string[] = [];
-  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
+  if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
   if (previousAttackResults) {
-    userParts.push(`<attack-results>\n${previousAttackResults}\n</attack-results>`);
+    userParts.push(`<attack-results>\n${escapeXmlContent(previousAttackResults)}\n</attack-results>`);
   }
-  userParts.push(`<task>${task}</task>`);
+  userParts.push(`<task>${escapeXmlContent(task)}</task>`);
 
   return [
     { role: "system", content: RED_TEAM_GENERATOR_SYSTEM },
@@ -568,10 +638,10 @@ export function buildRedTeamAttackerMessages(
   instructions?: string,
 ): ChatMessage[] {
   const userParts: string[] = [];
-  if (instructions) userParts.push(`<host-instructions>${instructions}</host-instructions>`);
-  const targets = targetOutputs.map((o) => `<target-output>\n${o}\n</target-output>`).join("\n\n");
+  if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
+  const targets = targetOutputs.map((o) => `<target-output>\n${escapeXmlContent(o)}\n</target-output>`).join("\n\n");
   userParts.push(targets);
-  userParts.push(`<task>${task}</task>`);
+  userParts.push(`<task>${escapeXmlContent(task)}</task>`);
 
   return [
     { role: "system", content: RED_TEAM_ATTACKER_SYSTEM },
@@ -607,6 +677,8 @@ Respond with ONLY the following XML structure:
 </acceptance>
 </output-format>`;
 
+  // Markdown body: do NOT escape — synthesis/position may contain legitimate
+  // code samples (`Array<T>`, comparisons, HTML) that must round-trip verbatim.
   const user = `## Your Original Position\n${originalPosition}\n\n## Synthesis\n${synthesis}\n\n## Task\n${task}`;
 
   return [

@@ -53,6 +53,11 @@ export interface ChatCompletionRequest {
    * CLI providers: switch to read-only tool mode.
    * API providers: include file-access tool definitions. */
   fileAccess?: boolean;
+  /** Enable web lookup tools (WebSearch/WebFetch) so the worker can VERIFY citations
+   * instead of recalling them. Claude CLI only (other providers ignore). */
+  webAccess?: boolean;
+  /** Vendor reasoning-effort level. Provider maps to its own flag. */
+  reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
 // --- Response Types ---
@@ -78,6 +83,8 @@ export interface ChatCompletionUsage {
   total_tokens: number;
   /** Number of input tokens served from provider cache (observation/reporting only). */
   cached_tokens?: number;
+  /** Reasoning-only output tokens (OpenAI reasoning models). Already included in completion_tokens; surfaced separately for cost attribution. */
+  reasoning_tokens?: number;
 }
 
 export interface ChatCompletionResponse {

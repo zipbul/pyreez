@@ -1,0 +1,101 @@
+## Weakness Analysis: Redis-Based Idempotency Keys (24h TTL) for Payment Dedup
+
+---
+
+### Finding 1 — Write-to-Redis and charge-to-processor are not atomically linked
+
+- **severity**: critical
+- **confidence**: HIGH
+- **target**: proposal (ordering of Redis write vs. payment execution)
+- **steelman**: By inserting the idempotency key before calling the payment processor, you guarantee no duplicate processor call can slip through the check.
+- **weakness**: There is no ordering of the Redis write and the processor call that avoids both double-charges *and* lost payments without additional machinery. **Write-first, charge-second**: if the charge fails or the process crashes after writing the key but before completing the charge, the key blocks all retries for 24 hours — the payment is silently lost. **Charge-first, write-second**: if the process crashes after the charge succeeds but before the key is persisted, the retry will see no key and charge again — double-charge. This is a classic two-phase-commit gap, and Redis alone cannot close it because it has no transaction coupling with the payment processor's state machine.
+- **evidence**: Stripe's idempotency implementation explicitly stores a lifecycle phase (`started → charging → charged`) so that a crash between phases allows safe resumption (Stripe API docs, "Idempotent Requests"; Brandur Leach, "Implementing Stripe-like Idempotency Keys in Postgres," 2017). A bare key-exists check cannot replicate this.
+- **falsification**: Show that the implementation uses a state machine (e.g., `PENDING → COMPLETED / FAILED`) persisted atomically alongside the idempotency key, and that retries during `PENDING` either block or resume — not reject.
+
+---
+
+### Finding 2 — Redis replication is asynchronous; failover silently drops keys
+
+- **severity**: critical
+- **confidence**: HIGH
+- **target**: proposal (implicit assumption: Redis is durable)
+- **steelman**: Redis Sentinel / Cluster provides high availability, so the idempotency store survives node failure.
+- **weakness**: Redis replication is asynchronous by default. A key written to the master that has not yet replicated to the replica will be lost on failover (master crash, network partition, or Sentinel-promoted replica). The client retries, finds no key, and the payment is charged again. In Redis Cluster, a netsplit where the master is in the minority partition will also discard acknowledged writes when the partition heals. Under `WAIT` you can request synchronous replication, but `WAIT` does not guarantee the write won't be rolled back on failover — only that N replicas acknowledged the write at that moment (Redis docs: "WAIT does not make Redis a strongly consistent store").
+- **evidence**: Redis documentation, "Replication" section: "Redis uses asynchronous replication, with asynchronous replica-to-master acknowledges of the amount of data processed." Jepsen's Redis Raft analysis (2023) confirms write-loss scenarios under partitions even with Sentinel.
+- **falsification**: Demonstrate the deployment uses Redis with the Raft-based `RedisRaft` module (strongly consistent) or that idempotency keys are cross-checked against a durable store (e.g., Postgres) before charging.
+
+---
+
+### Finding 3 — 24-hour TTL permits double-charges on late retries
+
+- **severity**: high
+- **confidence**: HIGH
+- **target**: proposal (TTL duration assumption)
+- **steelman**: 24 hours is generous; legitimate retries happen within seconds or minutes.
+- **weakness**: Retries are not always controlled by the fintech's own client. Mobile apps may queue requests while offline for days. Webhook-driven partner systems may replay after 24+ hours during an outage recovery. Batch reconciliation processes may re-submit transactions from T-2 or T-3. Card network dispute/re-presentment cycles operate on timescales of 30–120 days. Once the 24-hour window closes, the key vanishes and the system has zero memory of the original request — a textbook double-charge. Extending the TTL indefinitely is not viable in Redis (memory-bound), which reveals a deeper problem: Redis is the wrong *sole* store for a guarantee that must outlive ephemeral state.
+- **evidence**: Visa's dispute lifecycle allows re-presentment up to 30 calendar days after chargeback (Visa Core Rules, §11.3). AWS and GCP recommend client-side retry with exponential backoff up to hours/days for transient failures. Apple's `NSURLSession` background transfers can resume after device reboot.
+- **falsification**: Show that a durable store (RDBMS) records every completed idempotency key permanently (or for 90+ days), and Redis is merely a fast-path cache in front of it.
+
+---
+
+### Finding 4 — Memory pressure or misconfigured eviction policy silently destroys keys before TTL
+
+- **severity**: high
+- **confidence**: HIGH
+- **target**: proposal (implicit assumption: TTL is the only expiry mechanism)
+- **steelman**: Keys are set with a 24-hour TTL, so they exist for exactly that window.
+- **weakness**: Redis enforces `maxmemory` limits. Under memory pressure, if the eviction policy is `allkeys-lru`, `allkeys-random`, or any `volatile-*` variant, idempotency keys can be evicted *well before* their TTL expires. The application receives no notification of this eviction. A retry arriving post-eviction sees no key and proceeds to double-charge. Even `noeviction` only prevents new writes — which will cause the idempotency-key SET itself to fail with an OOM error, potentially allowing the charge to proceed without dedup protection if the error path isn't handled correctly.
+- **evidence**: Redis docs, "Using Redis as an LRU cache": "When maxmemory limit is reached, the behavior Redis follows is configured using the maxmemory-policy configuration directive." Default policy in many managed Redis offerings (e.g., AWS ElastiCache) is `volatile-lru`.
+- **falsification**: Confirm the Redis instance uses `noeviction` policy, has provisioned memory at ≥2× peak idempotency key working set, and the application code treats a SET failure as a hard stop (refuses to proceed to charge).
+
+---
+
+### Finding 5 — Non-atomic check-and-set allows race between concurrent duplicate requests
+
+- **severity**: high
+- **confidence**: MEDIUM
+- **target**: proposal (implicit assumption: check and insert are atomic)
+- **steelman**: The application checks for the key, and if absent, inserts it — this deduplicates retries.
+- **weakness**: If the check (`GET`/`EXISTS`) and the insert (`SET`) are separate commands without `SET NX` (or equivalent atomic primitive), two identical requests arriving within microseconds of each other can both pass the existence check before either writes. Both proceed to charge. Even with `SET NX`, if the response-handling code path reads the key's *value* (e.g., to return a cached response) in a separate `GET`, a TOCTOU window exists between the `SET NX` succeeding and the value being populated. Lua scripting or `SET key value NX EX ttl` as a single command is required, but the proposal doesn't specify atomicity guarantees.
+- **evidence**: Redis documentation for `SET`: "SET key value NX" is the canonical atomic check-and-set. OWASP and multiple fintech post-mortems (e.g., GoCardless engineering blog, 2018) cite non-atomic idempotency checks as a root cause of double-charges.
+- **falsification**: Show the implementation uses `SET key value NX EX 86400` (single atomic command) and that the charge only proceeds if the return value confirms the key was newly created.
+
+---
+
+### Finding 6 — No stored response body turns successful dedup into a client-visible failure
+
+- **severity**: high
+- **confidence**: MEDIUM
+- **target**: proposal (what is stored as the value?)
+- **steelman**: Storing a key in Redis is enough to block duplicate processing.
+- **weakness**: If only a key (or a boolean flag) is stored — not the original response — then a legitimate retry that *should* return the original success response instead receives a generic "duplicate rejected" error. The client cannot distinguish between "your payment succeeded earlier" and "something went wrong." This forces the client into a manual reconciliation path, degrading UX and potentially causing the client to retry *without* the idempotency key (new key), resulting in a double-charge at the application level.
+- **evidence**: Stripe, Adyen, and Square all store and return the original response body on idempotent retries (Stripe API docs: "If you retry a request with the same idempotency key, you get the same response back"). This is a deliberate design to prevent confused-client retries.
+- **falsification**: Confirm the system stores the full response (status code, payment ID, amount) as the Redis value and returns it verbatim on retry, matching the original status.
+
+---
+
+### Finding 7 — Key scoping collision: different users or merchants share the key namespace
+
+- **severity**: medium
+- **confidence**: LOW
+- **target**: proposal (implicit assumption: keys are globally unique)
+- **steelman**: Clients generate UUIDs as idempotency keys, so collisions are astronomically unlikely.
+- **weakness**: If idempotency keys are not scoped to a tenant/merchant/user (e.g., `{merchant_id}:{idempotency_key}`), a malicious or buggy client can submit a key that collides with another tenant's key — either blocking their payment (DoS) or receiving their cached response (information disclosure). Even with UUIDs, if a client library has a broken RNG (e.g., Android `SecureRandom` on certain Samsung devices, 2013), collisions become plausible. Without namespace scoping, the blast radius of any collision is cross-tenant.
+- **evidence**: Android `SecureRandom` vulnerability (CVE-2013-7372) produced predictable outputs on specific devices, leading to Bitcoin wallet collisions. [unverified inference: fintech clients may include mobile SDKs on affected devices]
+- **falsification**: Show that the key stored in Redis is a composite of `{authenticated_entity_id}:{client_supplied_key}`, making cross-tenant collision impossible regardless of client-side key generation quality.
+
+---
+
+### Finding 8 — Redis persistence gap on restart (RDB snapshots lose recent keys)
+
+- **severity**: medium
+- **confidence**: MEDIUM
+- **target**: proposal (implicit assumption: Redis survives restart)
+- **steelman**: Redis persists data to disk via RDB snapshots or AOF, so keys survive restarts.
+- **weakness**: Default RDB snapshots run every 60 seconds (if 10,000+ keys changed) or every 300 seconds (if 100+ keys changed). A crash or OOM kill between snapshots loses all idempotency keys written since the last snapshot. AOF with `appendfsync everysec` can also lose up to 1 second of writes. On managed services (ElastiCache, MemoryDB), configuration varies: ElastiCache's default does not enable AOF. A restart after crash means all in-flight idempotency keys vanish, and any retries of recently-charged payments will double-charge.
+- **evidence**: AWS ElastiCache documentation: "ElastiCache for Redis doesn't support AOF persistence" (for non-MemoryDB offerings). Redis docs: RDB "is not good if you need to minimize the chance of data loss in case Redis stops working."
+- **falsification**: Confirm the deployment uses Amazon MemoryDB (which provides durable, synchronous replication to a transaction log) or Redis with `appendfsync always` (at significant performance cost).
+
+---
+
+**Acceptability condition**: This design would be acceptable *only if* Redis serves as a **fast-path cache** in front of a durable, strongly-consistent store (e.g., Postgres with a unique constraint on the idempotency key), the idempotency record tracks a state machine (`pending → completed → failed`), the charge is executed only after the durable record is committed, the stored record includes the full response for replay, and the durable record is retained for at least 90 days to cover card-network dispute timelines.

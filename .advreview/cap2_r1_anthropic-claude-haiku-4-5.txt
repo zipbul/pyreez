@@ -1,0 +1,48 @@
+**Weakness: Schema evolution friction during high-requirement churn**
+
+Steelman: PostgreSQL's migration model is mature and well-supported, requiring only team discipline to manage.
+
+Weakness: When an MVP undergoes 8+ schema changes in 6 months (common in discovery-phase product iteration), each change requires explicit coordination: migration code, test environment verification, deployment sequencing, and rollback planning. For a 4-person team, this serializes: if Person A needs to add fields and Person B is blocked waiting, Person B stalls until the migration deploys and stabilizes. MongoDB's schemaless model absorbs this: code and data schema evolve together with no sync ceremony. The mechanism (PostgreSQL requires explicit upfront decisions per schema change) is sound, but the impact—coordination overhead of 1–2 hours per change for teams unfamiliar with Alembic/Flyway/equivalent—compounds: 8 changes × 1.5 hours = 12 hours of pure coordination tax (beyond feature work), plausibly extending a tight 6-month timeline by days.
+
+Evidence: PostgreSQL enforces schema-first design; each structural change is a deliberate deployment artifact. MongoDB permits code and document shape to drift together. The overhead is non-zero even for experienced teams (migration testing + staged rollout), and higher for teams encountering migration tooling for the first time. A 4-person team with one schema steward hits a bottleneck.
+
+Falsification: Track schema change count and time-to-deploy for each change in a real MVP. If <5 changes or <1 hour per change, this cost is negligible. If >10 changes and average time-per-change >1.5 hours including all team communication and testing, this finding holds.
+
+Verdict: **high** severity, **MEDIUM** confidence — mechanism is sound, but impact depends on actual requirement churn rate; many MVPs do stabilize schema faster than discovery-phase chaos suggests.
+
+---
+
+**Weakness: Operational surface area without a database specialist**
+
+Steelman: PostgreSQL on managed services (RDS, Aurora) is operationally equivalent to MongoDB on Atlas.
+
+Weakness: If the 4-person team deploys to self-hosted PostgreSQL or minimally-configured RDS (cost-conscious bootstrap choice), they inherit responsibility for autovacuum tuning, connection pool configuration (PgBouncer or equivalent), slow-query monitoring, backup testing, and log-based anomaly detection. MongoDB on Atlas is fully managed: autovacuum-equivalent runs automatically, connection pooling is built-in, monitoring is provided, backups are automatic. Self-hosted PostgreSQL incidents—connection pool exhaustion, autovacuum-induced locks, table bloat, wal-segment buildup—are not rare for operators new to PostgreSQL. Each incident consumes 8–16 hours of debugging while feature work pauses. A realistic self-hosted setup sees 2–3 such incidents in 6 months; that is 1+ week of a 4-person team's time. MongoDB on Atlas encounters <1 comparable incident.
+
+Evidence: PostgreSQL operational surface area is objectively larger: autovacuum has 20+ tunable parameters, connection pooling requires a separate daemon, monitoring requires custom metric queries and alert configuration, backup recovery requires testing. Atlas abstracts this to: defaults work, one-click backup, scaling is automatic. Time cost per incident is 12–20 hours (debugging + fix + verification), not 2–4 hours.
+
+Falsification: Deploy identical MVP to both self-hosted PostgreSQL and MongoDB on Atlas; run for 6 months with a non-specialist team. Count operational incidents and time spent. If PostgreSQL team loses >5 days to ops issues and MongoDB team loses ≤1 day, this finding is supported.
+
+Verdict: **high** severity, **MEDIUM** confidence — mechanism is sound and mechanism-confidence is HIGH, but overall confidence is MEDIUM because most teams choosing PostgreSQL will select managed RDS, which substantially reduces (though does not eliminate) this surface.
+
+---
+
+**Weakness: Data-model impedance for document-centric domains**
+
+Steelman: PostgreSQL's JSONB type and modern query operators handle document-shaped data efficiently and safely.
+
+Weakness: When an MVP's core entities are naturally hierarchical or document-centric—workflow definitions with nested conditional branches, multi-tenant configuration trees, event payloads with arbitrary metadata—PostgreSQL forces a choice with real friction: (a) normalize into 2N tables (schema becomes complex, queries require 3–5 table joins, iteration slows), or (b) store as JSONB (queries become ad-hoc, type safety is lost, filtering requires app-layer logic). MongoDB's document model sidesteps this: nested data is first-class, queries use `$elemMatch` and similar idioms, type is optional. For a 4-person team, weeks can be lost debating normalization-vs-JSONB, or time can be burned refactoring after choosing wrong. Under a 6-month deadline, 2–4 days for schema-design debate + 2–3 days discovering the first approach was suboptimal + 3–5 days refactoring = 1–2 weeks lost.
+
+Evidence: Document-heavy MVPs (think workflow orchestration, form-builder config, SaaS settings objects) require either recursive joins or type-opaque storage in PostgreSQL. MongoDB stores documents directly. Schema design time is shorter in MongoDB because the design question is answered by the data shape itself, not by relational decomposition strategy.
+
+Falsification: Implement a realistic workflow engine (nested steps, conditionals, metadata, branching) in both PostgreSQL (both normalized and JSONB variants) and MongoDB. Measure: (i) schema-design wall-clock time, (ii) query implementation time per feature, (iii) iteration velocity (time to add a new conditional type). If MongoDB is 25%+ faster on total and design phase is <3 days vs 5–7 days for PostgreSQL, this finding is supported.
+
+Verdict: **medium** severity, **MEDIUM** confidence — mechanism is sound for document-centric domains, but this weakness is conditional on data shape; MVPs with transactional, flat schemas (user accounts, billing records) do not trigger it.
+
+---
+
+PostgreSQL is acceptable as the default under these constraints only if:
+- Schema is relatively stable or team is experienced with migrations; **and**
+- Infrastructure is managed (RDS/Aurora, not self-hosted); **and**  
+- Core data model is relational or mixed with only shallow JSONB use.
+
+If two or more of these do not hold, MongoDB's lower friction on that axis may shorten the MVP timeline.

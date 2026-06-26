@@ -1,0 +1,1 @@
+Pyreez CLI failed: Only one flag may read from stdin ("-") per invocation; got: --task, --subject

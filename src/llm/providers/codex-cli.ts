@@ -62,6 +62,10 @@ export class CodexCliProvider implements LLMProvider {
       "--skip-git-repo-check",
     ];
 
+    if (request.reasoning_effort) {
+      args.push("-c", `model_reasoning_effort="${request.reasoning_effort}"`);
+    }
+
     if (request.fileAccess) {
       args.push("--sandbox", "read-only");  // read-only file access
     }
@@ -113,6 +117,8 @@ export class CodexCliProvider implements LLMProvider {
     let text = "";
     let inputTokens = 0;
     let outputTokens = 0;
+    let cachedTokens: number | undefined;
+    let reasoningTokens: number | undefined;
 
     for (const line of lines) {
       try {
@@ -123,6 +129,12 @@ export class CodexCliProvider implements LLMProvider {
         if (event.type === "turn.completed" && event.usage) {
           inputTokens = event.usage.input_tokens ?? 0;
           outputTokens = event.usage.output_tokens ?? 0;
+          if (event.usage.cached_input_tokens != null) {
+            cachedTokens = event.usage.cached_input_tokens;
+          }
+          if (event.usage.reasoning_output_tokens != null) {
+            reasoningTokens = event.usage.reasoning_output_tokens;
+          }
         }
       } catch {
         // skip non-JSON lines
@@ -151,6 +163,8 @@ export class CodexCliProvider implements LLMProvider {
           prompt_tokens: inputTokens,
           completion_tokens: outputTokens,
           total_tokens: inputTokens + outputTokens,
+          ...(cachedTokens != null ? { cached_tokens: cachedTokens } : {}),
+          ...(reasoningTokens != null ? { reasoning_tokens: reasoningTokens } : {}),
         },
       } : {}),
     };
@@ -170,5 +184,6 @@ interface CodexCliEvent {
     input_tokens?: number;
     cached_input_tokens?: number;
     output_tokens?: number;
+    reasoning_output_tokens?: number;
   };
 }

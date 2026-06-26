@@ -132,6 +132,63 @@ describe("CodexCliProvider", () => {
     expect(res.usage!.completion_tokens).toBe(80);
   });
 
+  it("forwards reasoning_effort via -c model_reasoning_effort=<level>", async () => {
+    setSpawnResult(JSON.stringify({ type: "item.completed", item: { text: "ok" } }));
+    const provider = new CodexCliProvider();
+    await provider.chat({
+      model: "openai/gpt-5.4",
+      messages: [{ role: "user", content: "Hi" }],
+      reasoning_effort: "high",
+    });
+    const args = spawnMod.spawnWithIdleTimeout.mock.calls[0]![0] as string[];
+    const idx = args.findIndex((a) => a === "-c");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe('model_reasoning_effort="high"');
+  });
+
+  it("omits -c model_reasoning_effort when not set", async () => {
+    setSpawnResult(JSON.stringify({ type: "item.completed", item: { text: "ok" } }));
+    const provider = new CodexCliProvider();
+    await provider.chat({
+      model: "openai/gpt-5.4",
+      messages: [{ role: "user", content: "Hi" }],
+    });
+    const args = spawnMod.spawnWithIdleTimeout.mock.calls[0]![0] as string[];
+    expect(args.some((a) => a.startsWith("model_reasoning_effort"))).toBe(false);
+  });
+
+  it("should expose reasoning_output_tokens as reasoning_tokens", async () => {
+    const lines = [
+      JSON.stringify({ type: "item.completed", item: { text: "result" } }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: { input_tokens: 100, output_tokens: 200, reasoning_output_tokens: 150 },
+      }),
+    ].join("\n");
+    setSpawnResult(lines);
+    const provider = new CodexCliProvider();
+    const res = await provider.chat({ model: "openai/gpt-5.4", messages: [{ role: "user", content: "Hi" }] });
+    expect(res.usage!.prompt_tokens).toBe(100);
+    expect(res.usage!.completion_tokens).toBe(200);
+    expect(res.usage!.reasoning_tokens).toBe(150);
+  });
+
+  it("should expose cached_input_tokens as cached_tokens", async () => {
+    const lines = [
+      JSON.stringify({ type: "item.completed", item: { text: "result" } }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: { input_tokens: 13428, cached_input_tokens: 12160, output_tokens: 3 },
+      }),
+    ].join("\n");
+    setSpawnResult(lines);
+    const provider = new CodexCliProvider();
+    const res = await provider.chat({ model: "openai/gpt-5.4", messages: [{ role: "user", content: "Hi" }] });
+    expect(res.usage!.prompt_tokens).toBe(13428);
+    expect(res.usage!.completion_tokens).toBe(3);
+    expect(res.usage!.cached_tokens).toBe(12160);
+  });
+
   it("should use last item.completed when multiple exist", async () => {
     const lines = [
       JSON.stringify({ type: "item.completed", item: { text: "first" } }),

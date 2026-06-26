@@ -1,0 +1,93 @@
+Now I have sufficient verified evidence. Here are the findings, ordered by severity:
+
+---
+
+## Finding 1: Unstable Domain Model During Six-Month Discovery
+
+**Steelman:** PostgreSQL is a safe default because every mature database supports ALTER TABLE, and good migration tooling (Flyway, Prisma Migrate, Alembic) makes schema evolution manageable with version-controlled scripts.
+
+**Weakness:** This holds only when the SaaS domain is well-understood before sprint 1. For a 4-person team on a 6-month MVP, the domain model will almost certainly change weekly — entity relationships get added, fields get promoted to top-level, polymorphic structures get discovered. Every such discovery in PostgreSQL becomes a migration file, a code-review object, a deployment gate, and a CI job. The friction isn't catastrophic per instance; it compounds. MongoDB's schemaless design lets the team write `{ newField: value }` and move on. Multiple sources confirm: "when iterating fast with data models that change weekly, MongoDB's schemaless nature lets you move without migration scripts, and this is genuinely faster during the exploration phase of a project." The 6-month deadline means the team has roughly 24 working weeks; even 30 minutes per migration cycle, across 50 model changes, is 25 hours of engineering time that produced nothing shippable.
+
+**Evidence:** [keyholesoftware.com](https://keyholesoftware.com/mongodb-vs-postgresql-when-to-use-nosql-vs-sql/) and [tech-insider.org](https://tech-insider.org/mongodb-vs-postgresql-2026/) both corroborate that MongoDB's schemaless iteration speed is a genuine, not merely theoretical, advantage during model discovery. The reasoning chain is: unknown domain → frequent schema evolution → migration ceremony per change → cumulative engineering drag → deadline risk. No source contradicts that migrations have non-zero cost; the dispute is only about magnitude.
+
+**Falsification:** If the team can produce a data-model diagram with entity relationships and field cardinality finalized before month 1 begins, and commits to a change-freeze on model shape, the migration overhead drops to near-zero and this finding is neutralized.
+
+**Verdict:** **Critical | MEDIUM** — The failure condition (unstable domain model) is near-universal for 4-person MVPs, but the magnitude of drag is workload-dependent and not quantified by a controlled benchmark.
+
+---
+
+## Finding 2: Migration Lock Queue Causing Cascading Application Downtime
+
+**Steelman:** ALTER TABLE risks are well-known and solvable — use `CREATE INDEX CONCURRENTLY`, set `lock_timeout`, split migrations into additive steps, and the downtime risk is effectively zero.
+
+**Weakness:** The "well-known and solvable" position understates what "solved" requires from a small team. The ACCESS EXCLUSIVE lock that most ALTER TABLE operations acquire does not just block concurrent writes — it queues *all* subsequent operations, including reads, behind it. GoCardless, an engineering organization with dedicated DBA capacity, still experienced 15 seconds of API downtime despite following best practices, caused by "an unfortunately timed, long-running read query" triggering the lock queue effect. A 4-person team with no dedicated database operator running migrations in a 6-month sprint will not have the operational discipline (lock_timeout settings, query-time SLAs, migration scheduling windows) to reliably avoid this. `SET NOT NULL`, `ALTER COLUMN TYPE` to a new type, and `ADD COLUMN with volatile DEFAULT` all require full table rewrites under ACCESS EXCLUSIVE, and none of the "safe" workarounds (shadow table, `CONCURRENTLY`, pg_osc) are zero-configuration.
+
+**Evidence:** The GoCardless article explicitly states the team experienced downtime despite following standard guidance, caused by lock queue cascades. The DEV Community article on ALTER TABLE locking confirms that `SET NOT NULL`, `ALTER COLUMN TYPE`, and `ADD COLUMN with volatile DEFAULT` all acquire ACCESS EXCLUSIVE and can require full table scans or rewrites, making lock duration non-trivial. The xata.io/pgroll article confirms that "any locks that conflict with the queued lock will queue up behind it," blocking even SELECT operations. URLs: [gocardless.com](https://gocardless.com/blog/zero-downtime-postgres-migrations-the-hard-parts/), [dev.to (ALTER TABLE locks)](https://dev.to/mickelsamuel/which-alter-table-operations-lock-your-postgresql-table-1082), [xata.io/blog](https://xata.io/blog/migrations-and-exclusive-locks).
+
+**Falsification:** If the team's schema changes will be restricted to additive-only operations (new tables, new nullable columns) and the team sets `lock_timeout = '2s'` in all migration scripts from day one, this specific failure mode becomes unlikely. Confirm by reviewing the team's actual migration script templates before launch.
+
+**Verdict:** **High | HIGH** — The lock mechanism is deterministic and confirmed by verified sources; the question is only whether the team has the operational discipline to avoid triggering it consistently.
+
+---
+
+## Finding 3: Serverless or High-Concurrency Architecture Exhausts PostgreSQL's Connection Model
+
+**Steelman:** PostgreSQL's default `max_connections` of 100 is a soft ceiling; it's raised trivially, and connection poolers (PgBouncer, Supabase's Supavisor) solve this cleanly. Modern managed Postgres services (Neon, Supabase, RDS Proxy) include pooling out of the box.
+
+**Weakness:** This holds only if the team proactively sets up a pooling layer before they need it. A 4-person team on a 6-month deadline will likely reach for the simplest deployment: Heroku Postgres, Railway, or a Vercel + Prisma ORM stack. Prisma's query engine binary initializes and "immediately tries to claw a connection from the database" on cold start. If the team builds with serverless functions (Lambda, Vercel Functions, Cloudflare Workers), each function instance creates independent connections. A burst of 50 concurrent invocations with a pool size of 5 attempts 250 simultaneous connections against a default `max_connections` of 100 — exhaustion is immediate. MongoDB's driver connection model pools at the cluster level and does not share PostgreSQL's per-process connection cost in the same way. The burden falls on the 4-person team to add, configure, and monitor an external pooler — an operational dependency that MongoDB Atlas users do not face.
+
+**Evidence:** PostgreSQL documentation confirms the default `max_connections` is 100 (see [postgresql.org docs](https://www.postgresql.org/docs/current/runtime-config-connection.html)). The [loke.dev article](https://loke.dev/blog/fixing-serverless-database-connection-exhaustion) provides the explicit scenario: "fifty concurrent function instances, each one tries to hold a connection pool of five, you just slammed your database with 250 connections in milliseconds." The article states that "Managed services like Neon, Supabase, or self-hosted PgBouncer are non-negotiable" for serverless Postgres. The per-connection overhead search confirms that PostgreSQL "sizes certain resources based directly on the value of max_connections" and resources are reserved at server start, meaning increasing the ceiling has memory cost.
+
+**Falsification:** If the team is building a monolithic server-rendered application (single long-lived Node/Rails/Django process) with a single ORM connection pool, connection exhaustion is not a realistic concern. Confirm by reviewing the team's deployment architecture — if it is server-per-process and not serverless, this finding drops to Low.
+
+**Verdict:** **High | MEDIUM** — Mechanism is confirmed and the team's architecture determines whether it fires; without knowing their deployment target, it remains high-severity but conditionally applicable.
+
+---
+
+## Finding 4: Heavily Document-Shaped Data With Frequent Partial Updates Triggers Write Amplification
+
+**Steelman:** PostgreSQL's JSONB type, plus GIN indexing and the `jsonb_set()` function, provides the flexibility of a document store without sacrificing SQL joins and transactions. The hybrid approach is widely recommended.
+
+**Weakness:** The JSONB escape hatch has a structural cost that only surfaces under write load. PostgreSQL's MVCC model does not update rows in place — it writes a new version of the entire row. For a 10KB JSONB document, a single counter increment rewrites 10KB to both the heap and WAL. GIN indexes on JSONB columns compound this: every INSERT or UPDATE decomposes the full document to update the index. This means write-heavy workloads with large embedded documents — common in SaaS MVPs with activity logs, audit trails, feature-flag blobs, or user preference objects — generate table bloat and index bloat faster than equivalent narrow-column schemas. Reclaiming that space requires autovacuum tuning and, in severe cases, manual REINDEX — operational tasks a 4-person team is unlikely to schedule during a 6-month sprint. The MongoDB benchmark (MongoDB-authored, so treat with appropriate skepticism) used 256 concurrent updaters over 30 minutes and reported qualitatively that PostgreSQL's throughput showed decline and CPU hit high utilization, while MongoDB's remained steady. No exact ops/sec numbers were published, so this benchmark is [unverified] for magnitude, but the MVCC write-amplification mechanism is structurally confirmed by independent sources.
+
+**Evidence:** The DEV Community article (AWS Builders) on PostgreSQL vs MongoDB JSON internals confirms: updating a single key in a 10KB jsonb document causes the entire value to be re-TOASTed. The sitepoint.com JSONB performance guide confirms GIN index write overhead of 30–50% cut to insert throughput under write-heavy conditions. The MongoDB benchmark URL ([mongodb.com blog](https://www.mongodb.com/company/blog/technical/evaluation-update-heavy-workloads-postgresql-jsonb-and-mongodb-bson)) is confirmed to exist and state qualitative degradation, but its numbers are [unverified] because it publishes no exact ops/sec figures and uses different instance tiers (RDS m5.xlarge vs Atlas M40 autoscaled to M50), making direct comparison methodologically suspect. DEV Community article: [dev.to/aws-builders](https://dev.to/aws-builders/postgresql-vs-mongodb-for-json-the-internal-trade-offs-they-dont-tell-you-in-the-docs-40oe).
+
+**Falsification:** If the team normalizes their data model into narrow relational tables (no JSONB blobs larger than ~2KB, or JSONB fields used read-mostly), the write amplification path does not fire. Conduct a pg_stat_user_tables bloat check after 4 weeks of production load; if dead tuple ratio stays below 10%, this finding is neutralized.
+
+**Verdict:** **Medium | MEDIUM** — Mechanism is structurally verified; severity depends on write pattern, and the benchmark supporting it is vendor-authored with no raw numbers.
+
+---
+
+## Finding 5: Operational Tuning Tax Consumes Disproportionate Engineering Capacity
+
+**Steelman:** Managed PostgreSQL services (RDS, Supabase, Neon, Render) abstract nearly all operational burden: backups, failover, version upgrades, and basic configuration. A team can run Postgres successfully without touching a config file.
+
+**Weakness:** Managed Postgres abstracts infrastructure but not database behavior. A 4-person team will encounter at minimum: autovacuum not keeping up with dead tuple accumulation (especially with JSONB or high-UPDATE workloads), query plan regression after data volume crosses a threshold (requiring `ANALYZE` or `pg_stat_statements` investigation), and the need to decide whether to use PgBouncer/Supavisor when connection counts grow. None of these require a DBA on call, but each requires an engineer who can read `EXPLAIN ANALYZE` output, understands statistics targets, and knows when to run VACUUM FULL. MongoDB Atlas, by contrast, manages compaction, index builds, and connection routing transparently for the managed tier. This is not a claim that Postgres is unusable by small teams — 49% of the Stack Overflow 2024 survey respondents use it ([survey.stackoverflow.co/2024](https://survey.stackoverflow.co/2024/technology)) — but the 4-person team implicitly assumes someone knows how to respond when query times spike under production load. If all four engineers are application-layer generalists with no Postgres operations experience, the learning curve costs real sprint time during the 6-month window.
+
+**Evidence:** Reasoning chain, not a single confirmed benchmark. Stack Overflow 2024 data confirms PostgreSQL dominance (48.7% vs MongoDB's 24.8%) but says nothing about operational complexity for small teams. The operational demands listed (autovacuum, EXPLAIN ANALYZE, statistics) are standard PostgreSQL administration topics, not exotic edge cases — [unverified] for the specific time cost on a 4-person team. This finding's evidence is primarily structural reasoning.
+
+**Falsification:** If at least one team member has operated Postgres in production before (can articulate `work_mem`, `shared_buffers`, and `autovacuum_vacuum_scale_factor`), this failure mode is largely mitigated. One 30-minute technical interview question decides it.
+
+**Verdict:** **Low | LOW** — Speculative; the cost is real but highly team-dependent, and managed services significantly reduce the floor.
+
+---
+
+## Condition Under Which PostgreSQL Is Acceptable
+
+PostgreSQL is the correct default if and only if: the domain model is substantially finalized before development begins, the deployment architecture is server-per-process (not serverless), at least one engineer has prior Postgres production experience, and the primary data access pattern is relational joins rather than document retrieval by ID — in which case every PostgreSQL cost identified above either does not fire or is outweighed by the integrity, query expressiveness, and ecosystem advantages that MongoDB cannot match at equivalent maturity.
+
+---
+
+**Sources:**
+- [Which ALTER TABLE Operations Lock Your PostgreSQL Table? – DEV Community](https://dev.to/mickelsamuel/which-alter-table-operations-lock-your-postgresql-table-1082)
+- [Schema changes and the Postgres lock queue – xata.io/pgroll](https://xata.io/blog/migrations-and-exclusive-locks)
+- [Zero-downtime Postgres migrations – the hard parts | GoCardless](https://gocardless.com/blog/zero-downtime-postgres-migrations-the-hard-parts/)
+- [PostgreSQL vs. MongoDB for JSON: The Internal Trade-offs – DEV Community (AWS Builders)](https://dev.to/aws-builders/postgresql-vs-mongodb-for-json-the-internal-trade-offs-they-dont-tell-you-in-the-docs-40oe)
+- [Evaluation of Update-Heavy Workloads With PostgreSQL JSONB and MongoDB BSON | MongoDB Blog](https://www.mongodb.com/company/blog/technical/evaluation-update-heavy-workloads-postgresql-jsonb-and-mongodb-bson)
+- [Fixing Serverless Database Connection Exhaustion in Node.js – loke.dev](https://loke.dev/blog/fixing-serverless-database-connection-exhaustion)
+- [PostgreSQL Documentation: Connections and Authentication (max_connections)](https://www.postgresql.org/docs/current/runtime-config-connection.html)
+- [MongoDB vs PostgreSQL: When NoSQL Actually Wins – tech-insider.org](https://tech-insider.org/mongodb-vs-postgresql-2026/)
+- [MongoDB vs. PostgreSQL: When to Use NoSQL vs. SQL? – Keyhole Software](https://keyholesoftware.com/mongodb-vs-postgresql-when-to-use-nosql-vs-sql/)
+- [2024 Stack Overflow Developer Survey – Technology](https://survey.stackoverflow.co/2024/technology)
+- [Why MongoDB Atlas Pricing Explodes – getmonetizely.com](https://www.getmonetizely.com/articles/why-mongodb-atlas-pricing-explodes-understanding-cloud-database-cost-dynamics-for-saas-companies)
+- [PostgreSQL JSONB Performance Guide: Indexing & Query Optimization – sitepoint.com](https://www.sitepoint.com/postgresql-jsonb-query-performance-indexing/)

@@ -1,0 +1,19 @@
+1. steelman: If the MVP will ingest customer-specific, semi-structured records that keep changing shape, MongoDB matches the workload better. A document store lets the team add fields, nest objects, and preserve source payloads without turning every product tweak into a schema migration.
+   weakness: This only breaks if the data shape is actually stable, or if the team is willing to treat Postgres as a document store anyway and build strong validation around JSONB. If they can freeze the model early, the advantage mostly disappears.
+   evidence: Mechanism: a relational default pushes the team toward schema-first design, migration planning, and compatibility work for every field change. Break: with frequent shape drift, those steps become the bottleneck, not the code that uses the data. Consequence: the MVP slows down because product iteration is gated by database coordination instead of feature work.
+   falsification: Track the first few planned data-model changes. If they can be absorbed in Postgres without migration churn, deploy friction, or application-layer schema gymnastics, this condition does not hold.
+   verdict: medium, MEDIUM
+
+2. steelman: If the product mostly reads and writes whole hierarchical objects by id, with little need for joins, constraints across entities, or ad hoc relational queries, MongoDB can be the cleaner default. The team stores the domain object as it already thinks about it, instead of decomposing it for a relational engine it does not yet need.
+   weakness: This stops being a real advantage as soon as the MVP needs cross-object integrity, reporting, or anything that benefits from normalized relationships. If those requirements are even moderately likely within the 6-month window, Postgres can recover the cost through correctness and query flexibility.
+   evidence: Mechanism: Postgres is strongest when the model is relational; forcing a document-shaped product into that default introduces either normalization work or a JSONB hybrid. Break: that extra modeling layer adds time and ambiguity on the critical path for a small team. Consequence: you spend MVP time designing tables and joins for data that would have been simpler as a document.
+   falsification: Inspect the top 10 queries and write paths. If most of them touch one aggregate at a time and avoid joins or relational predicates, MongoDB is likely the better fit for this condition.
+   verdict: medium, MEDIUM
+
+3. steelman: For a 4-person team that does not already have strong migration discipline, Postgres can create hidden process overhead. Every structural change needs coordination, deployment sequencing, and backwards-compatibility care; MongoDB reduces that ceremony and lets the team move faster while the product is still fluid.
+   weakness: This is not about the database alone; it is about team execution. If the team already has strong migration tooling, schema review habits, and comfort with relational design, this weakness shrinks a lot.
+   evidence: Mechanism: small teams pay a large share of their cost in coordination, not raw database performance. Break: a relational default turns data-model changes into multi-step releases, while a document store usually makes those changes local to the writer. Consequence: with a fast-moving MVP and weak process maturity, Postgres can slow shipping more than it improves structure.
+   falsification: Check whether the team can reliably ship schema changes today without blocking feature delivery. If yes, this condition is weak; if not, Postgres is likely imposing avoidable friction.
+   verdict: medium, LOW
+
+Acceptable only if the MVP’s core data model is already stable, the app needs real relational integrity or joins, and the team can handle migrations without it becoming a release bottleneck.

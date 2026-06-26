@@ -1,0 +1,43 @@
+**1. Schema Volatility During MVP Exploration (Months 1–4)**
+
+Steelman: PostgreSQL's ACID guarantees and explicit schema ensure data consistency even under rapid development, making it safer than allowing unbounded schema drift in MongoDB.
+
+Weakness: If the MVP's core data model is still being discovered—typical when product-market fit is uncertain—each shift in domain understanding requires a schema migration in PostgreSQL. A 4-person team cannot efficiently block feature work for migration coordination, testing, and deployment when product feedback suggests a new field or relation. In MongoDB, the same change incurs zero operational friction and ships immediately. The risk of eventual schema consistency issues is tolerable in an MVP context where velocity dominates integrity. If requirement pivots occur in months 2–4 (the most likely window), PostgreSQL's synchronization cost compounds: each schema change becomes a release gate, and each gate is a potential launch delay in a constrained 6-month window.
+
+Evidence: Schema evolution in relational databases requires explicit, tested, often-downtime-aware migrations (Alembic, Rails, etc.). MongoDB accepts arbitrary document shapes at write time, eliminating this gate. The coordination friction is structural for a 4-person team. The timing assumption (months 2–4 pivots) follows documented patterns in early-stage product development where requirements stabilize only after initial user feedback, not upfront.
+
+Falsification: Measure schema-change frequency in the first 3 months of an actual MVP. If changes exceed one per week and formal PostgreSQL migrations add >4 hours of lag per change, MongoDB's advantage is material. If schema stabilizes by week 2, the advantage evaporates.
+
+Verdict: **high severity, MEDIUM confidence**
+
+---
+
+**2. Semi-Structured, Hierarchical Data Without Clear Foreign Keys**
+
+Steelman: PostgreSQL's JSONB column type with GIN indexing provides near-native JSON support with full SQL querying, eliminating the need for a separate document store.
+
+Weakness: JSONB solves storage but not developer experience. If the domain involves deeply nested semi-structured data (event metadata, configuration trees, heterogeneous feature flags), MongoDB's BSON model and aggregation pipeline are more intuitive to developers unfamiliar with PostgreSQL's GIN index construction, operator precedence (`->` vs. `->>` vs. `@>` vs. `?`), and the mental model of embedding JSON in relational rows. PostgreSQL developers must decide between denormalization (flatten into JSONB columns) and normalization (split into tables)—both require expertise. A 4-person team learning as they go faces cognitive load. MongoDB's aggregation pipeline (`$match`, `$unwind`, nested-field queries) is closer to the problem domain and more familiar to modern developers. For JSON-heavy workloads, MongoDB is the path of least implementation friction in a 6-month timeline.
+
+Evidence: JSONB is performant but GIN indexing and JSONB operators are non-trivial for developers trained on NoSQL-first stacks. CTEs + JSONB operators are objectively more complex (larger API surface) than aggregation pipelines for queries like "find all events matching nested condition X." This is a capability and developer-experience gap, not a performance one.
+
+Falsification: Measure time-to-feature for a data-heavy feature (e.g., queryable event store with 50+ heterogeneous fields) on PostgreSQL JSONB vs. MongoDB. If JSONB developers match MongoDB on feature velocity, the weakness is overblown. If MongoDB is >20% faster, it is material across a 6-month timeline.
+
+Verdict: **medium severity, MEDIUM confidence**
+
+---
+
+**3. Minimal DevOps Expertise + Unexpected Write Scaling (Post-Launch)**
+
+Steelman: PostgreSQL's mature operational tooling and managed cloud offerings (AWS RDS) handle scaling transparently, requiring no special DevOps knowledge.
+
+Weakness: This assumption breaks if write volume unexpectedly exceeds single-node PostgreSQL capacity before the 6-month window closes, forcing architectural decisions the team is unprepared to make. PostgreSQL single-node write throughput is [unverified estimate: ~5–10k writes/sec] depending on configuration; beyond this, horizontal scaling requires Citus (vendor lock-in, licensing friction, setup overhead), application-level sharding (months of refactoring, new failure modes), or accepting degradation. MongoDB's auto-sharding is built-in and operationally invisible to the application. For a 4-person team without a DBA, the operational delta is decisive: MongoDB absorbs writes; PostgreSQL stalls. The timeline assumes launch success is bounded by feature completeness, not infrastructure. If early traction generates unexpectedly high write load, PostgreSQL creates a crisis; MongoDB doesn't.
+
+Evidence: PostgreSQL single-node write limits are well-documented [unverified recollection from tuning guides]. MongoDB auto-sharding requires only shard-key configuration. The operational complexity difference is structural: Citus requires PostgreSQL expertise and licensing decisions; auto-sharding is a configuration toggle. For teams without a DBA or external consultant, this is a meaningful burden.
+
+Falsification: Load-test both systems at expected peak write throughput for the 6-month MVP window. If PostgreSQL RDS scales without custom sharding logic, the weakness is moot. If peak writes exceed [unverified: 10k/sec], measure setup time for sharding on each database: if PostgreSQL Citus setup is <1 week for a junior engineer, MongoDB's advantage shrinks substantially.
+
+Verdict: **medium severity, LOW confidence**
+
+---
+
+PostgreSQL is acceptable as default provided that: (1) schema stabilizes within 2 weeks, (2) write load remains below single-node capacity through launch, and (3) the data model is primarily relational rather than document-centric.

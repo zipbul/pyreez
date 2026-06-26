@@ -208,6 +208,36 @@ describe("executeRound", () => {
 
     expect(workerIndices).toEqual([0, 1, 2]);
   });
+
+  it("gates webAccess per worker by provider capability (tool-less providers get the no-lookup prompt)", async () => {
+    // Bug guard: a global --web-access flag must NOT reach a tool-less provider's prompt. claude
+    // gets WebSearch/WebFetch; openai/xai do not, so sending them "fetch the page" causes citation
+    // theater. The engine gates the per-worker webAccess passed to the prompt builder.
+    const team: TeamComposition = {
+      workers: [
+        { model: "anthropic/claude-sonnet-4.6", role: "worker" }, // gets web tools
+        { model: "openai/gpt-5.4", role: "worker" }, // no web tools
+      ],
+    };
+    const input = makeInput({ webAccess: true });
+    const config = makeConfig();
+
+    const seen: Array<{ workerIndex: number; webAccess: boolean | undefined }> = [];
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(validWorkerContent("response"))),
+      buildR1Messages: mock((_ctx: any, _inst?: any, _ri?: any, workerIndex?: any, webAccess?: any) => {
+        seen.push({ workerIndex, webAccess });
+        return [{ role: "user" as const, content: "work" }];
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+    await executeRound(ctx, 1, deps, config, input);
+
+    expect(seen.find((s) => s.workerIndex === 0)?.webAccess).toBe(true); // anthropic → verify-with-tools
+    expect(seen.find((s) => s.workerIndex === 1)?.webAccess).toBe(false); // openai → no-lookup
+  });
 });
 
 // =============================================================================
@@ -2174,6 +2204,57 @@ describe("parseConfidence", () => {
 
   it("should parse 신뢰도 label and ignore non-confidence labels", () => {
     expect(parseConfidence("신뢰도: HIGH. 구체성: HIGH. 방어력: LOW.")).toBe("high");
+  });
+
+  // Bolded/emphasized field label (Claude markdown default) — the live-run defect.
+  it("should parse bolded label '**confidence**: HIGH'", () => {
+    expect(parseConfidence("- **confidence**: HIGH")).toBe("high");
+  });
+
+  it("should parse underscore-emphasized label '__confidence__: LOW'", () => {
+    expect(parseConfidence("__confidence__: LOW")).toBe("low");
+  });
+
+  it("should parse decorated value 'confidence: [HIGH]' and 'confidence: **HIGH**'", () => {
+    expect(parseConfidence("confidence: [HIGH]")).toBe("high");
+    expect(parseConfidence("confidence: **HIGH**")).toBe("high");
+  });
+
+  it("should parse single-emphasis label '_confidence_: MEDIUM'", () => {
+    expect(parseConfidence("_confidence_: MEDIUM")).toBe("medium");
+  });
+
+  it("should parse bolded Korean label '**신뢰도**: HIGH'", () => {
+    expect(parseConfidence("**신뢰도**: HIGH")).toBe("high");
+  });
+
+  // False-positive guards — must NOT match.
+  it("should NOT match 'overconfidence:' / 'nonconfidence:' (word-boundary guard)", () => {
+    expect(parseConfidence("overconfidence: HIGH")).toBeUndefined();
+    expect(parseConfidence("nonconfidence: LOW")).toBeUndefined();
+  });
+
+  it("should NOT match value-substring 'confidence: lower' / 'confidence: mediumship'", () => {
+    expect(parseConfidence("confidence: lower than expected")).toBeUndefined();
+    expect(parseConfidence("confidence: mediumship tier")).toBeUndefined();
+  });
+
+  it("HIGH+LOW tie resolves to low (low-biased tie rule)", () => {
+    expect(parseConfidence("**confidence**: HIGH. **confidence**: LOW.")).toBe("low");
+  });
+
+  it("should NOT match an embedded label even with emphasis (over**confidence**:)", () => {
+    expect(parseConfidence("over**confidence**: HIGH")).toBeUndefined();
+    expect(parseConfidence("a_confidence_: HIGH")).toBeUndefined();
+  });
+
+  it("handles uppercase label and no-space separator", () => {
+    expect(parseConfidence("CONFIDENCE: HIGH")).toBe("high");
+    expect(parseConfidence("confidence:HIGH")).toBe("high");
+  });
+
+  it("triple-emphasis label is not matched (only up to ** supported)", () => {
+    expect(parseConfidence("***confidence***: high")).toBeUndefined();
   });
 });
 

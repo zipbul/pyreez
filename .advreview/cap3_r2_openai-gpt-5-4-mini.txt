@@ -1,0 +1,22 @@
+1. **target:** Analyst A  
+   **steelman:** PostgreSQL is the safer default when the team wants strict integrity and the schema will eventually settle into a stable shape.  
+   **weakness:** If the MVP’s core object is still being discovered and its shape changes in non-additive ways every sprint, PostgreSQL turns product learning into coordination work. Each rename, split, or nested-field change forces schema edits, application changes, backfills, and rollout ordering, while MongoDB can absorb the same shift as a document-shape change. The break condition is not “any schema change”; it is repeated breaking change on the core entity while the team is still searching for the right model.  
+   **evidence:** The mechanism is structural: relational defaults reward a shared, stable schema; document stores tolerate sparse and drifting fields. When the schema is not yet known, the cost is not just migration code but repeated cross-cutting rework. The exact migration-hour claims in the peer draft are unverified and not needed to establish the failure mode.  
+   **falsification:** Take one real MVP entity and run three genuinely breaking shape changes through both stacks. If PostgreSQL can keep those changes additive and low-friction without repeated backfills or release choreography, this condition does not hold.  
+   **verdict:** high, MEDIUM
+
+2. **target:** Analyst B  
+   **steelman:** If the workload is mostly nested, variable-shaped payloads or whole-document reads and writes, MongoDB matches the data better than a relational default.  
+   **weakness:** If the MVP’s hot path is ingesting and returning document-shaped records with many optional fields, PostgreSQL’s default path adds friction without buying much relational value. The team either normalizes data that wants to stay nested, or it leans on JSONB and then rebuilds document-store behavior by hand in queries, indexes, and validation. This fails when joins, cross-row constraints, and reporting are not the main product value.  
+   **evidence:** The mismatch is between the shape of the workload and the default mental model. A document-oriented app wants sparse fields, nested substructures, and schema drift at the edges. PostgreSQL can represent that, but it does not make it the natural path; MongoDB does. For a 4-person team, “natural path” matters because every extra modeling decision slows delivery.  
+   **falsification:** Inspect the top request types. If most requests are single-aggregate reads/writes with little need for joins, multi-row invariants, or relational reporting, this weakness is real; if not, it is not.  
+   **verdict:** medium, MEDIUM
+
+3. **target:** Analyst A  
+   **steelman:** A shared relational schema is valuable when all customers share the same core entities and the team can enforce one canonical shape.  
+   **weakness:** If the SaaS must support tenant-specific custom fields, per-customer metadata, or cohort-specific payload versions, PostgreSQL’s shared-schema default becomes a liability. Every customer-specific attribute either triggers more migrations or gets pushed into semi-structured columns that are harder to validate, index, and report on. MongoDB is a better fit when flexibility at the edge is a product requirement rather than a one-off exception.  
+   **evidence:** This is a product-shape problem, not a database-fashion problem. The more the app’s value comes from letting different customers carry different attributes, the less useful one rigid canonical schema becomes. PostgreSQL can encode the exception case, but then the exception path becomes the default path, which adds complexity for a small team.  
+   **falsification:** Build one tenant-customizable object with a few tenant-specific fields and one shared list view. If PostgreSQL keeps write logic, validation, and query logic as simple as MongoDB without extra migration or JSONB indirection, this condition fails.  
+   **verdict:** medium, LOW
+
+Acceptable only if the MVP has a stable shared schema, the hot path is relational or transaction-heavy, and tenant-specific or document-shaped flexibility is not a first-class product requirement.

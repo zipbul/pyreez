@@ -37,10 +37,18 @@ export type Protocol =
  * Optional LLM generation parameters passed through to providers.
  * Controls temperature, response length, and sampling.
  */
+/** Vendor reasoning-effort level. Mapped per provider:
+ *  - claude CLI: `--effort <level>`
+ *  - codex CLI:  `-c model_reasoning_effort=<level>`
+ *  - gemini CLI: unsupported, silently ignored. */
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+
 export interface GenerationParams {
   readonly temperature?: number;
   readonly top_p?: number;
   readonly fileAccess?: boolean;
+  readonly webAccess?: boolean;
+  readonly reasoning_effort?: ReasoningEffort;
 }
 
 // -- Team Composition --
@@ -212,6 +220,13 @@ export interface DeliberateInput {
    * CLI providers: enables file read tools + sets cwd to project directory.
    * API providers: enables function calling with read-only file tools. */
   readonly fileAccess?: boolean;
+
+  /** Enable web lookup tools so workers VERIFY citations instead of recalling them.
+   * Claude CLI only. Significant cost/latency — opt-in. */
+  readonly webAccess?: boolean;
+
+  /** Vendor reasoning-effort hint forwarded to each worker LLM. */
+  readonly reasoning_effort?: ReasoningEffort;
 
   /**
    * Optional callback invoked after each round completes.

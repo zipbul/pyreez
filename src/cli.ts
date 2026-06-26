@@ -33,21 +33,46 @@ function parseArgs(argv: string[]): { command: string; flags: Record<string, str
   return { command, flags };
 }
 
-/** Read value from flag or stdin if value is "-". */
-async function resolveValue(value: string | undefined): Promise<string | undefined> {
-  if (value === undefined) return undefined;
-  if (value === "-") {
-    // Read from stdin
-    const chunks: Uint8Array[] = [];
-    const reader = Bun.stdin.stream().getReader();
+/** Read all of stdin to a trimmed string. The stream is consumed exactly once. */
+async function readStdin(): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  const reader = Bun.stdin.stream().getReader();
+  try {
     while (true) {
-      const { done, value: chunk } = await reader.read();
+      const { done, value } = await reader.read();
       if (done) break;
-      chunks.push(chunk);
+      chunks.push(value);
     }
-    return Buffer.concat(chunks).toString("utf-8").trim();
+  } finally {
+    reader.releaseLock();
   }
-  return value;
+  return Buffer.concat(chunks).toString("utf-8").trim();
+}
+
+/** Flag names whose values are user content and may be piped from stdin via "-". */
+const STDIN_FLAGS = [
+  "task", "worker-instructions", "criteria", "subject", "questions",
+  "synthesis", "candidates", "responses", "deliberate",
+] as const;
+
+/**
+ * Resolve the stdin pipe ("-") into its owning flag, mutating `flags` in place.
+ * stdin can be read only once, so at most one flag may use "-"; more than one is rejected
+ * rather than silently dropped or crashed.
+ * @param reader injectable for tests; defaults to reading process stdin once.
+ */
+export async function resolveStdinFlags(
+  flags: Record<string, string>,
+  reader: () => Promise<string> = readStdin,
+): Promise<void> {
+  const piped = STDIN_FLAGS.filter((name) => flags[name] === "-");
+  if (piped.length === 0) return;
+  if (piped.length > 1) {
+    throw new Error(
+      `Only one flag may read from stdin ("-") per invocation; got: ${piped.map((f) => "--" + f).join(", ")}`,
+    );
+  }
+  flags[piped[0]!] = await reader();
 }
 
 function die(message: string): never {
@@ -165,6 +190,10 @@ async function main(): Promise<void> {
     printUsage();
   }
 
+  // Resolve a single stdin pipe ("-") into its flag before dispatch. Reads stdin once; rejects
+  // more than one "-" flag. After this, flags hold literal content and no command re-reads stdin.
+  await resolveStdinFlags(flags);
+
   const config = await buildConfig();
 
   let result: import("./handlers").HandlerResult;
@@ -187,12 +216,23 @@ async function main(): Promise<void> {
     }
 
     case "deliberate": {
-      const task = await resolveValue(flags["task"]);
+      const task = flags["task"];
       if (!task) die("--task is required for deliberate");
       const modelsRaw = flags["models"];
       if (!modelsRaw) die("--models is required for deliberate");
       const models = modelsRaw!.split(",").map((s) => s.trim());
-      const workerInstructions = await resolveValue(flags["worker-instructions"]);
+      const workerInstructions = flags["worker-instructions"];
+      // criteria/subject/questions are user content and must support stdin ("-") like task does.
+      const criteria = flags["criteria"];
+      const subject = flags["subject"];
+      const questionsRaw = flags["questions"];
+      // Vendor reasoning-effort: the sanctioned depth lever (claude --effort / codex model_reasoning_effort).
+      // Caller opt-in only — no baked default. e.g. --reasoning-effort high for deep stress-tests.
+      const VALID_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
+      const reasoningEffort = flags["reasoning-effort"];
+      if (reasoningEffort !== undefined && !VALID_EFFORTS.has(reasoningEffort)) {
+        die(`--reasoning-effort must be one of: minimal, low, medium, high, xhigh`);
+      }
 
       result = await handleDeliberate(config, {
         task: task!,
@@ -201,11 +241,13 @@ async function main(): Promise<void> {
         worker_instructions: workerInstructions,
         max_rounds: flags["max-rounds"] !== undefined ? Number(flags["max-rounds"]) : undefined,
         protocol: flags["protocol"],
-        questions: flags["questions"]?.split(",").map((s) => s.trim()),
-        criteria: flags["criteria"],
-        subject: flags["subject"],
+        questions: questionsRaw?.split(",").map((s) => s.trim()),
+        criteria,
+        subject,
         aggregation: flags["aggregation"],
         file_access: flags["file-access"] === "true" ? true : undefined,
+        web_access: flags["web-access"] === "true" ? true : undefined,
+        reasoning_effort: reasoningEffort as import("./deliberation/types").ReasoningEffort | undefined,
         onRound: (round) => {
           const models = round.responses.map((r) => r.model).join(", ");
           const failed = round.failedWorkers?.length ?? 0;
@@ -216,9 +258,9 @@ async function main(): Promise<void> {
     }
 
     case "acceptance": {
-      const task = await resolveValue(flags["task"]);
+      const task = flags["task"];
       if (!task) die("--task is required for acceptance");
-      const synthesis = await resolveValue(flags["synthesis"]);
+      const synthesis = flags["synthesis"];
       if (!synthesis) die("--synthesis is required for acceptance");
       const workersRaw = flags["workers"];
       if (!workersRaw) die("--workers is required for acceptance (JSON array)");
@@ -234,9 +276,9 @@ async function main(): Promise<void> {
     }
 
     case "rank": {
-      const task = await resolveValue(flags["task"]);
+      const task = flags["task"];
       if (!task) die("--task is required for rank");
-      const candidatesRaw = await resolveValue(flags["candidates"]);
+      const candidatesRaw = flags["candidates"];
       if (!candidatesRaw) die("--candidates is required (JSON array: [{id, content}, ...])");
       const judgeModel = flags["judge"];
       if (!judgeModel) die("--judge is required (model id, e.g. openai/gpt-5.4-mini)");
@@ -269,7 +311,7 @@ async function main(): Promise<void> {
     }
 
     case "quality-check": {
-      const responsesRaw = await resolveValue(flags["responses"]);
+      const responsesRaw = flags["responses"];
       if (!responsesRaw) die("--responses is required (JSON array: [{id, content}, ...])");
       const judgeModel = flags["judge"];
       if (!judgeModel) die("--judge is required (model id)");
@@ -301,9 +343,9 @@ async function main(): Promise<void> {
     }
 
     case "convergence-check": {
-      const task = await resolveValue(flags["task"]);
+      const task = flags["task"];
       if (!task) die("--task is required for convergence-check");
-      const responsesRaw = await resolveValue(flags["responses"]);
+      const responsesRaw = flags["responses"];
       if (!responsesRaw) die("--responses is required (JSON array: [{id, content}, ...])");
       const judgeModel = flags["judge"];
       if (!judgeModel) die("--judge is required (model id)");
@@ -333,9 +375,9 @@ async function main(): Promise<void> {
     }
 
     case "inspect": {
-      const task = await resolveValue(flags["task"]);
+      const task = flags["task"];
       if (!task) die("--task is required for inspect");
-      const deliberateRaw = await resolveValue(flags["deliberate"]);
+      const deliberateRaw = flags["deliberate"];
       if (!deliberateRaw) die("--deliberate is required (path or '-' for stdin: full deliberate JSON output)");
       const judgeModel = flags["judge"];
       if (!judgeModel) die("--judge is required (model id)");
@@ -367,9 +409,9 @@ async function main(): Promise<void> {
     }
 
     case "fuse": {
-      const task = await resolveValue(flags["task"]);
+      const task = flags["task"];
       if (!task) die("--task is required for fuse");
-      const candidatesRaw = await resolveValue(flags["candidates"]);
+      const candidatesRaw = flags["candidates"];
       if (!candidatesRaw) die("--candidates is required (JSON array: [{id, content}, ...])");
       const judgeModel = flags["judge"];
       if (!judgeModel) die("--judge is required (model id)");
@@ -428,7 +470,9 @@ async function main(): Promise<void> {
   console.log(JSON.stringify(result!.data, null, 2));
 }
 
-main().catch((error) => {
-  console.error("Pyreez CLI failed:", error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error("Pyreez CLI failed:", error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

@@ -196,7 +196,7 @@ Rails monolith → microservices 마이그레이션 자체가 6개월~2년 시�
 |---|---|
 | **3** | default. lens 활성, round 2에서 수렴 시 조기 종료 가능 |
 | 4-5 | contested topic, budget 여유 |
-| 2 | **금지** — 조기 종료 작동 안 함, 비용 절약 0 |
+| 2 | **수렴 task에서 금지** — 조기 종료 작동 안 함, 비용 절약 0. **예외: brainstorming workaround** (SKILL.md §1) — R1 lens 활성 위해 2 사용, R2 무시 |
 | 1 | **금지** — lens·anti-conformity·조기 종료 모두 비활성 |
 
 ### `--count`

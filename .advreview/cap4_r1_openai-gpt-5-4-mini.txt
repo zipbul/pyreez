@@ -1,0 +1,22 @@
+1. **Condition: the MVP’s data model is expected to churn weekly, with many optional or tenant-defined fields**
+   - steelman: PostgreSQL is the safer default because it enforces structure, keeps data consistent, and avoids painting the team into a corner later.
+   - weakness: If the product is still discovering its domain and customers will keep adding/removing fields, PostgreSQL becomes the slower path. The team either pays migration cost repeatedly or punts to semi-structured columns, which reduces the benefit of choosing PostgreSQL in the first place. MongoDB is better here because the document shape can evolve without forcing a schema migration every time the product team learns something new.
+   - evidence: The mechanism is schema volatility. Postgres optimizes for stable structure; when the shape changes frequently, the work shifts into migrations, ORM changes, backfills, and coordination overhead. That is a direct time-to-MVP penalty for a 4-person team. This is strongest when the schema changes are not edge cases but part of the product loop itself.
+   - falsification: Count schema-affecting changes over the first 2-3 sprints. If the team can keep them to a handful and most fields are known up front, this weakness does not fire.
+   - verdict: high, MEDIUM
+
+2. **Condition: most operations are document-centric CRUD on one aggregate at a time, with little need for joins or cross-record constraints**
+   - steelman: PostgreSQL gives you stronger integrity, better ad hoc querying, and a more future-proof model if the product later needs relational reporting.
+   - weakness: If the app mostly creates, fetches, and updates whole business objects as a unit, PostgreSQL’s relational shape is extra ceremony. The team ends up designing join tables, deciding what to normalize, and wiring the ORM around that structure even though the app never benefits from those joins during the MVP. MongoDB is simpler when the natural unit of work is a nested document, because the whole object can be stored and retrieved directly.
+   - evidence: The failure mode is mismatch between access pattern and storage model. When reads and writes are centered on one aggregate, relational decomposition becomes overhead rather than leverage. PostgreSQL can emulate document storage, but once you rely on that heavily, you lose much of the reason for choosing PostgreSQL as the default.
+   - falsification: Trace the top 20 endpoints or commands. If most of them touch multiple entities, need joins, or require strong cross-entity constraints, this condition does not hold.
+   - verdict: medium, MEDIUM
+
+3. **Condition: the MVP includes high-velocity append-only payloads or event-like records whose query shape is not known yet**
+   - steelman: PostgreSQL can still store events efficiently, and its query power may matter later for analytics, auditing, and debugging.
+   - weakness: If the team is mostly capturing and replaying variable-shaped payloads, PostgreSQL pushes them toward wide sparse tables, JSON blobs, or a hybrid design that adds complexity without much benefit. MongoDB fits better when the payloads are heterogeneous and the team does not yet know which fields will matter operationally. For a small team under a 6-month deadline, avoiding premature relational design can be the difference between shipping and stalling.
+   - evidence: The risk here is write-path friction plus query-shape uncertainty. PostgreSQL is strongest when you already know the structure you need to query. If that structure is still unknown, the default choice creates avoidable modeling work and increases the odds of a bad first schema that has to be rewritten later.
+   - falsification: Measure whether the payloads are mostly fixed-shape and whether the team already knows the key queries they need. If both are true, PostgreSQL is not disadvantaged here.
+   - verdict: medium, LOW
+
+Acceptable only if the MVP has a mostly stable relational core, schema changes are rare, and the team can measure that joins and cross-record constraints matter more than schema flexibility.

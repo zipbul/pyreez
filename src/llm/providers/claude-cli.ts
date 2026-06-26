@@ -75,12 +75,15 @@ export class ClaudeCliProvider implements LLMProvider {
       "--system-prompt", systemPrompt,
     ];
 
-    if (request.fileAccess) {
-      // Read-only tools for file access during deliberation
-      args.push("--tools", "Read,Glob,Grep,Bash(git:*)");
-    } else {
-      args.push("--tools", "");  // Disable tools — raw LLM inference only
+    if (request.reasoning_effort) {
+      args.push("--effort", request.reasoning_effort);
     }
+
+    // Tool selection: file tools (read-only), web tools (citation verification), or none (raw inference).
+    const tools: string[] = [];
+    if (request.fileAccess) tools.push("Read", "Glob", "Grep", "Bash(git:*)");
+    if (request.webAccess) tools.push("WebSearch", "WebFetch");
+    args.push("--tools", tools.join(","));  // empty string = no tools (raw inference)
 
     try {
       // Strip CLAUDECODE env var to allow spawning from within a Claude Code session
@@ -92,8 +95,9 @@ export class ClaudeCliProvider implements LLMProvider {
         {
           stdin: new Blob([prompt]),
           env,
-          // fileAccess: run from project dir so workers can read files
-          // otherwise: run from /tmp to prevent loading CLAUDE.md (~18K tokens overhead)
+          // fileAccess: run from project dir so workers can read files.
+          // webAccess-only or neither: run from /tmp (web tools work from anywhere; avoids
+          // loading CLAUDE.md ~18K-token overhead).
           cwd: request.fileAccess ? process.cwd() : "/tmp",
         },
         { idleMs: IDLE_TIMEOUT_MS },
@@ -143,12 +147,13 @@ export class ClaudeCliProvider implements LLMProvider {
       );
     }
 
-    return this.buildResponse(parsed.result ?? "", originalModel);
+    return this.buildResponse(parsed.result ?? "", originalModel, parsed.usage);
   }
 
   private buildResponse(
     text: string,
     originalModel: string,
+    usage?: ClaudeCliUsage,
   ): ChatCompletionResponse {
     return {
       id: `cli-${Date.now()}`,
@@ -162,8 +167,39 @@ export class ClaudeCliProvider implements LLMProvider {
           finish_reason: "stop",
         },
       ],
+      ...(usage ? { usage: normalizeUsage(usage) } : {}),
     };
   }
+}
+
+/**
+ * Normalize Anthropic CLI usage to OpenAI-compatible ChatCompletionUsage.
+ *
+ * Anthropic reports three input sub-buckets: uncached `input_tokens`,
+ * `cache_creation_input_tokens` (cache miss → write), `cache_read_input_tokens`
+ * (cache hit). All three are billed as input; OpenAI's `prompt_tokens`
+ * convention is the total input, so we sum them.
+ */
+function normalizeUsage(u: ClaudeCliUsage) {
+  const uncached = u.input_tokens ?? 0;
+  const cacheCreation = u.cache_creation_input_tokens ?? 0;
+  const cacheRead = u.cache_read_input_tokens ?? 0;
+  const promptTokens = uncached + cacheCreation + cacheRead;
+  const completionTokens = u.output_tokens ?? 0;
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: promptTokens + completionTokens,
+    ...(u.cache_read_input_tokens != null ? { cached_tokens: u.cache_read_input_tokens } : {}),
+  };
+}
+
+/** Shape of `claude -p --output-format json` usage field. */
+interface ClaudeCliUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
 }
 
 /** Shape of `claude -p --output-format json` output. */
@@ -178,4 +214,5 @@ interface ClaudeCliJsonOutput {
   result?: string;
   session_id?: string;
   total_cost_usd?: number;
+  usage?: ClaudeCliUsage;
 }

@@ -1,0 +1,22 @@
+Finding 1
+steelman: PostgreSQL’s relational model and strict schema enforcement reduce data corruption risks and ease long-term maintenance for any SaaS handling user accounts, billing, or relationships.
+weakness: When the MVP’s core domain objects (e.g., dynamic user profiles, configurable workflows, or third-party integration payloads) change weekly, every alteration forces DDL migrations and potential downtime or backfill scripts; under a four-person team with two-week iteration cycles, these repeated production migrations accumulate deployment friction and rollback risk that MongoDB’s schemaless documents avoid entirely.
+evidence: A single added nested field or polymorphic relationship in Postgres requires an explicit ALTER TABLE plus application code update plus data migration; the same change in MongoDB is only a code change and can be deployed immediately without locking or backfill.
+falsification: Run two parallel four-week sprints on identical feature sets; measure cumulative hours spent writing and verifying migrations plus any production incidents; if Postgres total exceeds MongoDB by more than 30 %, the condition holds.
+verdict: critical MEDIUM
+
+Finding 2
+steelman: PostgreSQL’s JSONB type plus full ACID transactions safely store semi-structured data while guaranteeing consistency across related tables.
+weakness: When the initial data model is dominated by deeply nested, variable-length documents (configuration trees, audit trails, or embedded analytics events) and the team lacks a dedicated DBA, Postgres JSONB queries and indexes must be hand-tuned to avoid sequential scans; under six-month time pressure this tuning is deferred, producing production query latency spikes that MongoDB’s native document indexing and flexible query model do not trigger at the same scale.
+evidence: A nested array-of-objects filter or partial-index need in Postgres JSONB requires explicit GIN or expression indexes plus EXPLAIN verification; equivalent access in MongoDB uses only the built-in document index without extra syntax or planner surprises.
+falsification: After three months of live traffic, compare p95 latency on the three most common document-retrieval endpoints; a Postgres-to-MongoDB ratio above 2× falsifies the finding.
+verdict: high MEDIUM
+
+Finding 3
+steelman: PostgreSQL’s mature replication and point-in-time recovery give stronger durability guarantees out of the box than early MongoDB replica sets.
+weakness: When the team deploys its first production instance on a single managed Postgres node because no one has time to configure HA or connection pooling before launch, any single availability-zone outage or misapplied vacuum causes immediate downtime; MongoDB Atlas or equivalent document DBs ship with replica sets and automated failover by default, shielding the four-person team from these operational gaps during the critical six-month window.
+evidence: Default single-node Postgres on common PaaS offerings exposes the primary to maintenance events and disk-full scenarios with no automatic promotion; document DB managed services perform automatic failover within seconds without team intervention.
+falsification: Induce one managed-database maintenance event or simulated AZ failure in month four; if Postgres experiences >5 min user-visible downtime while the MongoDB equivalent stays under 30 s, the condition is confirmed.
+verdict: high LOW
+
+None exists within its constraints.

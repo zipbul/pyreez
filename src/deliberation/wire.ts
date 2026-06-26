@@ -66,7 +66,15 @@ export function stripThinkTags(text: string): string {
 // -- Chat Adapter --
 
 type RawChatFn = (
-  request: { model: string; messages: ChatMessage[]; temperature?: number; top_p?: number; fileAccess?: boolean },
+  request: {
+    model: string;
+    messages: ChatMessage[];
+    temperature?: number;
+    top_p?: number;
+    fileAccess?: boolean;
+    webAccess?: boolean;
+    reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  },
 ) => Promise<ChatCompletionResponse>;
 
 /**
@@ -86,6 +94,8 @@ export function createChatAdapter(
       ...(params?.temperature != null ? { temperature: params.temperature } : {}),
       ...(params?.top_p != null ? { top_p: params.top_p } : {}),
       ...(params?.fileAccess ? { fileAccess: true } : {}),
+      ...(params?.webAccess ? { webAccess: true } : {}),
+      ...(params?.reasoning_effort != null ? { reasoning_effort: params.reasoning_effort } : {}),
     });
     const choice = response.choices[0];
     const raw = choice?.message?.content ?? "";
@@ -108,6 +118,7 @@ export function createChatAdapter(
 function createEngineDepsForProtocol(
   protocol: Protocol,
   chatFn: (model: string, messages: import("../llm/types").ChatMessage[], params?: GenerationParams) => Promise<ChatResult>,
+  webAccess = false,
 ): EngineDeps {
   switch (protocol) {
     case "shared_convergence":
@@ -123,10 +134,12 @@ function createEngineDepsForProtocol(
     case "adversarial_debate":
       return {
         chat: chatFn,
-        buildR1Messages: (ctx, instructions, roundInfo, workerIndex) =>
-          buildAdversarialDebateR1(ctx, instructions, roundInfo, workerIndex),
-        buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex) =>
-          buildAdversarialDebateR2(ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex),
+        // perWorkerWeb is gated by the engine on provider capability; fall back to the global flag
+        // only when the engine doesn't supply it (e.g. a direct deps unit test).
+        buildR1Messages: (ctx, instructions, roundInfo, workerIndex, perWorkerWeb) =>
+          buildAdversarialDebateR1(ctx, instructions, roundInfo, workerIndex, perWorkerWeb ?? webAccess),
+        buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex, perWorkerWeb) =>
+          buildAdversarialDebateR2(ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex, perWorkerWeb ?? webAccess),
         buildFollowUp: (ctx, otherResponses, instructions, roundInfo, workerIndex) =>
           buildAdversarialDebateFollowUp(ctx, otherResponses, instructions, roundInfo, workerIndex),
       };
@@ -221,13 +234,15 @@ export function createDeliberateFn(
 
     // 5. Assemble engine deps (protocol-specific prompt builders)
     const protocol = input.protocol;
-    const engineDeps = createEngineDepsForProtocol(protocol, deps.chat);
+    const engineDeps = createEngineDepsForProtocol(protocol, deps.chat, input.webAccess ?? false);
 
     // 6. Build engine config
     const effectiveMaxRounds = input.maxRounds ?? defaultMaxRounds(protocol);
     const workerGenParams: GenerationParams = {
       temperature: 1.0,
       ...(input.fileAccess ? { fileAccess: true } : {}),
+      ...(input.webAccess ? { webAccess: true } : {}),
+      ...(input.reasoning_effort ? { reasoning_effort: input.reasoning_effort } : {}),
     };
     const config: EngineConfig = {
       maxRounds: effectiveMaxRounds,

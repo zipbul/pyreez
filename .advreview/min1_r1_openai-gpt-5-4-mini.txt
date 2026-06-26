@@ -1,0 +1,19 @@
+- steelman: PostgreSQL is the safer default because it gives strong integrity, mature tooling, and a cleaner path if the MVP later needs reporting or relational joins.
+- weakness: If the product model is still moving and the team expects frequent entity-shape changes while validating the MVP, PostgreSQL becomes a coordination tax. Every new field, split, merge, or optional relationship pushes the team through schema changes, migrations, backfills, and review friction; MongoDB can absorb that churn with less ceremony, so the default PostgreSQL choice can slow experiments and delay shipping.
+- evidence: The failure chain is simple: uncertain domain model -> repeated schema edits -> migration/backfill overhead -> slower deploy cadence -> fewer product iterations inside the 6-month window. This is the exact place where the proposal’s evidence gap matters: it assumes schema stability without showing it.
+- falsification: Track the next few planned feature changes and count how often the data model must change. If those changes can be implemented without DB migration work or blocking coordination, this weakness weakens.
+- verdict: high, MEDIUM
+
+- steelman: PostgreSQL is a solid default because it keeps data normalized and makes cross-entity queries safer when the product grows beyond a prototype.
+- weakness: If the app is mostly document-shaped and accessed as whole aggregates, PostgreSQL’s relational model is a poor ergonomic fit. The team either over-normalizes and pays join complexity, or stores semi-structured payloads in JSON-like columns and ends up with a document workflow inside a relational database, which removes much of the practical advantage of choosing PostgreSQL in the first place.
+- evidence: The failure chain is workload mismatch -> awkward schema design -> more application code and query complexity -> slower implementation and more chances to get the model wrong. MongoDB is usually a better match when reads and writes naturally happen on a single nested object rather than across related tables.
+- falsification: Inspect the first batch of endpoints and ask whether they mostly operate on one nested business object at a time or routinely need relational traversal. If joins and cross-entity constraints are already central, this objection weakens.
+- verdict: high, MEDIUM
+
+- steelman: PostgreSQL is the default because it reduces the risk of data corruption and keeps future options open.
+- weakness: If the 4-person team does not already have strong relational modeling habits and the MVP’s success depends more on shipping speed than on strict data guarantees, PostgreSQL can backfire through subtle design overhead. The team spends scarce attention on normalization, indexing, migration strategy, and transaction boundaries instead of product work; MongoDB lowers that up-front modeling burden and can therefore produce faster MVP progress in this specific setup.
+- evidence: The failure chain is low database expertise -> more modeling mistakes and design debates -> slower feature delivery -> less learning within the 6-month window. The evidence gap is that the proposal does not demonstrate the team’s relational skill level or prove that enforcement benefits will actually be used during the MVP.
+- falsification: Have the team implement one representative feature end to end without database help. If they can do it cleanly and quickly in PostgreSQL, this concern drops; if they repeatedly stall on schema/index/migration decisions, it holds.
+- verdict: medium, LOW
+
+The proposal is acceptable only if the MVP’s data model is already fairly stable, the app needs relational integrity or joins from day one, and the team is comfortable making and maintaining PostgreSQL schema decisions quickly.

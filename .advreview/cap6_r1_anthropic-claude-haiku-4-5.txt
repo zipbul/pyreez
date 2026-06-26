@@ -1,0 +1,83 @@
+Now I have sufficient evidence. Let me construct the findings with proper verification and source attribution.
+
+---
+
+**Weakness 1: Rapid, frequent schema iteration during MVP requires no migration coordination overhead**
+
+**Steelman:** MongoDB's schema-less model allows developers to add, rename, or restructure fields without running migrations, while PostgreSQL requires ALTER TABLE operations that demand coordination and carry lock-contention risk—critical when a 4-person team must ship often and cannot afford unplanned blocking events.
+
+**Weakness:** This advantage evaporates once the team's feature-change velocity triggers non-trivial schema evolution. The claim assumes the 6-month MVP window sees unpredictable, continuous pivots requiring schema rewrites, but two mechanisms undermine this:
+
+First, if the startup reaches users and begins collecting production data within weeks (typical for validated MVP launches), the "schema flexibility" premium reverses: [427 million rows migrating from MongoDB to PostgreSQL revealed that lack of enforced schema meant 47 different null checks just to read a user's balance, with different developers using inconsistent field names (`balance` vs `accountBalance`), data types (strings vs numbers), and date formats in the same collection](https://medium.com/lets-code-future/postgresql-vs-mongodb-we-migrated-400m-rows-one-direction-only-c0dc47a42ca4). Once the team is debugging data-quality issues caused by the absence of schema, onboarding new developers took 2–3 weeks instead of 2–3 days—consuming the 4-person team's capacity entirely.
+
+Second, research on early-stage startup pivots shows [92% pivot at least once before product-market fit, but 75% of "Ideation Pivots" (pre-user, pre-product pivots) happen within the first three months](https://blog.mean.ceo/startup-pivot-stories-news-june-2026/), and most "Hard Pivots" (with live users) occur 6–12 months in. By the 6-month MVP gate, the typical startup has either validated its core model (in which case schema is mostly stable) or needs to pivot after launch (a post-MVP event). The MVP window itself is not the high-pivot phase.
+
+**Evidence:** The contradiction relies on hidden timing: the proposal assumes schema flexibility is most valuable *during* MVP, but data-consistency failures only surface *after* users are live and data is voluminous. PostgreSQL migrations do impose coordination—[a 3-second ALTER TABLE ADD COLUMN took down an application for 45 minutes due to lock queueing behind a long-running analytics query](https://medium.com/@antoniodipinto/zero-downtime-schema-migrations-in-postgresql-c138017e7f90)—but this is a *post-launch* cost, not an MVP killer. For a 6-month MVP, [PostgreSQL 11+ no longer rewrites tables when adding a column with a default; the default is stored in metadata and new rows automatically get the default](https://hoop.dev/blog/zero-downtime-strategies-for-adding-a-new-column-in-postgresql), making early-stage pivots painless. MongoDB's initial velocity gain becomes technical debt once the team is debugging corrupted balances (string concatenation instead of addition: `"1000.50" + 50 = "1000.5050"`).
+
+**Falsification:** Ship a 4-person team with MongoDB and PostgreSQL in parallel on an identical MVP spec, measure days-to-first-production deployment and days spent on schema-related debugging (including data-type mismatches, null checks, developer onboarding on schema conventions) over 6 months. If MongoDB deployment is <3 days faster and schema-related debugging is <5% of sprints, MongoDB wins; if debugging exceeds 10% of capacity by month 4, PostgreSQL wins.
+
+**Verdict:** **medium | MEDIUM** — The claim is plausible for the first 8–12 weeks of pure development, but it relies on the MVP not reaching production users with significant data volume. The research on pivots and the case study on data corruption suggest the advantage flips once real data is at scale, which occurs well within a 6-month timeline for most validated startups.
+
+---
+
+**Weakness 2: Operational overhead of PostgreSQL on a 4-person team forces one engineer into part-time database administration**
+
+**Steelman:** PostgreSQL's self-managed or manually-scaled architecture demands monitoring, backup orchestration, connection-pool tuning, and index management, consuming non-trivial engineering hours on a small team. MongoDB Atlas abstracts these via a managed service, freeing all four engineers to focus on product.
+
+**Weakness:** This steelman assumes the team is running PostgreSQL unmanaged or on bare VMs, but for a 4-person MVP team, this premise is false. The proposal does not specify how PostgreSQL is deployed; [Supabase (managed PostgreSQL) includes "auth, storage, and edge functions in addition to PostgreSQL" at $25/month Pro tier, compared to MongoDB's entry-level Atlas Flex tier at $8/month with identical free-tier constraints](https://www.groovyweb.co/blog/mongodb-vs-firebase-vs-supabase-ai-apps-2026). Managed PostgreSQL via Supabase or Neon [abstracts away provisioning, maintenance, resizing, and administration; Neon handles security patches, load balancing, and capacity planning](https://northflank.com/blog/best-postgresql-providers), eliminating the admin burden the steelman assumes.
+
+The operational-overhead claim is only true if the proposal intends *unmanaged* PostgreSQL (self-hosted or raw AWS RDS without a managed wrapper). If managed PostgreSQL is in scope—which is the only sensible choice for a 4-person team—then MongoDB Atlas and Supabase impose *identical* operational overhead: approximately zero for both, delegated to the platform.
+
+The hidden assumption is that PostgreSQL means unmanaged, but modern SaaS architecture defaults to managed databases. Under that false premise, the comparison is unfair.
+
+**Evidence:** [On a 4-person team at early stage, "everyone handles multiple responsibilities" and the team focuses on "validating the idea, building the MVP, talking to real users, and surviving"](https://newxel.com/blog/startup-team-structure/). [Managed PostgreSQL services like Aiven, Neon, and Supabase handle operational overhead of running PostgreSQL, allowing engineers to dedicate more time to product development rather than infrastructure](https://northflank.com/blog/best-postgresql-providers). The operational-overhead penalty only applies if PostgreSQL is unmanaged; managed PostgreSQL eliminates it.
+
+**Falsification:** Measure weekly engineering hours spent on database administration (backups, scaling, monitoring, patching) for a 4-person team using Supabase PostgreSQL versus MongoDB Atlas, over 6 months. If Supabase requires >4 hours/week and MongoDB Atlas requires <1 hour/week, the weakness holds. If both require <1 hour/week (or the same amount), the weakness is false.
+
+**Verdict:** **high | HIGH** — The weakness is genuine but the evidence to support it is missing. The steelman assumes unmanaged PostgreSQL, which is not the realistic choice for a 4-person MVP team and is not specified by the proposal. Once managed PostgreSQL enters the picture, the operational-overhead advantage disappears entirely. The falsification test is trivial (compare platform UIs), and the proposal's failure to specify "unmanaged" invalidates the claim.
+
+---
+
+**Weakness 3: PostgreSQL's write-latency advantage is irrelevant for MVP user counts and masks real-world blocking under production load**
+
+**Steelman:** Benchmarks show PostgreSQL 18 achieves 4.9x faster inserts and 3.5x lower write latency than MySQL, and comparable performance to MongoDB in many cases. For an MVP with sub-10k users, this performance gap is immaterial, and choosing MongoDB introduces unnecessary technical debt when PostgreSQL's superior performance will become a future asset.
+
+**Weakness:** This inverts the burden: the steelman is that PostgreSQL's *superior* latency makes it the better choice, but the task asks for conditions where PostgreSQL is *worse*. However, the steelman itself contains a falsifiable but unverified premise: that PostgreSQL's write latency is universally superior and that this advantage holds under the specific production load patterns an MVP experiences.
+
+The weakness is conditional: if the MVP's access pattern is dominated by *multi-document, ad-hoc queries* rather than bulk writes, and if the team must ship without query optimization expertise, then MongoDB's simpler query model may reduce developer burden more than PostgreSQL's raw write speed helps. But this is weak because:
+
+1. [Benchmarks show PostgreSQL 18 inserts 21,338 single-row inserts per second versus MySQL's 4,383, at 4.0 ms latency versus 42.7 ms](https://commandlinux.com/statistics/database-performance-statistics-on-linux-mysql-postgresql-benchmark-data), but these tests use identical hardware, 16GB RAM, 8 CPUs, and Docker—conditions vastly higher than an MVP's typical deployment.
+
+2. [MongoDB multi-document transactions impose a "60-second default timeout" with performance overhead](https://builder.ai2sql.io/blog/postgresql-vs-mongodb), which is irrelevant for an MVP that avoids complex transactions.
+
+3. The MVP's actual bottleneck at scale is almost never database latency; it's application query count, N+1 patterns, and index misses—problems affecting both databases equally and solvable by engineering practices, not database choice.
+
+The weakness only fires if: (a) the MVP's workload is non-analytic and non-transactional (simple document lookups), (b) the team lacks SQL optimization skills, and (c) no managed query advisor is in use. These are edge cases, and the task asks for "specific conditions"—so this qualifies, but weakly.
+
+**Evidence:** [PostgreSQL 18 benchmark shows 21,338 inserts/sec and 4.0 ms latency at 99th percentile](https://commandlinux.com/statistics/database-performance-statistics-on-linux-mysql-postgresql-benchmark-data), but MongoDB's insert latency is comparable for single-document operations (not verified in the search results). The [60-second transaction timeout in MongoDB](https://builder.ai2sql.io/blog/postgresql-vs-mongodb) is a real constraint but only matters if the MVP uses multi-document transactions. The claim is not decisively falsified, but the conditions are narrow.
+
+**Falsification:** Run the MVP's actual query workload (not a generic benchmark) on both databases with real production data at 50,000 user-months. If PostgreSQL latency is <100ms median and MongoDB latency is >500ms median on the team's most common query, PostgreSQL is better regardless of developer skill. If both are <100ms, latency is not the deciding factor.
+
+**Verdict:** **low | LOW** — This weakness is speculative and requires a very specific (low-probability) combination of conditions: simple document lookups only, no transaction need, and team with weak SQL skills. The evidence does not show MongoDB's latency is superior—only that PostgreSQL's published latency is high, which is not the same as MongoDB being lower. This weakness is included to be thorough, but it is not the strongest line of attack.
+
+---
+
+**Condition under which the proposal is acceptable:**
+
+PostgreSQL as the default is acceptable **if the 4-person team will be using a managed PostgreSQL service (Supabase, Neon, or equivalent) with auto-scaling and built-in auth, and if the MVP does not anticipate frequent, pre-user-launch schema rewrites.** Under these constraints (managed service + stability-focused design), PostgreSQL eliminates the operational burden and schema-evolution risk, while its superior write performance and enforced data consistency become assets post-launch. If the team intends to run unmanaged PostgreSQL or anticipates weekly schema changes before user validation, this condition does not hold, and MongoDB's schema flexibility becomes the stronger choice.
+
+---
+
+**Sources:**
+- [Knowi: MongoDB vs PostgreSQL schema flexibility for MVP](https://www.knowi.com/blog/mongodb-vs-postgresql-choosing-the-right-database-for-your-needs/)
+- [AI2SQL: PostgreSQL vs MongoDB 2026 transactions and scalability](https://builder.ai2sql.io/blog/postgresql-vs-mongodb)
+- [Medium: 427M row migration from MongoDB to PostgreSQL, data-integrity failures](https://medium.com/lets-code-future/postgresql-vs-mongodb-we-migrated-400m-rows-one-direction-only-c0dc47a42ca4)
+- [Startup Pivot Research 2026: 92% pivot frequency, 75% hard pivots occur 6-12 months in](https://blog.mean.ceo/startup-pivot-stories-news-june-2026/)
+- [Newxel: 4-person startup team structure and time allocation](https://newxel.com/blog/startup-team-structure/)
+- [Northflank: Managed PostgreSQL providers eliminate operational overhead](https://northflank.com/blog/best-postgresql-providers)
+- [Groovy Web: Supabase vs MongoDB for startups 2026, pricing comparison](https://www.groovyweb.co/blog/mongodb-vs-firebase-vs-supabase-ai-apps-2026)
+- [SoloDevStack: MongoDB vs Supabase for developers, feature bundling](https://solodevstack.com/blog/mongodb-vs-supabase-solo-developers)
+- [Medium: PostgreSQL zero-downtime migrations, lock contention risks](https://medium.com/@antoniodipinto/zero-downtime-schema-migrations-in-postgresql-c138017e7f90)
+- [Hoop Dev: PostgreSQL 11+ column addition no longer requires table rewrite](https://hoop.dev/blog/zero-downtime-strategies-for-adding-a-new-column-in-postgresql)
+- [CommandLinux: PostgreSQL 18 benchmark, 21,338 inserts/sec, 4.0ms latency](https://commandlinux.com/statistics/database-performance-statistics-on-linux-mysql-postgresql-benchmark-data)
+- [CloudZero: MongoDB free tier limits, 5GB storage, shared resources](https://www.cloudzero.com/blog/mongodb-pricing/)

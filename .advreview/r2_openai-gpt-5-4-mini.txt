@@ -1,0 +1,22 @@
+1. target: Analyst A
+steelman: PostgreSQL is the safer default when the product model is already known because it enforces structure, protects integrity, and makes later reporting easier.
+weakness: If the MVP’s core records are sparse, tenant-specific, or still changing shape every time the team learns something, PostgreSQL turns ordinary product pivots into schema work, backfills, and coordinated deploys. For a 4-person team, that coupling can slow feature shipping more than the stronger guarantees help.
+evidence: The mechanism is direct: a relational schema assumes shared structure, while document storage tolerates shape drift. The proposal has not shown evidence that the MVP’s data model is stable, so the claim that PostgreSQL is the safer default rests on an unsupported assumption [unverified].
+falsification: Track the next few feature additions. If they do not require migrations, backfills, or query rewrites, this failure mode does not matter.
+verdict: high, MEDIUM
+
+2. target: Analyst B
+steelman: PostgreSQL’s relational model is an advantage when the app needs joins, constraints, or reporting across entities.
+weakness: If most requests are single-aggregate CRUD and the product rarely needs cross-record invariants, PostgreSQL’s relational machinery buys little and adds modeling overhead the team does not use. In that case the team either over-normalizes data that is never queried together or keeps JSON sidecars anyway, and MongoDB is closer to the actual access pattern.
+evidence: This is an access-pattern mismatch, not a preference for “documents” in the abstract. The earlier rapid-scaling argument is weaker here because it depends on an early load spike the MVP does not imply; the more defensible failure mode is simply that the workload is local to one aggregate and PostgreSQL’s extra structure becomes dead weight [unverified].
+falsification: Classify the top endpoints and data flows. If the majority of requests touch one aggregate and almost never join across entities, this critique stands; if not, it collapses.
+verdict: high, MEDIUM
+
+3. target: Analyst A
+steelman: PostgreSQL’s discipline is manageable if the team already knows SQL and can keep migrations, indexes, and query review under control.
+weakness: If no one on the 4-person team owns schema discipline, migration testing, and query tuning, PostgreSQL becomes a release-risk amplifier. Every change in product shape needs coordination, and small mistakes surface as blocked deploys or expensive rewrites; MongoDB absorbs more of that uncertainty with fewer blocking steps.
+evidence: The failure mode is organizational. PostgreSQL works well when someone is continuously tending the schema and query path; without that owner, correctness work gets deferred until it blocks shipping. The proposal does not establish that such ownership exists, so the premise is unsupported [unverified].
+falsification: Assign one person as database owner for a few sprints and count how often schema work blocks feature releases. If the count is near zero, this condition is not important.
+verdict: medium, LOW
+
+Acceptable only if the schema is expected to stay stable, the workload is mostly single-aggregate rather than relational, and one person can own migrations and query review without blocking shipping.

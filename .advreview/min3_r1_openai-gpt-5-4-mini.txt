@@ -1,0 +1,34 @@
+1.  
+steelman: The MVP’s data model is still fluid, with many optional fields, nested attributes, and product decisions still moving every sprint. In that setting, a document database can let a 4-person team ship changes without repeated migration work or schema-versioning overhead.
+
+weakness: PostgreSQL becomes the worse default when the core entities are still undefined and the team expects repeated shape changes before product-market fit. If every small feature adds or removes fields, the migration backlog, backfills, and rollout coordination become a real velocity tax; MongoDB absorbs that churn with less ceremony. This only bites if the proposal is hiding an unstable domain model behind a “we’ll normalize later” assumption.
+
+evidence: The failure mode is mechanical: relational schemas reward up-front structure, while document stores tolerate sparse and changing records. When the product is not yet converged, PostgreSQL forces either repeated DDL/migration work or a fallback to JSON columns that recreate document-store behavior with extra query friction. The consequence is slower iteration and more deploy coupling for a small team.
+
+falsification: Count schema changes, backfills, and field additions over the last few planned sprints. If the model is already stable enough that you can go weeks without touching schema shape, this weakness largely disappears.
+
+verdict: high, MEDIUM
+
+2.  
+steelman: The MVP’s hot path is mostly “fetch or replace one user/content/config document,” not cross-table reporting, transactional fan-out, or relational joins. In that case, a document model lines up better with the product surface and keeps the code path shorter.
+
+weakness: PostgreSQL is the worse default when the application is document-centric and denormalization would be the natural shape anyway. If the team ends up storing one aggregate per row and rarely joining, PostgreSQL adds schema overhead without giving back its main advantage. MongoDB is better aligned when the app mostly moves whole objects around and the relational model is incidental.
+
+evidence: The break point is access pattern, not ideology. If the product behaves like a set of independent aggregates, a relational schema buys little while still imposing migration, indexing, and query-planning overhead. The consequence is extra implementation work for the same user-facing behavior, which is exactly the kind of tax a 6-month MVP should avoid.
+
+falsification: Sample the expected request traces. If most reads and writes touch one aggregate and do not require joins or multi-entity consistency, this condition is real; if the app routinely needs relational queries, it is not.
+
+verdict: medium, MEDIUM
+
+3.  
+steelman: The MVP includes transient records that should expire automatically, such as sessions, inbox items, feeds, one-time jobs, or event blobs. The team wants the smallest possible operational surface and does not want to own cleanup logic in the app.
+
+weakness: PostgreSQL is the worse default when automatic expiry is a core operational need and the team cannot spare time for maintenance jobs or partition management. MongoDB’s TTL-style behavior can remove that burden from application code; PostgreSQL usually pushes you toward scheduled deletions or partition lifecycle work. For a 4-person team, that extra moving part can become a reliability and time cost.
+
+evidence: This is an ops-friction problem. If records must disappear on their own, the database choice determines whether expiry is a built-in behavior or a maintenance concern. PostgreSQL can do it, but not as frictionlessly; that means more code, more scheduling, and more failure modes during an MVP.
+
+falsification: Ask whether any product-critical data actually needs time-based expiry. If not, or if cleanup can run safely in a simple batch job without user-visible impact, this advantage of MongoDB is not material.
+
+verdict: medium, MEDIUM
+
+Acceptable only if the MVP already has a stable relational core, mostly cross-entity queries, and no recurring need for document-style schema churn or ephemeral TTL-managed data.

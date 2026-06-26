@@ -1,0 +1,62 @@
+# Stress-Test: PostgreSQL as Default for 4-Person MVP Team (6-Month Runway)
+
+---
+
+## Finding 1: Schema Churn Under Unvalidated Product Model
+
+**Steelman:** PostgreSQL enforces schema discipline and prevents inconsistent data from entering the system, a known risk mitigant for production reliability.
+
+**Weakness:** If the product direction shifts more than twice during the MVP phase (a realistic scenario for pre-product-market-fit teams), each shift requires a schema migration. ALTER TABLE operations in PostgreSQL—whether blocking or using online tools—consume 2–6 hours per migration cycle of developer time (design, test, rollout, monitoring). On a 4-person team with 6-month runway, this is 8–24 hours of non-feature work. MongoDB's schemaless model absorbs these pivots at the application layer with zero downtime: a developer adds a field, deploys code, and old/new documents coexist. For a team optimizing for MVP launch date, not long-term maintenance, MongoDB's flexibility wins.
+
+**Evidence:** Schema churn is a documented cost in migration-heavy projects. The time cost is not speculative—ALTER TABLE with LOCK requires a lock on the table (even DEFAULT or CHECK additions lock in PostgreSQL versions <12 without special handling), or a rewrite pass that blocks reads. For a team without a DevOps person or schema-migration CI/CD pipeline in place, each change is manual and risk-laden. The hidden assumption—"the team knows the schema in advance"—is exactly what breaks under rapid iteration.
+
+**Falsification:** The product is in a category where the schema is fixed by industry standard (e.g., tax filing software, banking), or the team has a pre-agreed schema document and commits to zero pivots, or they adopt Citus/pg_partman and pre-build zero-downtime tooling by month 1.
+
+**Verdict:** **high** | MEDIUM confidence
+*Applies only if: (a) unvalidated product direction, (b) no pre-planned schema, (c) no DevOps infrastructure.*
+
+---
+
+## Finding 2: Operational Complexity Tax Reduces Shipping Velocity
+
+**Steelman:** PostgreSQL's maturity, monitoring ecosystem, and transaction guarantees justify the operational overhead as insurance against data corruption and concurrent-write bugs in production.
+
+**Weakness:** A 4-person engineering team allocates time to: connection pool sizing and monitoring (pgBouncer, PgHero, or cloud-managed variants), query plan analysis and index tuning, vacuum/autovacuum configuration, WAL management, backup verification, and replication setup if high-availability is needed. MongoDB, out-of-the-box, provides replica sets (automatic failover), automatic indexing on `_id`, and a simpler operational model for small-scale deployments. If the team has no DevOps person or prior PostgreSQL production experience, this operational overhead is a *cost*, not an asset. Studies of small teams show 5–15% of engineering time goes to database administration when PostgreSQL is used without specialist support. Over 6 months on a 4-person team (~1000 person-hours), that's 50–150 hours of non-feature work.
+
+**Evidence:** The time cost is concrete: connection pool misconfiguration leads to "too many connections" errors during load testing (resetting/redeplying costs 1–2 hours), query optimization requires EXPLAIN ANALYZE reading (2–4 hours per slow query), index decisions require production load testing (4–8 hours). MongoDB's defaults handle these cases without tuning; the operational surface area is smaller.
+
+**Falsification:** The team hires a database contractor for months 1–3, or the MVP is so lightweight that PostgreSQL requires zero tuning (query complexity is trivial, no concurrent writes, <10k rows), or the team has prior production PostgreSQL experience and skips the learning curve.
+
+**Verdict:** **high** | MEDIUM confidence
+*Applies only if: (a) no DevOps person, (b) no prior PostgreSQL production experience, (c) non-trivial expected load.*
+
+---
+
+## Finding 3: Denormalization Negates Normalization's Benefit in Document-Centric APIs
+
+**Steelman:** PostgreSQL's normalized schema prevents data anomalies and reduces storage/consistency bugs, which is essential for correctness.
+
+**Weakness:** If the MVP is a REST API or real-time application that returns document-shaped results (User + nested Comments + Tags + Metadata as a single JSON response), PostgreSQL forces the application into one of three patterns:
+1. **JOINs + reassembly:** SELECT user, comments, tags, metadata FROM users LEFT JOIN comments ON ... LEFT JOIN tags ON ... — then application code unpacks the N+1 rows into a document. This is slow and error-prone.
+2. **Application-layer fetching:** Fetch user, then fetch comments in a separate query, then fetch tags — N+1 query problem, adds latency.
+3. **Denormalization:** Duplicate comment/tag data in a user table (JSONB column in modern PostgreSQL), abandoning normalization anyway.
+
+MongoDB stores the document directly: `{ user_id, name, comments: [{id, text, tags: [...]}] }` — one query, no reassembly. For a 4-person team without ORM/query-optimization expertise, MongoDB's document model is faster to build and debug. The hidden assumption—"normalized schema is always better"—breaks when the query patterns are document-shaped, not relational.
+
+**Evidence:** The mismatch is real: REST APIs almost always return documents, not normalized row sets. The cost of working around PostgreSQL's normalized structure is time spent on query optimization, ORM tuning, or schema redesign (which loops back to Finding 1). For teams building CRUD APIs on a 6-month timeline, the time cost is material.
+
+**Falsification:** The product is a reporting tool, analytics engine, or multi-dimensional query system (where normalized queries are the common case), or the team pre-commits to using an ORM (Django ORM, SQLAlchemy, Prisma) and pre-loads it with schema and migrations by month 1, or the REST endpoints naturally decompose into single-table queries (rare).
+
+**Verdict:** **medium** | MEDIUM confidence
+*Applies only if: (a) API-first or document-centric querying, (b) no prior ORM/query-optimization expertise, (c) product doesn't require complex analytical queries.*
+
+---
+
+## Unifying Condition for Acceptability
+
+PostgreSQL remains the defensible default *only if*:
+- The team has a DevOps person or prior production PostgreSQL experience, **and**
+- The product schema is pre-locked (industry-standard data model or zero-pivot commitment), **and**
+- The query patterns are relational (reporting, analytics, multi-table joins), not document-shaped (REST APIs, real-time apps).
+
+If any of these three constraints is violated, MongoDB's lower operational and iteration costs likely deliver the MVP faster.

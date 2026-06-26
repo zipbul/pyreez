@@ -133,6 +133,39 @@ describe("GeminiCliProvider", () => {
     expect(res.model).toBe("google/gemini-3.1-pro-preview");
   });
 
+  it("should expose tokens.cached as cached_tokens", async () => {
+    const output = JSON.stringify({
+      response: "ok",
+      stats: {
+        models: {
+          "gemini-3.1-pro": { tokens: { input: 3203, candidates: 43, cached: 2847 } },
+        },
+      },
+    });
+    setSpawnResult(output);
+    const provider = new GeminiCliProvider();
+    const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
+    expect(res.usage!.prompt_tokens).toBe(3203);
+    expect(res.usage!.completion_tokens).toBe(43);
+    expect(res.usage!.cached_tokens).toBe(2847);
+  });
+
+  it("should sum cached tokens across multiple models", async () => {
+    const output = JSON.stringify({
+      response: "ok",
+      stats: {
+        models: {
+          "a": { tokens: { input: 100, candidates: 50, cached: 80 } },
+          "b": { tokens: { input: 200, candidates: 75, cached: 150 } },
+        },
+      },
+    });
+    setSpawnResult(output);
+    const provider = new GeminiCliProvider();
+    const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
+    expect(res.usage!.cached_tokens).toBe(230);
+  });
+
   it("should sum tokens across multiple models in stats", async () => {
     const output = JSON.stringify({
       response: "ok",
@@ -323,7 +356,12 @@ describe("GeminiCliProvider", () => {
     expect(args).toContain("gemini-3.1-pro-preview");
     expect(args).toContain("-o");
     expect(args).toContain("json");
-    expect(args).toContain("-y");
+    // Read-only mode (parity with claude/codex), not YOLO auto-approve-all.
+    expect(args).toContain("--approval-mode");
+    expect(args).toContain("plan");
+    expect(args).not.toContain("-y");
+    // gemini 0.40+ exits 55 in an untrusted dir; --skip-trust prevents the abort.
+    expect(args).toContain("--skip-trust");
   });
 
   it("should prepend system prompt to the -p value when system messages exist", async () => {

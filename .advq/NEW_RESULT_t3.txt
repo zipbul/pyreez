@@ -1,0 +1,113 @@
+## Final Consolidated Analysis: Monorepo Full-Suite CI for 40 Engineers
+
+---
+
+### 1. Queue Saturation and Rebase-Invalidation Cascade
+
+- **severity**: critical
+- **confidence**: HIGH
+- **target**: proposal (reinforcing and extending Analyst A's first finding)
+- **steelman**: Running the full suite on every PR is the simplest model — no change-detection heuristics to misconfigure, no risk of a missed integration failure.
+- **weakness**: Analyst A correctly identifies the queue-length problem but underspecifies the mechanism. The critical failure is not merely that engineers "wait on unrelated test runs" — it's that **each merge invalidates every in-flight CI result**, because those results were computed against a base commit that no longer represents `main`. This turns a linear queueing problem into a geometric retry problem. With 40 engineers generating ~5 PRs/hour at peak, a 20-minute suite, and 4 parallel runners: the queue drains at 12 runs/hour, but each drain event (merge) invalidates the remaining queued runs. During a burst, you can enter a livelock where no PR's green result is fresh by the time it reaches the front of the merge queue. Analyst A's falsification ("instrument the existing suite… multiply runtime by expected growth factor") is necessary but insufficient — it must also model the invalidation cascade under bursty arrival patterns, not just mean throughput.
+- **evidence**: Queueing theory: with Poisson arrivals at rate λ and service time μ, utilization ρ = λ/μ. But standard M/M/c models assume completed jobs leave the system; here, completed-but-stale jobs re-enter, creating a feedback loop absent from Analyst A's framing. This is why every major monorepo operator (Google's TAP, Meta's Sandcastle) uses affected-target analysis — not because they can't afford runners, but because full-suite invalidation cascades are mathematically unresolvable by adding capacity alone.
+- **falsification**: Simulate with realistic parameters: Poisson λ=5 PRs/hour peak, suite duration T, N runners, and a policy that any merge triggers revalidation of all queued PRs. If the system reaches steady-state drain with T < 5 min and N ≥ 10, the proposal survives. At T ≥ 15 min, it will not, regardless of runner count.
+
+---
+
+### 2. Flaky Test Compounding Destroys Signal
+
+- **severity**: critical
+- **confidence**: HIGH
+- **target**: proposal (not addressed by Analyst A)
+- **steelman**: A binary pass/fail gate on the full suite gives engineers and reviewers a clear, unambiguous merge signal with zero interpretation required.
+- **weakness**: Analyst A omits test flakiness entirely, which is the single most common failure mode of full-suite CI strategies. The hidden assumption is that a "green" result is trustworthy. With N tests each having independent flake probability p, the suite-level false-failure rate is 1−(1−p)^N. For a realistic 3,000-test suite with p=0.1% (optimistic), this yields ~95% chance of at least one spurious failure per run. Engineers cannot distinguish a real regression from a flake, so they retry — doubling CI load (compounding Finding 1) — and eventually learn to ignore red results entirely. The policy's correctness guarantee degrades from "no regression passes" to "any regression can pass if the engineer retries enough times," which is strictly worse than no CI at all because it provides false confidence.
+- **evidence**: Combinatorial calculation as stated. Google's engineering blog has documented that flaky tests are one of their top infrastructure challenges even with per-target testing; running the full suite maximizes exposure to this problem. The behavioral erosion (ignoring reds) is a well-documented sociotechnical pattern in CI literature — Labuschagne et al. studied CI build failures and found a substantial fraction were non-deterministic [exact figures unverified].
+- **falsification**: Run the current suite 100 times on a single green commit. If ≥95 runs pass with zero failures, the suite-level flake rate is manageable. If not, this finding stands.
+
+---
+
+### 3. Single Point of Failure: One Broken Test Blocks All 40 Engineers
+
+- **severity**: high
+- **confidence**: HIGH
+- **target**: proposal (not addressed by Analyst A)
+- **steelman**: A single quality gate ensures uniform standards — no team can bypass testing or maintain a lower bar.
+- **weakness**: The proposal assumes test ownership is clear and response times are fast. In practice, a single broken test in module X blocks PRs in modules A through Z. With 40 engineers across multiple domains, the person who can diagnose and fix the broken test may be in a different timezone, on PTO, or simply unaware their test is the blocker. The mean time to unblock is not the time to fix the test — it's the time to (a) identify which test is broken, (b) determine ownership, (c) contact the owner, (d) wait for them to respond, and (e) either fix or disable. During this window, which can easily be 2-8 hours, the entire team's merge throughput drops to zero. At a merge rate of ~6 PRs/hour, an 8-hour blockage means ~48 PRs queued, creating a secondary stampede when the blockage clears.
+- **evidence**: Direct reasoning from single-pipeline architecture. No isolation boundary exists between test failures — this is inherent to "single pipeline, full suite." The frequency of blocking events is proportional to merge rate × probability-of-introducing-a-broken-test-per-merge. With 40+ merges/day, even a 2% per-merge breakage rate yields nearly one blocking event per day.
+- **falsification**: If the team has automated test quarantine that detects and skips a newly broken/flaky test within <5 minutes without human intervention, and this has been demonstrated to work, the blast radius is contained.
+
+---
+
+### 4. Suite Growth Without Natural Brake (Tragedy of the Commons)
+
+- **severity**: high
+- **confidence**: HIGH
+- **target**: proposal (partially overlaps Analyst A's second finding, but attacks a different hidden assumption)
+- **steelman**: Full-suite execution is the simplest policy to communicate and enforce — "all tests must pass" requires no nuanced configuration.
+- **weakness**: Analyst A's second finding focuses on the *current* distribution of test runtime across packages, which is valid. But the deeper hidden assumption is temporal: the proposal assumes suite duration is a fixed quantity. It is not — it is a monotonically increasing function of team size and time, with no natural feedback loop to constrain it. The "run everything" policy externalizes the cost of each new test from the test author to every other engineer's PR. This is a classic commons problem: the marginal private benefit of adding a 30-second integration test is high (my module is safer), while the marginal private cost is near-zero (my PR takes the same amount of time as everyone else's). The aggregate cost, however, is 30 seconds × 50 PRs/day = 25 minutes/day of additional CI time, growing daily. Without a per-PR test budget or affected-test selection, the only governance mechanism is social pressure, which empirically fails at team sizes above ~15 people.
+- **evidence**: Standard commons/externality reasoning. The key insight missing from Analyst A's analysis is the *dynamic*: even if the current test-time distribution is acceptable (their falsification condition), it will not remain so, because the policy itself creates the incentive to degrade it.
+- **falsification**: If the team has an enforced, automated wall-clock budget (e.g., CI fails if total time exceeds N minutes, forcing the test author to optimize or split) and has maintained it for >6 months, the commons problem is governed.
+
+---
+
+### 5. Challenge to Analyst A's Acceptance Condition
+
+- **severity**: high
+- **confidence**: HIGH
+- **target**: Analyst A
+- **steelman**: Analyst A's threshold — "full-suite runtime under ten minutes at expected one-year repo size and 95th-percentile merge latency below thirty minutes" — provides a concrete, measurable acceptance criterion, which is better than most proposals offer.
+- **weakness**: The ten-minute threshold is too permissive when combined with rebase invalidation. At 10-minute suite duration with 5 PRs/hour peak arrival, a merge queue with mandatory revalidation processes at most 6 merges/hour per runner. With 4 runners, that's 24 merges/hour — seemingly sufficient. But each merge invalidates concurrent runs, so effective throughput under burst conditions drops substantially. More critically, Analyst A's condition entirely omits flaky test rate and blocking-event frequency — two failure modes that are independent of suite duration and can individually make the strategy unworkable even with a 2-minute suite. A 2-minute suite with a 50% suite-level flake rate is still broken. The acceptance condition needs at minimum three additional clauses: (1) suite-level flake rate <5%, (2) mean time to auto-quarantine a broken test <10 minutes, and (3) a governance mechanism preventing suite duration growth.
+- **evidence**: Analyst A's condition is necessary but not sufficient. It addresses throughput but not signal quality (flakiness) or availability (blocking). These are orthogonal failure modes — you can satisfy Analyst A's condition while still having an unworkable CI system.
+- **falsification**: If Analyst A can show that flake rate and blocking events are downstream consequences of long suite duration (i.e., fixing duration automatically fixes them), the simpler threshold suffices. This seems unlikely — flakiness is primarily a function of test count and test quality, not duration.
+
+---
+
+### 6. O(Repo) Cost Per PR Regardless of Change Scope
+
+- **severity**: high
+- **confidence**: HIGH
+- **target**: proposal (reinforcing Analyst A's second finding)
+- **steelman**: Uniform cost eliminates gaming — no engineer can argue their change "doesn't need" certain tests, closing a category of human-judgment errors.
+- **weakness**: Analyst A's framing around the "top 10% of packages consuming runtime" is useful but too narrow. The deeper issue is the **perverse incentive on PR size**: when a one-line typo fix costs the same CI time as a 500-file refactor, engineers are rationally incentivized to batch unrelated changes into fewer, larger PRs to amortize CI cost. This directly undermines the small-PR, continuous-integration practice that monorepos are supposed to enable. The hidden assumption is that CI cost doesn't influence developer behavior — but it does. Studies of developer behavior around CI wait times (including Hilton et al.'s work on CI adoption practices [exact venue unverified]) consistently find that developers adapt their workflow to minimize CI friction, often in ways that reduce code quality.
+- **evidence**: Behavioral economics: when the fixed cost of an action (opening a PR) is high relative to the variable cost (adding more changes), rational agents batch. This is the same mechanism that explains why high shipping costs lead to larger, less frequent orders.
+- **falsification**: Survey the team on PR size over 3 months after adoption. If median PR size doesn't increase relative to the pre-monorepo baseline, developer behavior is not being distorted.
+
+---
+
+### 7. Multi-Stack Heterogeneity Assumption
+
+- **severity**: medium
+- **confidence**: MEDIUM
+- **target**: proposal (not addressed by Analyst A)
+- **steelman**: A single pipeline is operationally simple — one configuration surface, one set of secrets, one dashboard, one on-call rotation.
+- **weakness**: A 40-engineer team almost certainly spans multiple technology stacks (e.g., backend services, frontend SPA, mobile, infrastructure-as-code, data pipelines). "A single CI pipeline" assumes these can share a runtime environment. In practice, each stack requires its own toolchain, base image, dependency installation, and test harness. Cramming these into a single pipeline produces either (a) a massive, fragile Docker image with every toolchain (slow to pull, hard to maintain, susceptible to dependency conflicts), or (b) a sequential pipeline with distinct stages per stack (simple but slow, as you serialize independent workloads). The hidden assumption is technological homogeneity, and at 40 engineers it almost never holds.
+- **evidence**: Reasoning from typical team composition and the definition of "single pipeline." Even within a single language, test infrastructure often diverges (unit test framework vs. E2E framework vs. contract test framework), requiring different runtimes and services.
+- **falsification**: If the team confirms a single language, single framework, and single test runner across the entire monorepo, this concern is substantially diminished.
+
+---
+
+### 8. Analyst A's Incremental-Selection Finding Is Correct but Understated
+
+- **severity**: medium
+- **confidence**: MEDIUM
+- **target**: Analyst A (their third finding)
+- **steelman**: Analyst A correctly identifies that incremental test selection — often proposed as a mitigation — has its own overhead (graph materialization, cache miss rates) that could negate savings.
+- **weakness**: Analyst A rates this medium/MEDIUM, but this is actually the **escape hatch** for the entire proposal. If incremental selection works, most of the critical findings above are mitigated. If it doesn't, nothing else saves the strategy. By rating it medium, Analyst A implicitly treats it as a secondary concern — but it's actually the pivot point. The real hidden assumption in the *proposal* is that incremental selection is unnecessary (because we run everything). The real hidden assumption in Analyst A's *mitigation* is that it can be retrofitted. In practice, adding Bazel/Nx/Turborepo to an existing monorepo that wasn't designed for it is a 3-6 month engineering project, and the proposal contains no plan for it. This should be elevated: the absence of a selective-testing strategy is not a medium risk but a critical architectural omission.
+- **evidence**: Adopting Bazel in an existing monorepo is a well-known multi-month effort. Google, Stripe, and others have documented the investment required. The proposal's implicit assumption that selective testing is either unnecessary or can be added later is the most dangerous hidden assumption of all.
+- **falsification**: If the team is already using a build system with hermetic dependency tracking (Bazel, Buck, Pants), adding affected-test selection is incremental. If they're on Make/npm scripts/ad hoc tooling, it's a major project.
+
+---
+
+## Consolidated Acceptance Condition
+
+The proposal is acceptable **if and only if** all of the following hold simultaneously:
+
+1. **Suite duration**: Full suite completes in <5 minutes wall-clock (not Analyst A's 10 minutes — the invalidation cascade demands a tighter bound).
+2. **Suite duration governance**: An automated, enforced time budget prevents growth beyond this threshold, with clear ownership for remediation.
+3. **Flake rate**: Suite-level false-failure rate is <5% (measured by repeated runs on a known-green commit).
+4. **Blast radius containment**: Automated test quarantine detects and isolates broken/flaky tests within 5 minutes without human intervention.
+5. **Merge queue**: A serialization mechanism (e.g., GitHub merge queue, Bors) handles base-branch staleness with speculative merging, not naive rebase-retest.
+6. **Cost budget**: CI compute cost at 2× current PR volume has been explicitly budgeted and approved.
+7. **Stack homogeneity** is confirmed, or the "single pipeline" is actually a fan-out to per-stack pipelines (in which case it's not really a single pipeline).
+
+Failure of **any one** of conditions 1–5 makes the strategy unworkable within 6 months. The team should default to affected-target analysis (Bazel, Nx, Turborepo) unless all conditions are demonstrably met.

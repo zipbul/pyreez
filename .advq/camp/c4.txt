@@ -1,0 +1,1 @@
+A single-page app stores JWT access and refresh tokens in localStorage and attaches them to every API call. Identify the concrete conditions under which this design is exploited or fails in production.

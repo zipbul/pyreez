@@ -1,0 +1,22 @@
+Finding 1
+steelman: PostgreSQL’s ACID guarantees and relational constraints prevent data corruption under concurrent writes and let teams rely on a single source of truth without application-level checks.
+weakness: When the MVP must accommodate weekly product-pivot changes to core entities (new fields, nested objects, varying validation rules) the mandatory migration steps and schema-lock coordination across four developers introduce deployment delays that exceed the six-month launch window.
+evidence: Each schema alteration requires coordinated ALTER TABLE plus backfill scripts plus downtime or blue-green cutover planning; these steps compound because every developer must understand both the old and new state, whereas MongoDB accepts the new shape on the next insert with no lock.
+falsification: Measure total hours spent on migration reviews and failed deploys in the first eight weeks of parallel development; if the Postgres path shows less than 20 % overhead versus an equivalent MongoDB branch the claim is falsified.
+verdict: critical MEDIUM
+
+Finding 2
+steelman: PostgreSQL connection pooling and mature drivers keep per-request latency low and predictable when query patterns are known in advance.
+weakness: Under early-production load where the team must store and query heterogeneous user-generated documents (mixed free-form JSON plus evolving metrics) without time to design normalized tables, the added application-level serialization and object-relational mapping layers inflate both CPU usage and bug surface, lengthening incident response beyond the small team’s capacity.
+evidence: Each new document shape forces either wide-table columns or separate JSONB columns plus indexing decisions; mis-tuned queries surface as slow production alerts that the four-person team must debug in parallel with feature work, whereas MongoDB serves the same documents without transformation.
+falsification: Run identical synthetic read/write traces for two weeks on both engines with the same application code and compare median p95 latency and alert count; Postgres worse by more than 30 % falsifies the claim.
+verdict: high MEDIUM
+
+Finding 3
+steelman: PostgreSQL’s ecosystem supplies battle-tested extensions for full-text search, geospatial indexes, and time-series that avoid additional services.
+weakness: When the MVP’s first paying customers require only basic document storage plus one simple search field, the overhead of provisioning, securing, and monitoring a full PostgreSQL instance with replication and backup automation consumes engineering calendar time that could have been spent on customer-facing features inside the six-month deadline.
+evidence: A minimal production Postgres deployment still demands TLS certificates, connection-string rotation, point-in-time recovery testing, and at least one failover rehearsal—tasks that must be owned by the same four developers—whereas a managed MongoDB cluster supplies these controls via a single configuration change.
+falsification: Record cumulative DevOps hours spent on database infrastructure before first customer onboarding; if Postgres total is within 10 % of MongoDB total the claim is falsified.
+verdict: medium LOW
+
+None exists within its constraints.

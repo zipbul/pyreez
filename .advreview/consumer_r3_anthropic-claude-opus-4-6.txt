@@ -1,0 +1,164 @@
+Now I have comprehensive evidence. Let me consolidate all findings into a single severity-ordered list.
+
+---
+
+## Finding 1: Inherently Polymorphic or Tenant-Variable Data Makes PostgreSQL the Wrong Abstraction
+
+**target:** Analyst B (Finding 3), reinforcing and merging with my prior Finding 1
+
+**steelman:** PostgreSQL handles variable-structure data via JSONB, so the team never needs a second database. Even per-tenant custom fields or integration payloads can live in a JSONB column while the stable core stays relational. Analyst B is right that this failure mode exists, but the HIGH confidence assigned assumes it fires frequently for SaaS MVPs.
+
+**weakness:** When schema heterogeneity is a *first-class product feature* — customer-defined fields, integration-specific payloads that must be queried and filtered, versioned objects with materially different field sets, or multi-tenant configuration that varies by customer — PostgreSQL's JSONB escape hatch becomes the primary storage pattern, not a supplement. The PostgreSQL JSON documentation itself warns that documents should still have "a somewhat fixed structure" and that "any update acquires a row-level lock on the whole row." MongoDB's schema validation explicitly distinguishes required fields from optional ones and enforces rules only when a field exists (verified: the validation example checks `gpa` only "if the field exists"), giving the team a native way to validate the stable core while leaving the variable envelope unconstrained. In PostgreSQL, the team must either (a) add relational migrations for every new variant (unsustainable), or (b) shift variance into JSONB and lose the schema stability that justified choosing Postgres — carrying both relational and document-model complexity in one system. The JSONB path imposes additional costs: field names are stored in every row (no shared schema dictionary), non-string comparisons require explicit casting, and GIN indexes don't support ordering or range queries on nested fields.
+
+**evidence:** PostgreSQL JSON docs (verified): "any update acquires a row-level lock on the whole row" and documents should have "a somewhat fixed structure." MongoDB validation docs (verified): `gpa` is validated only "if the field exists," demonstrating optional-field enforcement. The Yuriy Ivon analysis confirms JSONB stores field names per-row, requires explicit casting, and GIN indexes don't support ordering. Binary Igor's benchmark confirms 2.23× storage overhead for JSONB vs BSON on 3.4M records.
+
+**falsification:** Inventory every planned source of schema variation. If the non-uniform fields are small, non-queryable blobs (opaque JSON stored and returned whole, never filtered against), PostgreSQL absorbs them without friction. The finding fires only when variable-structure data must be queried, filtered, or indexed.
+
+**verdict:** high severity · MEDIUM confidence (fires when polymorphism is a first-class queryable feature; many SaaS products have fixed-schema cores where this doesn't apply)
+
+---
+
+## Finding 2: Aggregate-Centric Read/Write Workloads Pay a Structural Tax in PostgreSQL
+
+**target:** Analyst B (Finding 2) — I largely agree with the mechanism but challenge the HIGH confidence rating
+
+**steelman:** When the dominant unit of work is a bounded nested aggregate (workflow definitions, onboarding state, template documents, tenant configurations) that is fetched whole and written whole, MongoDB's document model is the natural storage primitive. PostgreSQL forces an awkward choice: normalize and pay in joins and multi-table writes, or use JSONB and concentrate contention on one row.
+
+**weakness:** This finding holds when the aggregate is genuinely self-contained. MongoDB's single-document atomicity (verified: "A denormalized data model that uses embedded documents and arrays combines all related data in a single document...This data model allows atomic operations") eliminates the multi-table transaction overhead PostgreSQL requires for normalized aggregates. PostgreSQL's own JSON docs confirm row-level locking on any JSONB update, serializing concurrent edits to the same aggregate.
+
+However, Analyst B's HIGH confidence understates two counter-costs that narrow MongoDB's advantage in practice: (1) **Cross-aggregate queries emerge inevitably.** An MVP that starts with "show me this project's tasks" will, within months, need "show me all overdue tasks across all projects." MongoDB's `$lookup` for cross-collection queries lacks hash joins and merge joins. A MongoDB community thread discussing whether `$lookup` is "still 130 times worse than Postgres" went unrefuted from 2022 through 2024. MongoDB's own developer advocate benchmarked `$lookup` at 10 seconds for 1 million documents and concluded that `$lookup` is "not designed to join scalar values from thousands of documents," recommending denormalization instead. (2) **MongoDB's 16 MiB document size limit** (verified) means aggregates that grow over time (projects accumulating thousands of tasks, comments, events) must eventually be extracted into separate collections — reimplementing the relational model inside MongoDB.
+
+**evidence:** MongoDB docs (verified): single-document writes are atomic; denormalized embedded documents "continue to be optimal for your data and use cases" in most scenarios. But MongoDB's own best practices recommend references over embedding when "the child side of the relationship has high cardinality" or "your embedded data grows without bounds" (verified). MongoDB's document size limit is 16 mebibytes (verified). The `$lookup` benchmark from MongoDB's own DEV Community article shows 10-second latency on 1M documents with IndexedLoopJoin. PostgreSQL JSON docs (verified): "any update acquires a row-level lock on the whole row."
+
+**falsification:** Sample the top 20 reads and writes. If >70% are aggregate-scoped (no cross-aggregate joins, no sub-part filtering across aggregates) and aggregates remain bounded (< 1,000 embedded items), this finding holds. If >30% of queries need cross-entity filtering within 6 months, MongoDB's advantage erodes and `$lookup`'s poor join performance becomes the bottleneck instead.
+
+**verdict:** high severity · MEDIUM confidence (mechanism is sound but HIGH confidence is unjustified because cross-aggregate queries and unbounded growth are likely to emerge during the MVP lifecycle)
+
+---
+
+## Finding 3: Non-Additive Schema Changes on Hot Tables Are the Real Hazard — But Both Analysts Overstate Its Severity at MVP Scale
+
+**target:** Analyst A (Finding 1, round 2), Analyst B (Finding 1)
+
+**steelman (Analyst A):** Even with additive discipline, the first production pivot requiring a type change or NOT NULL on an existing column acquires ACCESS EXCLUSIVE. The team has no buffer to implement shadow-table patterns under load, and the resulting lock queue blocks every SELECT for the duration of the table rewrite.
+
+**steelman (Analyst B):** PostgreSQL is the wrong default when core product objects are still being discovered in production and require repeated live changes to required fields, field types, or nullability on high-traffic tables.
+
+**weakness:** Both analysts correctly cite the ACCESS EXCLUSIVE lock mechanism (verified: "An ACCESS EXCLUSIVE lock is acquired unless explicitly noted") and the table-scan requirement for SET NOT NULL (verified: "ordinarily this is checked during the ALTER TABLE by scanning the entire table"). The Xata blog confirms the cascading lock queue: "Any other statements that require a lock on the users table are now queued behind this ALTER TABLE statement."
+
+However, both assign critical severity without accounting for three scale-dependent mitigations:
+
+1. **Table size at MVP scale.** A column type change rewrites the table (verified: "Changing the type of an existing column will normally cause the entire table and its indexes to be rewritten"). But rewrite time is proportional to table size. At 100K rows, a rewrite completes in under a second. The ACCESS EXCLUSIVE lock is held for that duration — sub-second. The cascading lock queue only causes meaningful downtime when the rewrite takes minutes (millions of rows) or when a long-running query is already blocking the DDL.
+
+2. **PostgreSQL 18 (released September 2025) introduces NOT NULL NOT VALID.** Verified via Neon's documentation: this allows adding NOT NULL constraints without scanning existing data, using only a "brief ACCESS EXCLUSIVE lock," with subsequent validation using a "SHARE UPDATE EXCLUSIVE lock" that "allows reads and writes during validation." This eliminates the SET NOT NULL table-scan hazard that both analysts cite as a key risk. Since the team is building now (June 2026), PostgreSQL 18 is available.
+
+3. **The lock_timeout pattern is trivial.** The Xata blog prescribes it in one line: `SET lock_timeout = '2s'`. This prevents the cascading queue entirely. A 4-person team can learn this in 30 minutes.
+
+The critical severity assigned by both analysts is only justified if the team (a) has tables with millions of rows, (b) needs frequent type changes (not just additive columns), (c) is on PostgreSQL < 18, AND (d) doesn't set `lock_timeout`. At MVP scale in 2026, the conjunction of all four is unlikely.
+
+**evidence:** PostgreSQL ALTER TABLE docs (verified): ACCESS EXCLUSIVE lock acquired by default; column type changes rewrite the table; adding nullable columns does NOT rewrite. PostgreSQL 18 NOT NULL NOT VALID feature (verified via Neon): adds constraint without table scan, validation step uses SHARE UPDATE EXCLUSIVE lock allowing concurrent reads and writes. Xata blog (verified): cascading lock queue occurs when DDL is blocked behind a long-running query; solution is `SET lock_timeout`.
+
+**falsification:** If the team expects >5M rows in a core table within the first 3 months AND plans non-additive DDL (type changes, restructuring) on that table during production traffic, the critical rating holds regardless of PostgreSQL version. Track the first 8 weeks: if >30% of migrations are non-additive, upgrade this to high severity.
+
+**verdict:** medium severity · MEDIUM confidence (mechanism is real and verified, but critical/HIGH ratings from both peers overstate the impact at MVP scale on PostgreSQL 18; the most dangerous sub-case — SET NOT NULL — is now mitigated by NOT VALID syntax)
+
+---
+
+## Finding 4: Write-Heavy Large-Document Updates Expose MVCC's Full-Row-Copy Penalty
+
+**steelman:** Most SaaS MVPs are read-heavy; write performance differences are immaterial at MVP scale.
+
+**weakness:** If the SaaS product's core loop involves frequent partial updates to large JSONB documents — real-time collaboration, activity feed updates embedded in user profiles, feature flag state mutated per-request — PostgreSQL's MVCC model copies the entire row on every update, even when only one nested field changed. PostgreSQL's own docs confirm: "any update acquires a row-level lock on the whole row." MongoDB's `$set` operator modifies only the targeted path within the BSON document. Under sustained update pressure, PostgreSQL accumulates dead tuples that autovacuum must clean, while MongoDB's in-place partial updates avoid this overhead entirely. However, this failure mode is narrow: it requires large documents (>4KB), high update frequency on the same documents, and partial-update patterns (not whole-document replacement).
+
+**evidence:** PostgreSQL JSON docs (verified): "any update acquires a row-level lock on the whole row." MVCC full-row-copy behavior is architectural. MongoDB's partial-update mechanism is well-documented. Binary Igor's benchmark shows 42% batch-insert advantage for MongoDB (115 vs 81 QPS for 1,000-record batches). MongoDB's own benchmark (acknowledged as synthetic) showed PostgreSQL CPU saturation under sustained update workload.
+
+**falsification:** If documents are small (<4KB) or the update pattern is insert-append rather than update-in-place, the row-copy cost is negligible. Measure the expected update-to-read ratio on core entities; if < 1:5 and average document size < 4KB, this finding doesn't fire.
+
+**verdict:** medium severity · LOW confidence (narrow failure mode; most SaaS MVPs are not write-heavy on large documents)
+
+---
+
+## Finding 5: Analyst A's Prior-Codebase Argument Is Symmetric and Non-Falsifiable as a PostgreSQL Weakness
+
+**target:** Analyst A (original Finding 3, round 1)
+
+**steelman:** If the team has existing MongoDB application code from a prior project, switching to PostgreSQL forces re-implementation of every upsert, partial-update, and aggregation pipeline, costing days per entity.
+
+**weakness:** The problem statement specifies a team "launching an MVP" — it says nothing about porting an existing codebase. This finding is entirely symmetric: if the team had prior PostgreSQL code, switching to MongoDB would impose the identical cost. An argument that applies equally in both directions does not identify a condition where PostgreSQL is *strictly worse* than MongoDB — it identifies a condition where any technology switch is costly. The LOW confidence rating was appropriate, but the finding should be dropped entirely. Analyst A did not defend this finding in round 2, implicitly conceding it.
+
+**evidence:** The problem statement reads: "A 4-person SaaS team is launching an MVP within a 6-month deadline." No mention of existing codebases. The finding's mechanism (porting cost) is symmetric.
+
+**falsification:** If the team explicitly states they have a prior MongoDB codebase they intend to reuse, this finding would hold. Ask them.
+
+**verdict:** **refuted** — not a PostgreSQL-specific weakness; symmetric switching cost
+
+---
+
+## Finding 6: Analyst A's Operational Expertise Deficit Argument Fires Below MVP-Scale Thresholds
+
+**target:** Analyst A (Finding 2, round 1; Finding 2, round 2)
+
+**steelman:** A 4-person team without prior autovacuum or bloat monitoring experience will accumulate dead tuples faster than they can diagnose, producing production query degradation within the first 60 days.
+
+**weakness:** Analyst A claims dead tuples will cause problems "once row counts exceed a few hundred thousand" and within "the first 60 days." This conflates enterprise-scale operational concerns with MVP reality. PostgreSQL's default autovacuum triggers at approximately 20% dead-tuple ratio (50 + 0.2 × n_live_tup). The documentation confirms that autovacuum_freeze_max_age defaults to 200 million transactions — at 10 TPS (generous for a new SaaS), that's ~231 days before forced freezing, well beyond the 6-month window. At MVP scale, default autovacuum settings handle bloat without manual intervention. Managed services (RDS, Supabase, Neon) all ship with autovacuum enabled, monitoring dashboards, and connection pooling pre-configured. The "60-day degradation" claim has no supporting evidence — it's asserted without benchmarks or sources.
+
+In round 2, Analyst A pivots to MVCC full-row copy plus GIN decomposition cost, but the falsification test proposed (`n_dead_tup > 0.1 * n_live_tup`) actually supports my counter-attack: at MVP write rates with default autovacuum, this ratio will stay well below 10% for months.
+
+**evidence:** PostgreSQL Routine Vacuuming docs (verified): autovacuum_freeze_max_age defaults to 200 million transactions. At 100 TPS, that's ~23 days; at 10 TPS, ~231 days. Default autovacuum runs automatically at scale factors designed for normal workloads. The 60-day degradation claim is [unverified] — no source cited by Analyst A.
+
+**falsification:** Run a load test at projected MVP write rates for 60 simulated days. If `n_dead_tup / n_live_tup` exceeds 10% with default autovacuum settings, I'm wrong. I predict it won't.
+
+**verdict:** **refuted at high/medium severity for this timeline.** Downgrade to low severity · LOW confidence. Only fires if the MVP has extreme update churn on hot rows exceeding 1,000 updates/second on the same table — far beyond typical SaaS MVP patterns.
+
+---
+
+## Finding 7: Analyst A's Connection Exhaustion Claim Is Already Solved by Standard Tooling
+
+**target:** Analyst A (Finding 3, round 2)
+
+**steelman:** A marketing-driven traffic spike will exhaust PostgreSQL's default `max_connections = 100` when background jobs, health checks, and user requests coincide, forcing the team to set up PgBouncer under time pressure.
+
+**weakness:** Every managed PostgreSQL service the team would realistically use already includes connection pooling. Supabase ships with Supavisor built-in. Neon has a built-in connection pooler. AWS RDS Proxy is a one-click add-on. The premise — that the team must independently discover, install, and configure PgBouncer — requires the team to be running self-managed PostgreSQL on bare metal or a VM, which is implausible for a 4-person SaaS startup in 2026. Analyst A's own falsification ("if it never exceeds 60 concurrent") essentially concedes the finding is unlikely for an early MVP. The LOW severity rating was already appropriate but the finding adds no new failure mode beyond what common tooling solves.
+
+**evidence:** Supabase docs confirm built-in connection pooling via Supavisor. Neon docs confirm built-in connection pooling. AWS RDS Proxy provides managed pooling. The problem statement implies a modern SaaS team that would use managed infrastructure.
+
+**falsification:** If the team is running self-hosted PostgreSQL without a managed service, this finding holds. Ask them.
+
+**verdict:** **refuted for the assumed deployment model** (managed service). Holds only for self-hosted PostgreSQL, which is implausible for this team profile.
+
+---
+
+## Consolidated Surviving Findings (severity-ordered)
+
+| # | Finding | Severity | Confidence |
+|---|---------|----------|------------|
+| 1 | Core domain is polymorphic / tenant-variable with queryable variation | high | MEDIUM |
+| 2 | Dominant access pattern is aggregate-centric read/write with bounded documents | high | MEDIUM |
+| 3 | Non-additive DDL on hot tables during production traffic | medium | MEDIUM |
+| 4 | Write-heavy partial updates on large documents | medium | LOW |
+
+**Dropped/refuted findings:** Analyst A F3 (prior codebase — symmetric, not PostgreSQL-specific); Analyst A F2/round 2 (operational bloat within 60 days — below MVP-scale thresholds); Analyst A F3/round 2 (connection exhaustion — solved by managed services); Analyst A F1 critical severity (>10% capacity on migrations — fabricated arithmetic, additive migrations are free on modern PG). Both analysts' critical ratings on ALTER TABLE locks downgraded to medium (mechanism real but magnitude trivial at MVP table sizes, further mitigated by PG 18's NOT NULL NOT VALID).
+
+**Key unresolved disagreement:** Both Analyst A and Analyst B maintain critical/HIGH on the ALTER TABLE lock finding. I maintain medium/MEDIUM. The disagreement reduces to: will the team need frequent non-additive DDL on tables with >1M rows during the first 6 months? I judge this unlikely for an MVP; they judge it likely. The test that settles it: classify the team's next 10 expected schema changes as additive vs non-additive, and project core table sizes at month 3.
+
+---
+
+**Acceptability condition:** PostgreSQL is acceptable if: (1) the core domain entities have stable, known schemas at design time — verifiable by drawing an ER diagram with fixed columns for the top 5 entities; (2) the primary access pattern involves relational queries (joins, constraints, aggregations across entities) rather than aggregate-scoped document retrieval; (3) per-tenant or per-integration variability is confined to non-queryable blobs rather than first-class queryable fields; and (4) the team uses a managed PostgreSQL 18 service with built-in connection pooling. If any of (1)–(3) fails, run a 2-day spike comparing both databases against the actual top-10 queries before committing. If all four hold, keep PostgreSQL — the default is correct.
+
+---
+
+Sources:
+- [PostgreSQL ALTER TABLE documentation](https://www.postgresql.org/docs/current/sql-altertable.html)
+- [PostgreSQL JSON data type documentation](https://www.postgresql.org/docs/current/datatype-json.html)
+- [PostgreSQL Routine Vacuuming documentation](https://www.postgresql.org/docs/current/routine-vacuuming.html)
+- [PostgreSQL 18 NOT NULL NOT VALID — Neon](https://neon.com/postgresql/18/not-null-as-not-valid)
+- [PostgreSQL 18 New Features — Neon](https://neon.com/postgresql/18-new-features)
+- [Xata — Schema Changes and the Postgres Lock Queue](https://xata.io/blog/migrations-and-exclusive-locks)
+- [MongoDB Schema Validation documentation](https://www.mongodb.com/docs/manual/core/schema-validation/specify-json-schema/)
+- [MongoDB Write Operations Atomicity](https://www.mongodb.com/docs/manual/core/write-operations-atomicity/)
+- [MongoDB Data Modeling Best Practices](https://www.mongodb.com/docs/manual/data-modeling/best-practices/#link-related-data)
+- [MongoDB Reference Limits (16 MiB)](https://www.mongodb.com/docs/manual/reference/limits/)
+- [MongoDB $lookup 1M challenge — DEV Community](https://dev.to/mongodb/one-million-lookup-challenge-mongodb-slow-join-1kao)
+- [MongoDB $lookup performance discussion — Community Forum](https://www.mongodb.com/community/forums/t/is-the-performance-of-lookup-still-130-times-worse-than-postgres/191462)
+- [Yuriy Ivon — Can PostgreSQL JSONB Replace MongoDB?](https://medium.com/@yurexus/can-postgresql-with-its-jsonb-column-type-replace-mongodb-30dc7feffaf3)
+- [Binary Igor — JSON Documents: MongoDB vs PostgreSQL](https://binaryigor.com/json-documents-mongodb-vs-postgresql.html)

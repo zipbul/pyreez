@@ -1,0 +1,25 @@
+**Finding 1**  
+target: Analyst A  
+steelman: PostgreSQL's ACID guarantees and explicit schema ensure data consistency even under rapid development, making it safer than allowing unbounded schema drift in MongoDB.  
+weakness: When product feedback in months 2–4 forces weekly changes to core entities, each ALTER TABLE or backfill locks the production table for the rewrite duration on any instance handling concurrent SaaS traffic; with only four engineers the release gate created by migration testing, coordination, and rollback preparation directly delays the next validated feature, turning discovery velocity into downtime risk.  
+evidence: A table lock acquired for a multi-million-row migration blocks all writes until commit; absent a dedicated operator the probability of an incomplete or rolled-back change compounds with each pivot, a mechanism absent when documents accept new fields at write time without coordination.  
+falsification: Count schema-altering features shipped in the first 12 weeks and measure hours from pull request to production for each; a sustained gap above four hours per change falsifies the operational parity claim.  
+verdict: critical MEDIUM
+
+**Finding 2**  
+target: Analyst A  
+steelman: PostgreSQL's JSONB column type with GIN indexing provides near-native JSON support with full SQL querying, eliminating the need for a separate document store.  
+weakness: When integration payloads and event metadata contain heterogeneous nested fields that evolve weekly, developers must repeatedly decide between JSONB operators, additional GIN indexes, and partial normalization; each choice adds query-pattern and index-maintenance work that a four-person team cannot amortize before launch, whereas MongoDB accepts the same shape with a single collection and pipeline without operator-precedence decisions.  
+evidence: GIN maintenance on every inserted key plus vacuum pressure on the JSONB heap produces write-latency spikes once cardinality rises; the mental-model overhead of `->`, `@>`, and index tuning is incurred on every read path change, directly lengthening feature cycles when the domain unit is already a document.  
+falsification: Implement one representative nested-event query path in both systems and compare calendar days from requirement to production deploy; a consistent gap exceeding one day favors MongoDB under the six-month constraint.  
+verdict: high MEDIUM
+
+**Finding 3**  
+target: Analyst B  
+steelman: Postgres is the default because it rewards discipline: clear modeling, strong constraints, and mature operational practices that prevent later cleanup.  
+weakness: When schema evolution, indexing, and backfill ownership are distributed by default across four engineers without an explicit single owner, migration scripts accumulate technical debt and untested constraints; an unexpected production write-path regression then requires the whole team to stop feature work for diagnosis, whereas MongoDB's lack of schema contracts removes the same coordination surface.  
+evidence: Each migration or index decision without a named owner becomes a shared review bottleneck; once two or more such decisions queue, the release cadence drops below the feedback loop needed to reach product-market fit inside six months.  
+falsification: Name the owner of the first ten migration and index changes before week one; if ownership remains ambiguous after the first feature cycle, measure days of blocked deploys attributable to schema coordination.  
+verdict: medium LOW
+
+Postgres acceptable only if schema changes stay below one per month, a single engineer owns all migrations and indexes from day one, and the hottest paths are proven relational rather than document-shaped.

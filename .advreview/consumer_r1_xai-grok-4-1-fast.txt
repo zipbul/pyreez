@@ -1,0 +1,37 @@
+**Finding 1**
+
+**Steelman:** PostgreSQL’s transactional DDL and mature migration tooling (e.g., transactional `ALTER TABLE`) make schema evolution safe and auditable, so a small team can treat the database as a stable contract rather than a source of runtime surprises.
+
+**Weakness:** When the MVP must ship weekly product experiments whose persisted objects contain new or optional nested fields (customer-specific attributes, third-party webhook payloads, A/B variant metadata), every change forces a migration, data backfill script, and dual-write period. Under a 6-month hard stop and four engineers who already split time across product, frontend, and DevOps, the cumulative hours spent writing, reviewing, and verifying migrations exceed the equivalent effort in a schemaless store.
+
+**Evidence:** Each migration requires at least one engineer to (a) write the change, (b) test it against a copy of production, (c) coordinate deployment order with application code, and (d) monitor for lock timeouts; four such cycles per month consume >10 % of total engineering capacity on infrastructure rather than features.
+
+**Falsification:** Instrument the first eight weeks of development; if cumulative migration-related PRs and incidents stay below four hours per engineer per month, the operational cost claim is falsified.
+
+**Verdict:** critical | MEDIUM
+
+**Finding 2**
+
+**Steelman:** Modern Postgres connection pooling (PgBouncer) and read replicas let a small team reach thousands of concurrent users without sharding.
+
+**Weakness:** When the product’s core workflow is read-heavy on deeply nested documents (e.g., user-configurable dashboards, document templates) and the team has no one with production Postgres vacuum, autovacuum tuning, or index bloat diagnosis experience, query latency degrades after the first few production data loads. Restoring acceptable performance then requires either hiring a DBA or spending multiple engineer-weeks learning the tooling—both unavailable inside the deadline.
+
+**Evidence:** Default autovacuum settings and lack of partial-index or expression-index patterns produce table bloat and plan instability once row counts exceed a few hundred thousand; a four-person team without prior exposure must discover and remediate these empirically, burning calendar time that MongoDB’s simpler document-level storage does not impose.
+
+**Falsification:** Run a load test with realistic document shapes and row counts at week 10; if p99 latency stays under 100 ms without any index or autovacuum changes, the operational-expertise claim is falsified.
+
+**Verdict:** high | MEDIUM
+
+**Finding 3**
+
+**Steelman:** Postgres’s JSONB column plus GIN indexes give document flexibility without abandoning relational guarantees.
+
+**Weakness:** When the team already possesses working MongoDB application code and deployment scripts from a prior project, the switch to Postgres forces re-implementation of every upsert, partial-update, and aggregation pipeline using unfamiliar SQL idioms and ORMs. The re-write cost directly subtracts from feature velocity in the first three months.
+
+**Evidence:** Porting a typical Mongo `updateOne` with `$set` and `$addToSet` plus a `$match`/`$group` aggregation requires new SQL, new tests, and new migration steps; even with ORMs the cognitive and testing overhead is measured in days per entity rather than hours.
+
+**Falsification:** Track the first two months of story points delivered versus the same team’s historical velocity on the prior Mongo codebase; parity or better falsifies the re-implementation penalty.
+
+**Verdict:** high | LOW
+
+None exists within the six-month constraint.

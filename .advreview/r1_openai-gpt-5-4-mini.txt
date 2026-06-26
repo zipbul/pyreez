@@ -1,0 +1,22 @@
+1. **Condition: the MVP’s core entities are sparse, tenant-specific, or frequently reshaped documents**
+- **steelman:** PostgreSQL is still the safer default because it preserves data integrity, keeps future relational options open, and can store semi-structured fields when needed.
+- **weakness:** That only holds if the shape of the product is mostly stable. If each customer, workflow, or feature adds a handful of optional fields that change every week, PostgreSQL turns each “small” product tweak into a schema decision, migration, query update, and deploy coordination step. MongoDB tolerates that kind of shape drift more directly, so the 4-person team spends less time reconciling data model changes and more time shipping.
+- **evidence:** Mechanism: relational defaults reward stable shared structure. Break: frequent sparse-field additions force repeated migrations or JSONB workarounds, which means more touched files and more release coupling. Consequence: the team’s throughput drops even though the business change is small. The proposal has not shown any measured schema-stability evidence, so this is an unproven assumption [unverified].
+- **falsification:** Implement the next 3 planned features in a spike and count how many require schema changes, backfills, or query rewrites in PostgreSQL. If the count is near zero, this failure mode does not apply.
+- **verdict:** high, MEDIUM
+
+2. **Condition: most requests operate on one aggregate at a time, with few cross-record invariants or reporting queries**
+- **steelman:** PostgreSQL’s joins, constraints, and transactions make it a strong general-purpose database, so even document-like apps can benefit from the relational model.
+- **weakness:** That advantage disappears if the app rarely needs it. If the common path is “load one object, edit one object, save one object,” PostgreSQL forces the team to model and query around relations they do not actually use, while MongoDB matches the access pattern directly and keeps the whole aggregate local. In that situation, PostgreSQL’s structure is overhead, not leverage.
+- **evidence:** Mechanism: document stores reduce object-relational impedance for aggregate-centric workloads. Break: if the product almost never joins across entities or enforces multi-row invariants, the relational model adds indirection without buying meaningful correctness. Consequence: slower implementation and more code surface for the same user-visible feature. The proposal has not supplied any measurement of join frequency or multi-entity transaction need [unverified].
+- **falsification:** Trace the prototype’s top endpoints and check whether they almost always touch a single aggregate. If cross-entity reads/writes are rare, PostgreSQL is likely the wrong default optimization.
+- **verdict:** high, MEDIUM
+
+3. **Condition: the team expects repeated pivots but has no spare owner for schema discipline, migrations, and query tuning**
+- **steelman:** PostgreSQL is operationally mature, so it should reduce risk for a small team that cannot afford surprises.
+- **weakness:** That is only true if someone can actually keep up with the discipline PostgreSQL demands. For a 4-person team under MVP pressure, every migration, index choice, or query-plan regression becomes a coordination tax. MongoDB shifts more of the volatility into additive document changes, which is easier to absorb when the real risk is learning the wrong product shape, not enforcing strong invariants.
+- **evidence:** Mechanism: schema rigidity and query tuning create overhead proportional to change rate. Break: if the team is still discovering the product and nobody owns database hygiene full-time, that overhead directly competes with feature work. Consequence: the database choice starts delaying experiments, which is worse than accepting some data-model looseness early. This is a process assumption, not a proven fact, so confidence is low [unverified].
+- **falsification:** Run a two-sprint simulation: assign schema ownership, count how many changes block release readiness, and see whether migrations become a coordination bottleneck. If they do not, this condition is not strong enough to matter.
+- **verdict:** medium, LOW
+
+The proposal is acceptable only if the product is already known to be relational, invariant-heavy, and stable enough that schema changes are rare.

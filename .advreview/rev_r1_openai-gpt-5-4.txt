@@ -1,0 +1,36 @@
+1.
+- steelman: `"If none does, do not pad — pick the peer finding you judge weakest and try to refute it."` is trying to keep round 2 adversarial and prevent empty consensus.
+- weakness: This breaks when no new critique survives and the peer findings are all legitimately strong. The line still forces an attack, so the worker must either manufacture a low-value objection or spend tokens on a bad-faith refutation. That is a direct quality leak in a prompt whose stated goal is zero wasted tokens. Rewrite: `"If none does, stop after briefly stating that no new surviving critique was found."`
+- evidence: Mechanism -> break -> consequence: mandatory refutation without a live target -> contrarian filler or nitpicking -> wasted tokens and noisier final synthesis. The hidden premise is that a weakest peer finding is always worth attacking; the prompt gives no evidence for that premise.
+- falsification: Feed workers a round where peer findings are strong, distinct, and mutually reinforcing. If removing the refute-something clause reduces output length without losing any surviving critique or catching fewer errors, the original line was harmful.
+- verdict: severity high and confidence HIGH
+
+2.
+- steelman: `"Revise your own position only when your own evidence falsifies it — never because another analyst sounded confident."` is meant to block herding and confidence contagion.
+- weakness: It overshoots by discouraging revision on the evidence that actually arrives in round 2: peer arguments already present in context. In this setup, a peer can surface a decisive contradiction from the shared text; forcing the worker to treat that as invalid until re-derived as "its own evidence" creates needless stubbornness and duplicate reasoning. Rewrite: `"Revise only when evidence in the record, including a peer's concrete evidence, falsifies your prior claim; never because another analyst sounded confident."`
+- evidence: Mechanism -> break -> consequence: peer supplies concrete evidence -> rule discounts it unless self-generated -> slower or failed convergence -> persistent false disagreement and extra tokens. The unsupported premise is that self-generated evidence is better than directly inspectable peer evidence when both are just text in the same context window.
+- falsification: Use a case where one peer points to a direct textual contradiction in the prompt. Compare how often workers correctly retract under the current line versus the rewrite.
+- verdict: severity high and confidence MEDIUM
+
+3.
+- steelman: `"keep the rest — weak-but-plausible ones at low confidence"` and `"Keep low-confidence findings; never inflate."` preserve edge cases instead of over-pruning.
+- weakness: This is only helpful if extra coverage is worth the token cost. When there are already a few strong findings, explicit retention of low-confidence tails crowds out depth, sharper falsification tests, and cleaner consolidation. On a no-lookup model, low-confidence items are exactly where speculative drift lives. Rewrite: `"Keep a low-confidence finding only if it adds a distinct mechanism not already covered."`
+- evidence: Mechanism -> break -> consequence: instruction rewards inclusion of speculative-but-plausible items -> model spends budget listing them -> strongest attacks get less space and the final list gets noisier. The prompt asserts that retaining low-confidence items improves output quality, but offers no measurable support for that trade in a zero-waste regime.
+- falsification: Run a tight token-budget ablation. If the retention clause increases finding count but reduces distinctness or falsification depth, it is a net leak.
+- verdict: severity medium and confidence MEDIUM
+
+4.
+- steelman: `"Before submitting, downgrade any source/number/quote held by memory alone, and fix self-contradictory findings."` is a final anti-hallucination and self-consistency check.
+- weakness: Its first half duplicates earlier anti-fabrication rules: `"Never invent sources, identifiers, quotes, or numbers."` and `"When existence, attribution, identifier, venue/year, wording, or figure is uncertain, don't assert it..."` A no-lookup model cannot obtain new evidence at submission time; it can only rerun the same uncertainty check. Cut the duplicated half and keep only: `"Before submitting, fix self-contradictory findings."`
+- evidence: Mechanism -> break -> consequence: repeated wording for the same uncertainty policy -> more cached tokens -> no new decision branch for the model -> less room for task-specific instructions. The current measured success does not isolate whether this extra line changes behavior; without ablation, carrying it is evidence-free cost.
+- falsification: Remove only the downgrade-by-memory language while keeping the earlier uncertainty rule. If fabrication and citation behavior stay flat on the weakest target model, the extra text was redundant.
+- verdict: severity medium and confidence HIGH
+
+5.
+- steelman: `"Enumerate candidate failure modes, attack each, drop any your own counter-attack defeats, and keep the rest"` pushes breadth first, then pruning.
+- weakness: It has a drop rule but no merge rule. Two findings can survive counter-attack while still being the same mechanism with different wording, especially under per-worker attack angles. That creates sibling findings instead of one strongest formulation. Rewrite: append `"Merge overlapping survivors by mechanism; keep only the strongest wording once."`
+- evidence: Mechanism -> break -> consequence: enumerate -> generate adjacent candidates -> counter-attack removes false ones but not duplicates -> final list contains same underlying failure twice -> wasted tokens and diluted ranking. The prompt assumes self-counterattack is enough to eliminate redundancy; that is unsupported.
+- falsification: Score final lists for mechanism-level distinctness with and without an explicit merge instruction. If near-duplicates drop without losing coverage, the rewrite is justified.
+- verdict: severity medium and confidence LOW
+
+Acceptable only if ablations show that forced refutation is removed, peer evidence can directly falsify prior claims, and the anti-fabrication text is collapsed to a minimal set with no regression on weaker models.

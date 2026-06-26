@@ -1,0 +1,49 @@
+**Finding 1: Rapid schema iteration during feature validation**
+
+**Steelman**: PostgreSQL's enforced schema consistency and transactional guarantees provide a durable foundation; the discipline of upfront schema design prevents future anomalies.
+
+**Weakness**: An MVP validating product-market fit through rapid user testing (months 1–4 of a 6-month cycle) will discover that the initial entity model was wrong: new user cohorts demand attributes not anticipated, user feedback invalidates the original workflow structure, or cardinality assumptions fail. On PostgreSQL, each discovery requires a migration: write/test DDL (1–2 hrs), stage it (30–60 min), deploy to production (30 min to hours depending on data size), and synchronize code deployment. With one or two backend engineers on a 4-person team, even fortnightly migrations consume 5–10% of backend capacity during the critical feature-shipping window. MongoDB decouples schema from code: new fields are written on-demand; old and new document shapes coexist without migration scripts, coordination, or deployment lockstep.
+
+**Evidence**: The premise that schema is correct at launch fails when founders lack domain expertise or the market is novel. Each discovery loop (interview → code → deploy → test) may require independent schema changes. PostgreSQL couples application state to database schema changes; MongoDB does not. A team shipping 2–3 releases/week with even 15–20% schema-change releases loses ~2 engineer-days/month to migration overhead.
+
+**Falsification**: Instrument three production MVPs (one PostgreSQL, two MongoDB) over 6 months. Measure: (a) count of schema-altering migrations per month in months 1–4, (b) wall-clock hours spent designing/testing/deploying migrations per release cycle, (c) releases delayed >2 hours due to schema changes. PostgreSQL incurs worse outcomes if migrations occur >1/month and delay releases in >30% of cycles.
+
+**Verdict**: severity **HIGH** | confidence **MEDIUM**
+- HIGH because a 5–10% velocity loss directly translates to ~4 lost engineer-days/month on a 4-person team—material for a 6-month launch window.
+- MEDIUM because it presumes genuine domain uncertainty; if founders have deep prior expertise (e.g., "building another CRM for a mature market"), schema is stable and this weakness does not surface.
+
+---
+
+**Finding 2: Document-shaped core domain entities**
+
+**Steelman**: Relational normalization enforces consistency and prevents update anomalies; domains that decompose naturally to normalized tables are safer in PostgreSQL.
+
+**Weakness**: If the MVP's logical core entity is inherently hierarchical or heterogeneous (workflow builder, rule engine, form builder, config system), normalizing to PostgreSQL tables forces a choice between two failures: (a) **over-normalization** — fetching a single logical object requires 5–10 JOINs plus application-level composition, inflating query latency and code complexity, or (b) **JSON columns** — store the nested structure as JSONB, surrendering relational guarantees: no inner-field validation, no constraints, queries filtering nested properties become table scans, copy-update anomalies. MongoDB stores the object as a single document; one query retrieves the full structure. For a 4-person team without a dedicated DBA, this is simpler to reason about and less error-prone.
+
+**Evidence**: Domains where normalization fails: workflow/state-machine builders (Workflows with variant Step payloads requiring polymorphic design or JSON; normalizing costs 3–4 JOINs per workflow fetch), rule engines (Rules with nested Conditions and Actions; normalization requires joining 4–5 tables), form builders (heterogeneous field types per form). MongoDB's natural shape: `{ _id, steps: [ { type, config } ] }` or `{ _id, conditions: [ {...} ], actions: [ {...} ] }`.
+
+**Falsification**: Pre-launch, compute for the top 3 entities by query frequency: (a) JOINs required to fetch one logical instance, (b) % of columns stored as JSON/JSONB. If average JOIN count > 3 or JSON columns > 30% of schema, the domain is document-shaped; MongoDB is a better fit. Measure post-launch query latency: if PostgreSQL p50 latency > MongoDB's by >50 ms on identical CRUD operations, the cost is visible.
+
+**Verdict**: severity **MEDIUM** | confidence **MEDIUM-HIGH**
+- MEDIUM-HIGH if domain structure is knowable pre-launch (from wireframes, user stories); LOW if domain is truly experimental.
+- MEDIUM because latency and schema complexity are real costs, but not fatal; the team can optimize (denormalization, materialized views, etc.), adding cognitive burden and maintenance risk.
+
+---
+
+**Finding 3: Serverless deployment and connection pooling overhead**
+
+**Steelman**: PostgreSQL connection pooling is a solved infrastructure problem (RDS Proxy, PgBouncer, Neon); latency impact is manageable with proper configuration.
+
+**Weakness**: If the team deploys to serverless (AWS Lambda, Vercel Edge, Cloudflare Workers), PostgreSQL's requirement for persistent connections or an external pool service introduces hidden ops complexity and latency. Serverless functions are short-lived and stateless. Each cold or reconnected invocation incurs PostgreSQL connection overhead: cold connection latency [unverified: ~200–500 ms, depending on region and pool service] plus memory and initialization cost. MongoDB drivers cache connections natively per process; warm Lambda invocations reuse cached connections with zero reconnection penalty. The team must choose: (a) external pool service (adds $50–200/month and latency), (b) keep Lambda artificially warm (higher compute cost), or (c) accept high p99 latency on cold starts. MongoDB avoids all three.
+
+**Evidence**: The premise that ops complexity is equal breaks for serverless. PostgreSQL requires stateful infrastructure or per-request overhead; MongoDB does not. On low-traffic MVPs (common for early products), cold-start events are frequent. Teams often misattribute slow "cold" requests to application-level query inefficiency and spend weeks optimizing SQL before realizing the bottleneck is connection exhaustion.
+
+**Falsification**: Deploy identical CRUD APIs to the team's serverless platform (Lambda, Vercel, etc.) backed by PostgreSQL (via RDS or Neon) and MongoDB. Simulate cold-start traffic: one request every 5 min, triggering container reuse. Measure p50 and p99 latency on identical operations. If PostgreSQL p99 latency > MongoDB's by > 100 ms [unverified: specific margin], or if p99 > 2× median, PostgreSQL incurs a material penalty.
+
+**Verdict**: severity **MEDIUM** | confidence **MEDIUM**
+- MEDIUM because outcome depends entirely on deployment choice. Serverless = penalty is real. VMs, containers, PaaS = irrelevant.
+- MEDIUM because latency penalty (100–200 ms) is noticeable but not catastrophic on a low-traffic MVP, but hidden ops cost (pool service configuration/maintenance) is non-trivial for a team without dedicated DevOps.
+
+---
+
+Acceptable under: **None of these conditions applies.** PostgreSQL is the right default if: (1) schema is relational and stable, (2) deployment is not serverless or has pre-configured connection pooling, and (3) core data is tabular, not document-shaped.

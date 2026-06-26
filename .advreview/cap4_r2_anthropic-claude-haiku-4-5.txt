@@ -1,0 +1,63 @@
+**Finding 1: Write-Heavy Workload on Small Hot Set (Lock Contention)**
+
+**Steelman:** For workloads with many concurrent writes to a small set of rows (leaderboard, shared inventory, activity feed), PostgreSQL's row-level locking introduces contention and tail-latency spikes. MongoDB's sharding distributes the hot set and tolerates eventual consistency, delivering flatter p99 latency.
+
+**Weakness:** If the MVP's primary loop is many concurrent writers to few rows (100+ clients incrementing a leaderboard, tens of thousands of events appended per minute to one user's feed), PostgreSQL's lock serialization creates a queue. Lock wait time becomes the dominant latency component. MongoDB's sharding distributes writes across leaders; conflict rates are lower (no row lock, just version checks). Benchmarks show MongoDB throughput 2–10x higher under this pattern [unverified; direction is well-established in DB literature]. For an MVP with a bursty viral moment, PostgreSQL's p99 latency can jump from 50ms to 500ms+ when the hot set lock queue fills; MongoDB's tail latency remains flatter. This kills user experience at peak visibility.
+
+**Evidence:** PostgreSQL uses shared/exclusive row locks; under concurrent writes to the same rows, lock-wait time is the primary latency component. This is a known tradeoff: PostgreSQL prioritizes consistency, MongoDB prioritizes availability. Downside of MongoDB: lost updates or stale reads are possible without application-level conflict resolution, but leaderboards and activity streams tolerate this.
+
+**Falsification:** Simulate your actual write pattern (concurrency level, rows touched per operation) on both databases under realistic peak load (e.g., 1 million operations/hour). Measure p99 write latency and throughput. If PostgreSQL p99 is >2x MongoDB's, the condition holds and user experience degrades. If both are <100ms p99, PostgreSQL's consistency wins and this weakness doesn't manifest.
+
+**Verdict:** HIGH severity, MEDIUM confidence.
+
+---
+
+**Finding 2: Frequent Core-Entity Schema Changes Without JSONB or Migration Tooling**
+
+*[Analyst B's Finding 1 (migrations block deploys) is a related mechanism under this same condition; consolidated here.]*
+
+**Steelman:** PostgreSQL enforces schema-first design. Each ALTER TABLE requires a migration, deployment coordination, and potential lock contention. MongoDB accepts new fields without ceremony, allowing faster iteration on unproven product models.
+
+**Weakness:** If the product domain is novel (new creator tool, vertical SaaS in unfamiliar domain) and the team learns weekly that their core data model was wrong—user profile structure needs nesting, event payload needs new mandatory fields, or a core entity must split—each PostgreSQL change is a migration task. Even with 0-downtime strategies (ALTER TABLE ... ADD COLUMN with DEFAULT, CONCURRENTLY), the QA and coordination cost is ~2–3 hours per migration [unverified estimate]. A 4-person team split across disciplines has ~1 person-week of DevOps slack. Two migrations per sprint exhaust it; the team defers data structure improvements to cut scope. MongoDB allows both shapes to coexist in the same collection; new code writes the new shape; old code still works without ceremony. This is faster to ship and lower-risk for an experimental product.
+
+**Exception / Mitigation:** If the team uses JSONB columns for flexible fields, new fields require no ALTER TABLE or migration. If they adopt a good ORM with migration scaffolding (Prisma, Alembic) and use managed services (RDS, Heroku, Supabase) that abstract lock complexity, overhead is negligible. The finding holds only if the team commits to frequent non-JSONB changes to core entities and lacks tooling.
+
+**Evidence:** PostgreSQL ALTER TABLE rewrites the table under most DDL operations; a 4-person team without dedicated DevOps is unlikely to have expertise in zero-downtime migration strategies (logical replication, dual schema, CONCURRENTLY). The time tax is real: schema review → test migration → apply → verify → rollback procedure. JSONB is a direct answer to this; migrations with ORM scaffolding are automatable and cheap. Without either, overhead compounds.
+
+**Falsification:** Measure actual schema-change frequency over 3 months post-launch. If <1 major non-backward-compatible change per sprint, PostgreSQL's rigidity is irrelevant. If >3 per sprint to core entities *and* the team reports migration overhead as a blocker (explicit quotes like "we delayed feature X because of schema work"), the condition holds. If the team uses JSONB or managed-service tooling and reports no overhead, the finding is refuted.
+
+**Verdict:** HIGH severity, MEDIUM confidence. Substantially mitigated by JSONB + migration tooling.
+
+---
+
+**Finding 3: Team Lacks Relational Modeling Expertise (Ramp-Up + Suboptimal Queries)**
+
+*[Analyst B's Finding 2 (analytics queries are hard without SQL proficiency) is an instance of the same root cause; consolidated here.]*
+
+**Steelman:** PostgreSQL's power comes from disciplined schema design and SQL's expressiveness. MongoDB's document model maps directly to JavaScript objects and JSON API responses; the barrier to productive database work is lower for teams without relational DB experience.
+
+**Weakness:** If the team is majority JavaScript developers with no prior relational DB design experience, the ramp-up cost to write a good PostgreSQL schema is real. They will struggle with normal forms, foreign keys, join optimization, and will ship N+1 query bugs to production. For analytics-style queries (leaderboard stats, user activity summaries), a team lacking SQL proficiency may implement inefficient application-level joins or aggregation instead of using PostgreSQL's GROUP BY, window functions, CTEs, or JSON operators. Each discovery costs a sprint's refactoring. For a 6-month MVP, a 2–4 week ramp-up delay [unverified estimate] represents 8–13% of the runway—significant for a 4-person team. Each new hire or contractor faces the same learning curve.
+
+**Exception / Mitigation:** ORMs (Prisma, TypeORM, Sequelize) and 1–2 hours of SQL training prevent most mistakes. If the team invests in learning or hires one strong backend engineer with SQL experience, PostgreSQL becomes accessible.
+
+**Evidence:** JavaScript developers often find SQL unintuitive on first exposure (joins, aggregation pipelines, index design). Cognitive load of relational thinking is documented in pedagogy: nested documents (MongoDB) align with object-oriented thinking; relational decomposition (PostgreSQL) requires a mental model shift. A 4-person team without a DBA will produce suboptimal queries. ORMs and query-building libraries significantly mitigate this.
+
+**Falsification:** Audit the team's first 10 production queries (SQL for PostgreSQL, aggregation pipelines for MongoDB). Count N+1 queries, missing indexes, and inefficient joins. If PostgreSQL queries are >30% less optimal (more full-table scans, more network round-trips) *and* the team reports that schema design felt harder, the condition holds. If the team navigates PostgreSQL confidently or uses a good ORM, this weakness is irrelevant.
+
+**Verdict:** MEDIUM severity, MEDIUM-HIGH confidence. Realistic scenario (many startups are JS-first), real friction, but mitigated by training and ORMs. Weakest of the three because it's a team skill issue, not an inherent database fit problem.
+
+---
+
+**Challenge to Analyst A, Finding 1:** Holds partially but weaker than stated. JSONB allows schema-less fields without ALTER TABLE; migrations are scaffolded by ORMs. The finding applies only to frequent non-JSONB changes to core entities + no tooling. Confidence: LOW-MEDIUM (was MEDIUM).
+
+**Challenge to Analyst A, Finding 3 (Append-Only Events with Unknown Query Shape):** **REFUTED.** JSONB is a first-class PostgreSQL solution designed for exactly this use case. An `events (id, created_at, event_type, payload JSONB)` schema is clean, schema-light, and performant. New fields require no ALTER TABLE; indexes on JSON paths can be added once query patterns emerge. Analyst A conflates "relational structure" with "rigid schema," but JSONB breaks that equation. Confidence in refutation: HIGH.
+
+**Challenge to Analyst B, Finding 2 (Analytics Queries on Semi-Structured Data):** Weakened. PostgreSQL's aggregation framework (GROUP BY, window functions, JSON operators, CTEs) is as powerful as MongoDB's aggregation pipeline. Performance is comparable with proper indexes. The claim "relational forces wide tables or application-level joins" assumes the team is not proficient in SQL. That is a team skill issue (covered in Finding 3 above), not a database flaw. Confidence in weakness: LOW.
+
+**Challenge to Analyst B, Finding 3 (Staging Database Branching):** Weakened. Managed Postgres services (RDS, Heroku, Supabase) provide point-in-time restore and cloning without manual dump/restore; MongoDB Atlas provides the same. Operational cost is equivalent for both. Self-hosted setups have similar I/O bottlenecks for both databases. Only applies to self-hosted without good DevOps tooling. Excludable.
+
+**Unresolved Disagreement:** Analyst A argues PostgreSQL + JSONB "reduces the benefit of choosing PostgreSQL." I argue JSONB is a feature (flexible schema + strong consistency), not a degradation. This hinges on whether the team values schema safety (my view) vs. velocity and schema flexibility (Analyst A's). For an MVP, both matter and trade off. This cannot be resolved without specifying product domain and risk tolerance.
+
+---
+
+**Condition for Acceptability:** PostgreSQL is the safer default if the team has relational DB expertise (or will hire one), the workload is read-heavy or loosely coupled, the schema stabilizes within 2 weeks, and write load is sparse. MongoDB is better if **more than one** of the three surviving conditions applies: (1) write-heavy hot-set workload, (2) schema expected to churn weekly with non-JSONB core changes and no migration tooling, (3) team is JavaScript-first with no SQL experience. If all three apply, MongoDB is strongly recommended.

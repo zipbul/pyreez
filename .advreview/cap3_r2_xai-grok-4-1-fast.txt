@@ -1,0 +1,25 @@
+Finding 1
+target: Analyst B
+steelman: A 4-person team launching an MVP within 6 months cannot commit to stable entity boundaries early, so forcing a relational model creates repeated rework that delays feature delivery.
+weakness: When production traffic arrives and the team must still perform live schema revisions to accommodate new user-facing fields discovered post-launch, Postgres migration scripts and constraint updates must be coordinated with zero-downtime deployments; any misstep during a hot migration under load either blocks releases or risks partial data visibility that MongoDB sidesteps by treating shape changes as pure application logic.
+evidence: Relational systems surface design choices at write time; when boundaries remain fluid, each production change compounds into extra query rewrites and index maintenance that a small team must execute while users are already writing data, exactly the scenario B's falsification test would reveal if the time-boxed design exercise fails to stabilize the model.
+falsification: Time-box schema design for the core aggregate and ship three subsequent field additions under simulated production load on both engines; if Postgres migration plus validation effort stays under two engineer-hours per change with no production-visible impact, the weakness is refuted.
+verdict: critical MEDIUM
+
+Finding 2
+target: Analyst A
+steelman: PostgreSQL’s enforced schema prevents downstream inconsistency even when requirements shift, so early migration overhead is justified.
+weakness: During the 6-month window, when customer-driven pivots force repeated structural changes after the service is already receiving live writes, each Postgres migration must be tested for lock duration and rolled out with dual-read code; under production load this creates multi-hour maintenance windows or extended dual-write phases that consume the entire team’s capacity for feature work, whereas MongoDB permits the identical logical change via a single code deploy followed by optional background rewriting.
+evidence: Schema enforcement at the storage layer makes structural evolution a database operation that blocks or slows concurrent writes; the condition activates precisely when the MVP reaches paying users before the data model has settled, matching the operational-failure scenario the proposal targets.
+falsification: Execute one live schema pivot (single field to nested array) on a production-like workload of at least 1 M rows on both platforms and measure time from decision to full read-path cutover without user-visible errors; if Postgres completes with equivalent or lower risk and effort, downgrade.
+verdict: high MEDIUM
+
+Finding 3
+target: Analyst B
+steelman: When the dominant access pattern is single-aggregate reads and writes, relational join and normalization costs are largely unused and therefore represent unnecessary work.
+weakness: If early production usage surfaces even moderate cross-aggregate reporting or consistency needs after launch, the team must retrofit joins or transactions on a document-shaped workload; Postgres then forces either expensive runtime joins or denormalization that erodes the original simplicity advantage, whereas MongoDB would have required no such retrofit.
+evidence: The mechanism is workload mismatch surfacing only after real users generate secondary query patterns; a team without prior measurement cannot know the pattern will remain single-document, so the production failure mode is the sudden appearance of reporting requirements after the choice is locked.
+falsification: Instrument the top five production request types after launch and count how many require joins or multi-document consistency; if the count stays below 10 % of traffic volume the weakness is refuted.
+verdict: medium LOW
+
+None exists within its constraints.

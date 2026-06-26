@@ -630,7 +630,7 @@ describe("createDeliberateFn", () => {
       expect(Array.isArray(msgs1)).toBe(true);
       // R2
       if (engineDeps.buildR2Messages) {
-        const msgs2 = engineDeps.buildR2Messages(fakeCtx as any, fakeResponses, "prev", "instructions", { current: 2, max: 3 }, 0);
+        const msgs2 = engineDeps.buildR2Messages(fakeCtx as any, fakeResponses, fakeResponses[0], "instructions", { current: 2, max: 3 }, 0);
         expect(Array.isArray(msgs2)).toBe(true);
       }
       // FollowUp — returns a single ChatMessage, not an array
@@ -688,7 +688,7 @@ describe("createDeliberateFn", () => {
       const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [fakeRound], taskNature: "critique" as const };
       const fakeResponses = [{ model: "m", content: "c", workerIndex: 0 }];
       if (engineDeps.buildR2Messages) {
-        const msgs = engineDeps.buildR2Messages(fakeCtx as any, fakeResponses, "prev", "instructions", { current: 2, max: 3 }, 0);
+        const msgs = engineDeps.buildR2Messages(fakeCtx as any, fakeResponses, fakeResponses[0], "instructions", { current: 2, max: 3 }, 0);
         expect(Array.isArray(msgs)).toBe(true);
       }
       return STUB_DELIBERATE_OUTPUT;

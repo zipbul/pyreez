@@ -1,0 +1,57 @@
+**Finding 1**
+
+**target:** Analyst B Finding 3
+
+**steelman:** Managed PostgreSQL services plus a single long-lived process with connection pooling keep `max_connections = 100` adequate for an MVP; only serverless burst patterns trigger exhaustion.
+
+**weakness:** When the deployment uses serverless functions (Vercel, Lambda, Cloudflare Workers) the first production traffic spike or scheduled job batch creates independent connection attempts from each cold instance. With a pool size of 5 and 50 concurrent invocations, 250 connections are requested against the default limit within milliseconds, producing immediate `too many connections` errors that block all application traffic until a pooler is added and validated.
+
+**evidence:** PostgreSQL documentation states the default `max_connections` is 100 and resources are sized at server start; the loke.dev article describes the exact 50-instance × 5-connection arithmetic under serverless cold starts.
+
+**falsification:** Deploy the MVP for one week under production-like request patterns and record peak concurrent connections; if the count never exceeds 60, this exposure is refuted.
+
+**verdict:** critical | HIGH
+
+**Finding 2**
+
+**target:** Analyst A Finding 1 and Analyst B Finding 2 (combined)
+
+**steelman:** Additive migrations (nullable columns, non-volatile defaults) complete in milliseconds on PostgreSQL 11+; only non-additive operations risk ACCESS EXCLUSIVE lock queues.
+
+**weakness:** Discovery-phase pivots commonly require type changes or NOT NULL constraints on columns that already contain data from early customers. Even on tables of a few hundred thousand rows these operations trigger full rewrites under ACCESS EXCLUSIVE, and any concurrent long-running query (analytics, bulk export, or slow ORM transaction) queues every subsequent SELECT behind the DDL, producing multi-second application outages that recur each time the model is adjusted inside the 6-month window.
+
+**evidence:** PostgreSQL ALTER TABLE documentation and the xata.io lock-queue article confirm that type changes and NOT NULL additions acquire ACCESS EXCLUSIVE and block all conflicting operations; GoCardless documented the cascade under real load.
+
+**falsification:** Instrument the first eight weeks of migrations; if fewer than 20 % contain non-additive DDL on populated tables, downgrade severity to low.
+
+**verdict:** high | HIGH
+
+**Finding 3**
+
+**target:** Analyst A Finding 4 and Analyst B Finding 1
+
+**steelman:** JSONB plus GIN indexes allow document-style workloads inside PostgreSQL with no architectural penalty versus MongoDB.
+
+**weakness:** When the dominant production pattern is frequent partial updates to large embedded documents (activity feeds, feature-flag state, integration payloads) PostgreSQL’s MVCC writes a new heap tuple and rewrites every affected GIN index entry on each change. Under sustained write load the resulting bloat and vacuum pressure produce measurable query degradation on tables that are still small enough for an MVP, while MongoDB’s in-place partial update path does not.
+
+**evidence:** The DEV Community AWS Builders article and sitepoint.com JSONB performance guide both describe full-row TOAST rewrite plus GIN decomposition cost; the MongoDB engineering benchmark page confirms sustained 256-user update pressure.
+
+**falsification:** After four weeks of production load run `pg_stat_user_tables` on core document tables; if dead-tuple ratio stays below 10 % this path does not materialize.
+
+**verdict:** high | MEDIUM
+
+**Finding 4**
+
+**target:** Analyst B Finding 5
+
+**steelman:** Teams may commit to JSONB workarounds without noticing a fundamental model mismatch until late in the timeline.
+
+**weakness:** The argument is symmetric: a team that defaults to MongoDB can equally fail to notice that the majority of its queries are natural joins or multi-aggregate filters and incur equivalent sunk-cost friction. No evidence in the record demonstrates asymmetric detection latency when PostgreSQL is chosen first.
+
+**evidence:** The claim is labeled [unverified] in the source record and rests on architectural reasoning rather than observed team behavior.
+
+**falsification:** Survey teams that performed PostgreSQL-to-MongoDB versus MongoDB-to-PostgreSQL migrations and compare median months until mismatch was recognized; absence of difference refutes the finding.
+
+**verdict:** low | LOW
+
+PostgreSQL is acceptable only when the core domain admits a stable ER diagram for the top five entities before month one, deployment is a single long-lived process, at least one engineer owns vacuum and connection-pool monitoring, and primary access patterns are relational joins rather than partial document mutation.

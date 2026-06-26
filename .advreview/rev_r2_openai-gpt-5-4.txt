@@ -1,0 +1,60 @@
+1.
+steelman: `"If none does, do not pad — pick the peer finding you judge weakest and try to refute it."` is trying to keep round 2 adversarial and avoid empty agreement.
+
+weakness: Offending text: `"If none does, do not pad — pick the peer finding you judge weakest and try to refute it..."` This breaks exactly when no new critique survives and the peer findings are already strong. The line first forbids padding, then mandates more output anyway. That is a deterministic quality leak against the stated goal of zero wasted tokens. Cut the refutation clause, or rewrite to: `"If none does, stop after briefly stating that no new surviving critique was found."`
+
+evidence: Mechanism -> no surviving new critique -> forced attack on a peer finding without live contrary evidence -> filler, fake disagreement, or token-wasting nitpicks. The prompt provides no measurable support for the premise that a "weakest" peer finding is always worth attacking.
+
+falsification: Construct a round where peer findings are strong, distinct, and mutually reinforcing. If the current wording produces an extra attack section with no unique surviving mechanism, while the rewrite does not, the current clause is harmful.
+
+verdict: critical | HIGH
+
+2.
+steelman: `"Revise your own position only when your own evidence falsifies it — never because another analyst sounded confident."` is meant to block herding and confidence contagion.
+
+weakness: Offending text: `"only when your own evidence falsifies it"`. This is too narrow when round 2 evidence arrives through peers and is already present in the shared context. If a peer points to a direct contradiction in the prompt, the worker should be able to revise on that record evidence immediately; forcing it to treat peer evidence as invalid until re-derived creates unnecessary stubbornness and duplicate reasoning. Rewrite to: `"Revise only when evidence in the record falsifies your claim; never because another analyst sounded confident."`
+
+evidence: Mechanism -> peer supplies a concrete contradiction or missing quote from the shared text -> worker either ignores valid evidence or restates it to make it "own" -> persistent false disagreement or extra tokens. The current wording asserts, without measurable support, that self-generated evidence is safer than equally inspectable evidence already in context.
+
+falsification: Seed round 2 with a peer that quotes a direct contradiction from the prompt text. Compare retraction rates under the current line versus the rewrite.
+
+verdict: high | MEDIUM
+
+3.
+target: Analyst A
+
+steelman: Analyst A is right that the prompt treats memory specially in two places, and that this deserves compression if it does not change behavior.
+
+weakness: The real defect is not a contradiction between `"reasoning chains ... or exact recall only"` and `"Before submitting, downgrade any source/number/quote held by memory alone"`; it is redundant calibration. Exact recall can be permitted while still being capped below HIGH. The exact offending text to cut is the first half of bullet 5: `"Before submitting, downgrade any source/number/quote held by memory alone"`, because earlier lines already cover the same decision: `"When ... uncertain, don't assert it..."` and `"Confidence: HIGH = one cheap deterministic check decides it..."`. Keep only `"Before submitting, fix self-contradictory findings."`
+
+evidence: Memory-only claims cannot satisfy the prompt's own definition of HIGH without an external deterministic check, and uncertain memory is already handled by the uncertainty rule. So the extra downgrade sentence adds token cost but no new measurable branch in the policy.
+
+falsification: Remove only the memory-downgrade phrase and keep the earlier uncertainty and confidence rules. If weaker models still avoid fabricated citations and never assign HIGH to memory-only claims, the phrase was redundant.
+
+verdict: medium | HIGH
+
+4.
+steelman: `"keep the rest — weak-but-plausible ones at low confidence"` and `"Keep low-confidence findings; never inflate."` try to preserve edge-case coverage instead of over-pruning.
+
+weakness: Offending text: `"keep the rest — weak-but-plausible ones at low confidence"` and `"Keep low-confidence findings"`. These lines assume, without measurable support, that unconditional retention of low-confidence tails is worth the token cost. Under tight budgets or dense peer context, that is where a no-lookup model is most likely to spend tokens on speculative drift instead of deepening stronger attacks. Rewrite to: `"Keep a low-confidence finding only if it adds a distinct mechanism not already covered."`
+
+evidence: Mechanism -> explicit reward for retaining weak-but-plausible items -> more tail findings survive -> less space for stronger falsification tests, quote-checking, and consolidation. In a zero-waste regime, coverage only helps if it is mechanism-distinct; the current wording does not say that.
+
+falsification: Run a fixed-budget ablation comparing the current wording against the distinct-mechanism rewrite. If finding count stays similar but distinctness and falsification depth improve under the rewrite, the current wording is leaking quality.
+
+verdict: medium | MEDIUM
+
+5.
+target: Analyst B
+
+steelman: Analyst B is right that `"reason before each verdict"` is suspect because the template already places reasoning fields before `verdict`.
+
+weakness: The claim that this line "directly conflicts" with `"No preamble before the first finding"` is under-evidenced. A model can satisfy both instructions with no extra text at all by starting at `steelman:` and putting its reasoning in `weakness` and `evidence`. The exact offending text is still worth cutting, but as redundancy, not as a deterministic format-break. Cut `"reason before each verdict"` unless ablation shows it improves output quality.
+
+evidence: The required field order already forces reasoning before `verdict`. The alleged conflict only appears if a model externalizes an extra sentence outside the fields, and nothing in the prompt requires that behavior.
+
+falsification: Remove only `"reason before each verdict"` and compare whether models that already start at the first field change at all. If they do not, the conflict claim fails and only redundancy remains.
+
+verdict: low | HIGH
+
+The proposal is acceptable if ablations show no regression after removing the forced weakest-peer refutation, broadening revision from "your own evidence" to "evidence in the record," collapsing the memory-only downgrade into the existing uncertainty/confidence rules, and constraining low-confidence retention to distinct mechanisms.

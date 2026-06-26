@@ -1,0 +1,64 @@
+---
+
+**Finding 1 — DDL Lock Cascades Under High-Frequency Schema Churn**
+
+**Steelman:** PostgreSQL is ACID-compliant, has a mature migration ecosystem (Flyway, Alembic, pgroll), and the ACCESS EXCLUSIVE lock problem is a known, solved problem — just set `lock_timeout` and retry.
+
+**Weakness:** The condition where this breaks is a 4-person team shipping multiple schema changes per week to a live production table while any long-running transaction exists. The "just set `lock_timeout`" solution requires the team to have already instrumented retry logic *before* their first incident. On an MVP timeline where engineers are writing features, not infra, the first unguarded `ALTER TABLE` on a table with an open idle-in-transaction connection will queue all subsequent reads and writes behind it until the DDL either acquires the lock or the timeout fires. If the team has not pre-configured `lock_timeout`, there is no automatic ceiling on the blockage duration. Adopting shadow-table tools like pgroll or pg_osc adds a separate operational surface requiring setup, testing, and maintenance that a 4-person team without a dedicated DBA will defer — which means the risk persists through the entire 6-month window. MongoDB's lack of DDL lock semantics makes this class of incident structurally impossible.
+
+**Evidence:**
+- Verified at xata.io: ACCESS EXCLUSIVE lock "conflicts with all other lock types" and "the table is effectively blocked for reads and writes until the ALTER TABLE statement completes." A queued DDL statement blocks even ACCESS SHARE (ordinary SELECT) requests that arrive after it. ([xata.io/blog/migrations-and-exclusive-locks](https://xata.io/blog/migrations-and-exclusive-locks))
+- Verified at postgres.ai: "our session with a DDL attempt, while waiting to acquire the ACCESS EXCLUSIVE lock it needs, starts blocking others. It's blocking even read-only transactions." The protective remedy is `"set lock_timeout = '50ms';"` plus retry logic — neither of which ships as a PostgreSQL default. ([postgres.ai/blog/20210923-zero-downtime-postgres-schema-migrations-lock-timeout-and-retries](https://postgres.ai/blog/20210923-zero-downtime-postgres-schema-migrations-lock-timeout-and-retries))
+- The postgres.ai article also notes that subtransaction-based retry logic carries its own hazard: "each retry attempt consumes new transaction IDs (XIDs), potentially causing Subtrans SLRU overflow on replica servers" — a non-trivial failure mode for teams running read replicas.
+
+**Falsification:** Deploy a PostgreSQL instance with default settings, open one idle-in-transaction session, and issue an `ALTER TABLE ADD COLUMN` from a second session without `lock_timeout`. If the operation completes without blocking concurrent SELECT queries on that table, this finding is wrong.
+
+**Verdict:** severity **high**, confidence **HIGH** — both sources were fetched and confirmed the specific lock mechanism and its default absence of protection.
+
+---
+
+**Finding 2 — GIN Index Degradation Defeats the JSONB "Best of Both Worlds" Argument for Document-Heavy Domains**
+
+**Steelman:** PostgreSQL's JSONB with GIN indexing gives teams schema flexibility *and* relational power, eliminating the need to choose. This is the standard rebuttal to MongoDB for flexible-schema SaaS.
+
+**Weakness:** The condition under which this breaks is a SaaS domain where core entities are natively document-shaped (e.g., user-configurable forms, product catalogs with variable attributes, CMS content, event payloads) *and* the dataset grows past a few hundred thousand rows within the MVP window — which is plausible for a B2B SaaS with even modest traction. For these workloads, the JSONB shortcut produces two compounding problems. First, the GIN index — the mechanism that makes JSONB queries performant — degrades at scale. Second, PostgreSQL's JSONB requires non-standard operator syntax (`->`, `->>`, `@>`, `jsonb_path_query`) that creates a learning tax on a small team already stretched across product, infrastructure, and customer delivery. MongoDB's native document query model requires no operator translation and its consistent select performance does not exhibit the same growth-rate degradation.
+
+**Evidence:**
+- Verified at documentdatabase.org: on SELECT queries, PostgreSQL "showed a noticeable decline in its performance" as data exceeded roughly 500,000 rows, while MongoDB "showcased consistent select performance, irrespective of the dataset's size." On GIN indexes specifically, they "initially performed well" but their "efficiency plummeted after reaching the 1.25 million data volume mark." ([documentdatabase.org/blog/json-performance-postgres-vs-mongodb/](https://documentdatabase.org/blog/json-performance-postgres-vs-mongodb/))
+- The benchmark used default database configurations without tuning — which is exactly the condition a 4-person MVP team operates under.
+- Counterpoint on the MongoDB 2026 benchmark: the techbytes.app article I fetched explicitly states the 256-user/13M-document test measured only "sustained partial-document mutation at high concurrency" and that credible metrics like "p50, p95, and p99 latency" and "write amplification" were absent, making that benchmark's conclusions unreliable. This cuts both ways — it deflates MongoDB's claimed win but it also deflates any PostgreSQL JSONB counter-claim derived from it. ([techbytes.app/posts/postgresql-17-json-vs-mongodb-benchmark-reality-check/](https://techbytes.app/posts/postgresql-17-json-vs-mongodb-benchmark-reality-check/))
+
+**Falsification:** Run the same SELECT workload against a JSONB GIN-indexed table and a native MongoDB collection at 200K, 750K, and 2M rows with tuned configurations (not defaults). If PostgreSQL query latency does not degrade relative to MongoDB at the 1M+ threshold, this finding is wrong for tuned deployments (though it remains valid for the default-config teams this proposal targets).
+
+**Verdict:** severity **medium**, confidence **MEDIUM** — the performance finding is from a fetched source but uses default configs; the degradation threshold may shift with tuning, and the exact row count at which MVP traction reaches this threshold is workload-dependent.
+
+---
+
+**Finding 3 — Schema Rigidity Imposes Compounding Engineering-Day Costs During PMF-Search Pivots**
+
+**Steelman:** PostgreSQL enforces schema discipline that prevents the technical debt accumulation MongoDB famously enables ("schema-on-read" defers inconsistency problems to query time). For a SaaS team, that discipline is an asset even in MVP stage.
+
+**Weakness:** The condition where this inverts is when the team's core entities have not yet stabilized — which is the defining condition of a 6-month MVP sprint targeting product-market fit. Every feature pivot that touches data model shape in PostgreSQL requires: (1) a migration file authored and versioned, (2) a deployment sequence ensuring the migration runs before new code, and (3) backward-compatible application code during the window when old and new schema coexist. MongoDB allows adding a field to a subset of documents immediately, with zero migration file, zero deployment ordering constraint, and zero backward-compat logic for documents that don't yet carry the field. For a 4-person team doing 2–3 data model pivots per month — a normal rate during PMF search — the eliminated migration overhead is a real, recurring velocity saving. The "discipline" PostgreSQL enforces is only valuable once the schema is worth disciplining, i.e., post-PMF. Enforcing it prematurely adds friction per pivot without adding correctness (new columns start NULL anyway, providing no stronger integrity than a missing MongoDB field).
+
+**Evidence:**
+- Verified reasoning against published sources: the arxiv-linked MigCast paper (2104.11787) I found in search results studies data model evolution in NoSQL and notes that "adding a field to the data schema requires updating and rewriting of all affected data entities in the database" in relational systems, and "curating all variational data by eagerly migrating all legacy entities can significantly drive up operational costs, especially in case of frequent software releases." The migration planning estimate provided — "2–4 weeks" planning, "4–8 weeks" execution — concerns large systems, but the per-migration overhead ratio is preserved at smaller scales.
+- The postgres.ai article confirms that a new column with a non-null DEFAULT still requires PostgreSQL to handle lock acquisition during migration in many older patterns (partially addressed since PostgreSQL 11 for constant defaults, but not for expressions or function calls), meaning the overhead is not zero even for the simplest field addition.
+- PostgreSQL's own documentation (implied by the search findings) establishes that `jsonb` is "slower to ingest than raw json because of conversion overhead" — so even the JSONB escape hatch adds a tax at write time. [unverified as a direct verbatim quote from the PostgreSQL docs; this reflects the summary from the search result, not a page I fetched directly]
+
+**Falsification:** Measure actual engineer-hours spent on schema migration tasks (authoring, testing, deploying) across 10 consecutive feature sprints for a PostgreSQL-backed MVP team vs. a MongoDB-backed team with equivalent feature complexity. If PostgreSQL teams do not spend measurably more time on migration overhead per feature with a schema change, this finding loses its empirical basis.
+
+**Verdict:** severity **medium**, confidence **MEDIUM** — the mechanism is sound and partially supported by fetched sources, but the per-pivot hour cost is [unverified] as a controlled measurement; confidence cannot reach HIGH without a controlled study.
+
+---
+
+**Acceptability condition:** The proposal is acceptable if and only if the team's data model is predominantly relational from day one (foreign keys across multiple entity types are load-bearing, not incidental), the team includes at least one engineer who has already operated PostgreSQL in production and will pre-configure `lock_timeout` and migration tooling before first deploy, and the MVP is not targeting a document-heavy domain where JSONB GIN index degradation would manifest within the traction threshold the team projects in 6 months. Without all three conditions holding simultaneously, at least one of the above failure modes is live.
+
+---
+
+**Sources:**
+- [Schema changes and the Postgres lock queue — xata.io](https://xata.io/blog/migrations-and-exclusive-locks)
+- [Zero-downtime Postgres schema migrations: lock_timeout and retries — postgres.ai](https://postgres.ai/blog/20210923-zero-downtime-postgres-schema-migrations-lock-timeout-and-retries)
+- [JSON performance: PostgreSQL vs MongoDB — documentdatabase.org](https://documentdatabase.org/blog/json-performance-postgres-vs-mongodb/)
+- [PostgreSQL 17 JSON vs MongoDB: Benchmark Reality Check — techbytes.app](https://techbytes.app/posts/postgresql-17-json-vs-mongodb-benchmark-reality-check/)
+- [Zero-downtime schema migrations in production PostgreSQL — dev.to](https://dev.to/software_mvp-factory/zero-downtime-schema-migrations-in-production-postgresql-b29)
+- [pgroll: Schema changes and the Postgres lock queue](https://pgroll.com/blog/schema-changes-and-the-postgres-lock-queue)

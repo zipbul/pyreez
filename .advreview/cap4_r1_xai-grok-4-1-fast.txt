@@ -1,0 +1,22 @@
+Finding 1
+steelman: Postgres can be the right default because its JSONB support plus strong consistency and transactions reduce data-integrity bugs in production even for small teams.
+weakness: When the four-person team must ship new user-facing fields or nested objects every one-to-two weeks during the six-month MVP window, each change requires a migration that blocks deploys and introduces lock-contention risk on the single production instance.
+evidence: Adding or indexing a new JSON path still demands an explicit ALTER TABLE or CREATE INDEX CONCURRENTLY; under continuous delivery the migration must be coordinated with code, whereas MongoDB accepts new fields and sparse indexes without any DDL step or downtime window.
+falsification: Measure the fraction of sprint time spent writing, testing, and deploying migrations; if it stays below 5 % of developer hours then the operational cost claim is falsified.
+verdict: high MEDIUM
+
+Finding 2
+steelman: Postgres offers better long-term maintainability and query power, so an early choice avoids later migration pain once the product stabilizes.
+weakness: With only four engineers and a hard six-month launch, the team must frequently iterate on analytics-style queries against semi-structured event or configuration data; the relational model forces either wide tables or repeated application-level joins that increase both latency and cognitive load compared with MongoDB’s native document traversal.
+evidence: Each new nested attribute path requires either a new column plus backfill or a lateral join whose planner cost grows with row count; MongoDB expresses the same access with a single dotted-path query and no schema change.
+falsification: Run identical read-path benchmarks on representative MVP data volumes (low tens of GB); if Postgres p95 latency is no worse than 1.5× MongoDB under the same indexes, the productivity gap disappears.
+verdict: medium MEDIUM
+
+Finding 3
+steelman: Managed Postgres services give the same operational baseline as MongoDB Atlas, so infrastructure choice is neutral for a tiny team.
+weakness: When the team uses a single shared staging database and must reset or branch data nightly for parallel feature work, Postgres’s rigid foreign-key and transaction semantics make cheap point-in-time copies or lightweight branching far more expensive in both storage and scripting effort than MongoDB’s simple dump/restore or Atlas “copy cluster” flow.
+evidence: A Postgres logical dump of even modest relational data (tens of tables) requires careful ordering to satisfy constraints and still consumes gigabytes per branch; MongoDB can snapshot a single collection or entire database in one atomic filesystem-level copy without constraint validation.
+falsification: Time and storage cost of creating an isolated staging copy that reflects the previous day’s production state; if the Postgres procedure finishes in comparable wall-clock time and <1.5× storage then the operational penalty is refuted.
+verdict: medium LOW
+
+The proposal is acceptable only when the team commits to a fixed relational schema before the first line of code and accepts weekly migration overhead as non-blocking.

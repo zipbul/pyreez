@@ -1,0 +1,22 @@
+**Finding 1**  
+steelman: PostgreSQL guarantees ACID transactions and relational integrity that protect production data during concurrent SaaS operations such as billing and user actions.  
+weakness: When an early-stage product must change its data shape every few days to chase user feedback, each ALTER TABLE or migration introduces table locks and rollback risk on a live instance that a four-person team without a dedicated DBA cannot safely manage inside a 6-month launch window.  
+evidence: A single production migration that requires exclusive lock on a non-trivial table blocks all writes for the duration of the rewrite; with four engineers rotating on-call the probability of an incomplete migration or data inconsistency rises sharply once the table exceeds a few million rows.  
+falsification: Run the first five schema-altering deploys on a staging replica sized to production traffic and measure cumulative downtime plus engineer hours spent on rollbacks.  
+verdict: critical MEDIUM
+
+**Finding 2**  
+steelman: PostgreSQL’s JSONB column plus GIN indexes deliver flexible document storage while retaining strong consistency guarantees.  
+weakness: When third-party integration payloads arrive with high cardinality and frequent field additions, index bloat and vacuum pressure degrade write throughput faster than an equivalent MongoDB collection; the four-person team lacks capacity to monitor autovacuum lag and rebuild indexes under time pressure.  
+evidence: Each new top-level key added to JSONB documents forces index maintenance on every write; on a 4 vCPU instance the combination of frequent vacuum and index bloat produces measurable latency spikes once insert rate exceeds a few thousand per second, conditions reached by typical SaaS webhook traffic.  
+falsification: Replay a week of production webhook traffic on both engines and compare p99 insert latency after the tenth schema change.  
+verdict: high MEDIUM
+
+**Finding 3**  
+steelman: PostgreSQL connection pooling and prepared statements keep resource usage predictable for a multi-tenant SaaS workload.  
+weakness: Under the tight timeline the team defaults to an ORM that emits N+1 queries or broad joins; when real usage reveals hot paths, the only fast remedy is connection-count explosion or expensive index surgery that the same four engineers cannot perform without delaying the next revenue feature.  
+evidence: ORM-generated queries that touch three or more tables with polymorphic relationships routinely require 8–12 connections per concurrent user; once daily active users reach a few hundred the pool saturates a modest instance and forces either vertical scaling or query rewrites that take days to validate.  
+falsification: Measure connection usage and query latency during a simulated ramp from 50 to 500 concurrent users using the team’s actual ORM code.  
+verdict: high LOW
+
+Postgres acceptable only if the team commits in advance to a fixed schema, a single experienced operator, and no third-party payload variability within the 6-month window.

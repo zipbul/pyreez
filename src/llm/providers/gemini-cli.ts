@@ -73,8 +73,16 @@ export class GeminiCliProvider implements LLMProvider {
 
     // --sandbox intentionally omitted: launches Docker on Linux, causing EACCES
     // on ~/.gemini/projects.json.tmp (volume mount permission bug).
-    // Non-fileAccess runs from cwd=/tmp so tool calls are no-ops.
-    args.push("-y");
+    //
+    // Read-only by design, matching the other providers (claude: read-only --tools;
+    // codex: --sandbox read-only). `--approval-mode plan` is gemini's read-only mode — the model
+    // can read context but never edit/run, so deliberation cannot mutate the workspace. This
+    // replaces the former `-y` (YOLO: auto-approve ALL tools incl. writes), which gave gemini
+    // write/shell access the other providers never had.
+    args.push("--approval-mode", "plan");
+    // gemini 0.40+ aborts (exit 55) in an untrusted directory; both cwd modes (/tmp and the
+    // project dir under fileAccess) are untrusted. Trust the workspace for this headless session.
+    args.push("--skip-trust");
 
     try {
       const { stdout, stderr, exitCode } = await spawnWithIdleTimeout(
@@ -132,15 +140,28 @@ export class GeminiCliProvider implements LLMProvider {
     const stats = parsed.stats?.models;
     let inputTokens = 0;
     let outputTokens = 0;
+    let cachedTokens = 0;
+    let sawCached = false;
 
     if (stats) {
       for (const model of Object.values(stats)) {
-        inputTokens += (model as any)?.tokens?.input ?? 0;
-        outputTokens += (model as any)?.tokens?.candidates ?? 0;
+        const tokens = (model as any)?.tokens;
+        inputTokens += tokens?.input ?? 0;
+        outputTokens += tokens?.candidates ?? 0;
+        if (tokens?.cached != null) {
+          cachedTokens += tokens.cached;
+          sawCached = true;
+        }
       }
     }
 
-    return this.buildResponse(text, originalModel, inputTokens, outputTokens);
+    return this.buildResponse(
+      text,
+      originalModel,
+      inputTokens,
+      outputTokens,
+      sawCached ? cachedTokens : undefined,
+    );
   }
 
   private buildResponse(
@@ -148,6 +169,7 @@ export class GeminiCliProvider implements LLMProvider {
     originalModel: string,
     inputTokens = 0,
     outputTokens = 0,
+    cachedTokens?: number,
   ): ChatCompletionResponse {
     return {
       id: `gemini-cli-${Date.now()}`,
@@ -166,6 +188,7 @@ export class GeminiCliProvider implements LLMProvider {
           prompt_tokens: inputTokens,
           completion_tokens: outputTokens,
           total_tokens: inputTokens + outputTokens,
+          ...(cachedTokens != null ? { cached_tokens: cachedTokens } : {}),
         },
       } : {}),
     };
@@ -182,6 +205,7 @@ interface GeminiCliJsonOutput {
         input?: number;
         candidates?: number;
         total?: number;
+        cached?: number;
       };
     }>;
   };

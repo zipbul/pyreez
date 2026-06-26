@@ -1,168 +1,158 @@
 # pyreez
 
-Heterogeneous multi-model deliberation infrastructure exposed as an [MCP](https://modelcontextprotocol.io/) server.
+A CLI tool for **heterogeneous multi-model LLM deliberation**.
 
-pyreez sits between a host agent (GitHub Copilot, Claude Desktop, etc.) and multiple LLM providers.
-It routes tasks to the optimal model, orchestrates multi-model deliberation,
-and continuously calibrates model ratings via Bradley-Terry scoring.
+pyreez sends one task to several different LLMs, has them deliberate under a chosen
+protocol (independent analysis, adversarial debate, interrogation, etc.), and then
+gives a host agent the structured material to synthesize a single answer — plus
+tools to inspect convergence, rank candidates, and cross-check factual claims.
 
-## Key Features
+The core idea: diversity comes from **different model architectures**, not from
+assigning roles to one model. The host (you, or an agent calling the CLI) owns the
+task and the final synthesis; pyreez owns the deliberation harness.
 
-- **Intelligent Routing** — PROFILE → SCORE → SELECT pipeline picks the best model per task
-- **Multi-Model Deliberation** — Workers respond independently; host synthesizes across providers
-- **Bradley-Terry Ratings** — 21-dimension capability scores with pairwise calibration
-- **Provider Diversity** — 50 models across 9 providers
-- **Learning Layer** — Online BT updates, preference tracking, MoE gating, matrix factorization
-- **Feedback API** — 4-type feedback (boolean, float, comment, demonstration) with session linkage
-- **Quality Tracking** — Per-model reporting with context utilization metrics
+> **Status:** pyreez is a command-line tool. It is **not** an MCP server today, and
+> it does **not** auto-route tasks or learn model ratings — see
+> [Roadmap](#roadmap--not-yet-implemented). Everything in the sections above the
+> Roadmap is implemented and tested.
 
-## Supported Models
-
-| Provider | Models |
-|----------|--------|
-| OpenAI | GPT-5.3, GPT-5.2, GPT-5, GPT-5 Mini, GPT-5 Nano, o3, o4-mini, GPT-4.1, GPT-4.1 mini, GPT-4.1 nano, GPT-4o, GPT-4o mini |
-| Anthropic | Claude Opus 4.6, Claude Sonnet 4.6, Claude Haiku 4.5, Claude Sonnet 4.5, Claude Opus 4.5, Claude Opus 4.1, Claude Sonnet 4, Claude Opus 4 |
-| Google | Gemini 3.1 Pro, Gemini 3 Pro, Gemini 3 Flash, Gemini 2.5 Pro, Gemini 2.5 Flash, Gemini 2.5 Flash-Lite, Gemini 2.0 Flash |
-| DeepSeek | DeepSeek V3.2, DeepSeek R1 |
-| xAI | Grok 4.1 Fast, Grok 4, Grok Code Fast 1 |
-| Mistral | Mistral Large 3, Codestral, Devstral 2 |
-| Qwen | Qwen 3.5 Plus, Qwen 3.5 Flash, Qwen 3 Coder Next |
-| Groq | Llama 4 Maverick, Llama 4 Scout |
-| Local | DeepSeek R1 Distill Llama, Qwen3 Coder, Phi-4 |
-
-## MCP Tools
-
-| Tool | Description |
-|------|-------------|
-| `pyreez_route` | Route a task through PROFILE → SCORE → SELECT to find the optimal model |
-| `pyreez_scores` | Query model capability scores (filter by model, dimension, top-N) |
-| `pyreez_deliberate` | Run multi-model deliberation |
-| `pyreez_acceptance` | Verify host synthesis by having workers check position accuracy |
-| `pyreez_feedback` | Submit pairwise quality preferences to update model BT ratings |
-
-## Quick Start
-
-### Prerequisites
+## Requirements
 
 - [Bun](https://bun.sh) v1.3+
-- API keys for at least one LLM provider
+- At least one provider available:
+  - **CLI providers** — the `claude`, `codex`, and `gemini` CLIs on your `PATH`.
+    These run as subprocesses and use your existing subscriptions, so they need
+    no API key.
+  - **xAI** — set `PYREEZ_XAI_KEY` (uses the Vercel AI SDK over HTTP).
 
-### Install
+> **Known issue:** the config loader currently throws
+> `No LLM providers configured. Set PYREEZ_XAI_KEY.` when `PYREEZ_XAI_KEY` is unset,
+> even though the CLI providers need no key (`src/config.ts:77`). Until this is
+> fixed, set `PYREEZ_XAI_KEY` to any non-empty value to pass the config gate, even
+> if you only intend to use the CLI providers.
+
+## Install
 
 ```bash
 bun install
 ```
 
-### Environment
-
-Set provider API keys as environment variables:
-
-```env
-PYREEZ_ANTHROPIC_KEY=sk-ant-...
-PYREEZ_GOOGLE_API_KEY=...
-PYREEZ_OPENAI_KEY=sk-...
-PYREEZ_DEEPSEEK_KEY=...
-PYREEZ_XAI_KEY=...
-PYREEZ_MISTRAL_KEY=...
-PYREEZ_QWEN_KEY=...
-PYREEZ_GROQ_KEY=...
-PYREEZ_CLAUDE_CLI=1          # Use claude CLI instead of Anthropic API
-PYREEZ_LOCAL_URL=http://...  # Local LLM (Docker Model Runner, Ollama, LM Studio)
-PYREEZ_LOCAL_SOCKET=/var/run/docker.sock  # Docker Model Runner socket
-```
-
-### MCP Client Configuration
-
-Add to your MCP client config (e.g., `.vscode/mcp.json`):
-
-```json
-{
-  "servers": {
-    "pyreez": {
-      "type": "stdio",
-      "command": "bun",
-      "args": ["run", "/path/to/pyreez/index.ts"]
-    }
-  }
-}
-```
-
-### Run
+## Quick Start
 
 ```bash
-bun run index.ts
+# List the models pyreez knows about
+bun run src/cli.ts models
+
+# Run a deliberation across three models
+bun run src/cli.ts deliberate \
+  --task "Should we use PostgreSQL or MongoDB for a 4-person SaaS MVP?" \
+  --models "anthropic/claude-opus-4.6,openai/gpt-5.4,google/gemini-3.1-pro-preview" \
+  --protocol shared_convergence
+
+# Pipe a long task in via stdin with `-`
+echo "long task text..." | bun run src/cli.ts deliberate --task - --models "..."
 ```
 
-## Architecture
+Each command prints a JSON result to stdout; progress lines go to stderr.
 
+## Commands
+
+| Command | What it does |
+|---------|--------------|
+| `models` | List configured models with provider, cost, and benchmark scores |
+| `deliberate` | Run a multi-model deliberation under a protocol |
+| `acceptance` | Have each worker verify that a synthesis represents its position and is grounded |
+| `rank` | Pairwise-rank candidate responses with an LLM judge (LLM-Blender PairRanker) |
+| `quality-check` | Cross-validate factual claims across responses |
+| `convergence-check` | LLM judge classifies semantic convergence (HIGH / MODERATE / DIVERSE) |
+| `inspect` | Post-deliberation pass: convergence + (rank if N≥4) + optional quality-check |
+| `fuse` | Fuse ranked candidates into a single synthesis draft (LLM-Blender GenFuser) |
+
+Run `bun run src/cli.ts <command> --help` for command-specific options.
+
+Key `deliberate` flags: `--task`, `--models` (comma-separated, **required** — you
+choose the models), `--protocol`, `--count`, `--max-rounds`, `--worker-instructions`,
+plus protocol-specific `--questions`, `--criteria`, `--subject`, `--aggregation`,
+and `--file-access`. A flag value of `-` reads from stdin. Worker count is capped at 7.
+
+## Deliberation Protocols
+
+Set with `--protocol`. Default is `shared_convergence`.
+
+| Protocol | Structure | Default rounds |
+|----------|-----------|----------------|
+| `shared_convergence` | Workers analyze independently, see others' positions, converge | 3 |
+| `adversarial_debate` | Workers challenge each other's positions; no forced consensus (≥2 models) | 3 |
+| `host_interrogation` | Workers answer the host's questions 1:1, isolated from each other | 1 |
+| `sequential_refinement` | Workers chain A→B→C, each improving the previous output | 1 |
+| `evaluation_scoring` | Workers score a subject against criteria; host aggregates | 1 |
+| `red_team` | Asymmetric: generators produce, attackers find weaknesses (≥2 models) | 2 |
+
+## How a Run Works
+
+- **Per-worker fallback** — if a worker model fails, it is replaced from a pool
+  (same provider first, then any unique model, then a team duplicate), so one bad
+  model doesn't sink the round.
+- **Cooldown** — failed models are excluded for the rest of the session; provider-wide
+  errors (rate limit, auth, 5xx) cool the whole provider. Cooldown is in-memory per run
+  (the CLI restores `.pyreez/cooldown.json` on startup if present, but does not write it).
+- **Replenishment & degradation** — empty slots are refilled from healthy providers;
+  if the team shrinks below a minimum viable size the run reports a degradation error
+  instead of returning a misleading result.
+- **Post-deliberation** — `inspect` (and the standalone `rank`/`quality-check`/
+  `convergence-check`/`fuse` commands) score convergence, rank candidates pairwise,
+  and cross-check factual claims, returning `host_actions` for the synthesizing agent.
+
+## Providers & Models
+
+15 models across 4 providers, defined in `.pyreez/models.jsonc`:
+
+| Provider | Wiring | Models |
+|----------|--------|--------|
+| Anthropic | `claude` CLI subprocess | Claude Opus 4.6, Claude Sonnet 4.6, Claude Haiku 4.5 |
+| Google | `gemini` CLI subprocess | Gemini 3.1 Pro, Gemini 3 Flash, Gemini 3.1 Flash-Lite (all preview) |
+| OpenAI | `codex` CLI subprocess | GPT-5.4, GPT-5.4 Mini, GPT-5.4 Nano, GPT-5.3 Codex |
+| xAI | Vercel AI SDK (HTTP) | Grok 4, Grok 4.1 Fast (+ Reasoning / Non-Reasoning), Grok Code Fast 1 |
+
+Edit `.pyreez/models.jsonc` to add, remove, or toggle models. Benchmark scores
+shown by `models` come from that file (sources noted in its header) and are used
+only for internal fallback-ordering, not for automatic selection.
+
+## Configuration
+
+Environment variables actually read:
+
+```env
+PYREEZ_XAI_KEY=...      # required to pass the config gate (see Known issue); used by the xAI provider
+PYREEZ_MODEL=...        # optional default model id (default: anthropic/claude-sonnet-4.6)
 ```
-Host Agent (Copilot / Claude Desktop / Claude Code)
-    │
-    ▼ (MCP stdio)
-┌──────────────────────────────────────────────┐
-│  pyreez MCP Server (5 tools)                 │
-│                                              │
-│  ┌────────────────────────────────────────┐  │
-│  │  3-Stage Pipeline (PyreezEngine)       │  │
-│  │                                        │  │
-│  │  Score → [Learning L2~L4] → Profile    │  │
-│  │    → Select → Deliberate               │  │
-│  └────────────────────────────────────────┘  │
-│                                              │
-│  ┌─────────────┐  ┌──────────────────────┐  │
-│  │ Selectors   │  │ Learning Layer       │  │
-│  │ ├ bt-ce     │  │ ├ L2 Preference      │  │
-│  │ ├ knn       │  │ ├ L3 MoE Gating      │  │
-│  │ └ cascade   │  │ ├ L4 Matrix Factor.  │  │
-│  │ (+ A/B)     │  │ └ Online BT Update   │  │
-│  └─────────────┘  └──────────────────────┘  │
-│                                              │
-│  ┌─────────────┐  ┌──────────────────────┐  │
-│  │ Model       │  │ Feedback Store       │  │
-│  │ Registry    │  │ (4-type: bool/float/ │  │
-│  │ 21-dim BT   │  │  comment/demo)       │  │
-│  └─────────────┘  └──────────────────────┘  │
-│                                              │
-│  ┌─────────────┐  ┌──────────────────────┐  │
-│  │ Reporter    │  │ LLM Client           │  │
-│  │ quality     │  │ 9 providers          │  │
-│  │ tracking    │  │ multi-adapter        │  │
-│  └─────────────┘  └──────────────────────┘  │
-└──────────────────────────────────────────────┘
-    │
-    ▼
-LLM Providers (OpenAI, Anthropic, Google, DeepSeek, xAI, Mistral, Qwen, Groq, Local)
-```
 
-## Routing Configuration
+The `claude` CLI provider strips the `CLAUDECODE` env var so it can be spawned from
+within a Claude Code session, and runs from `/tmp` (or the project dir when
+`--file-access` is set) to avoid loading project context it doesn't need.
 
-Configure selector variant and weights in `.pyreez/config.jsonc`:
+## Roadmap / Not Yet Implemented
 
-```jsonc
-{
-  "routing": {
-    "qualityWeight": 0.7,
-    "costWeight": 0.3,
-    // Selector variant: "bt-ce" (default), "knn", "cascade"
-    "selector": "bt-ce"
-  }
-}
-```
+None of the following exists in the code today. They reflect design intent, not
+current behavior:
 
-| Selector | Strategy |
-|----------|----------|
-| `bt-ce` | Composite quality + cost-efficiency scoring with exploration (default) |
-| `knn` | Preference-based selection using historical win rates, composite fallback |
-| `cascade` | Cost-first: cheapest model above median quality threshold |
+- **MCP server** — a `.mcp.json` registration exists but starts no server
+  (`src/index.ts` only exports a utility function). No MCP SDK is used.
+- **Automatic routing** — there is no PROFILE→SCORE→SELECT pipeline; you pass
+  `--models` explicitly. The `routing` weights in config are not consumed.
+- **Bradley-Terry ratings / capability calibration** — not implemented
+  (`src/evaluation/` and `src/math/` are empty).
+- **Learning layer** — online rating updates, preference tracking, MoE gating,
+  matrix factorization: not implemented.
+- **Feedback API** — not implemented.
 
 ## Development
 
 ```bash
-# Run all tests
-bun test
-
-# Type check
-bun run typecheck
+bun test                 # run all tests
+bun test src/deliberation/   # run a directory
+bun run typecheck        # tsc --noEmit
+bun run src/cli.ts <cmd> # run a command
 ```
 
 ## License

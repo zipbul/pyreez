@@ -1,0 +1,82 @@
+---
+
+**Explosive growth exceeding single-instance capacity within 6 months**
+
+**Steelman:** For most MVPs, vertical scaling is sufficient. But if product-market fit is immediate and usage spikes above [unverified] 5,000–10,000 QPS in high-write workloads, a single-instance PostgreSQL database becomes a hard ceiling while the MVP is still being built.
+
+**Weakness:** If the MVP grows 10× in 3–4 months and that growth is driven by write-heavy operations—e.g., IoT ingestion, real-time event tracking, high-velocity logging—PostgreSQL's single-writer architecture demands sharding. PostgreSQL offers no native sharding: retrofitting requires application-level shard-key design, routing logic, and managing multiple instances mid-MVP. A 4-person team forced into a sharding retrofit loses 2–4 weeks to infrastructure rework when velocity is critical. MongoDB's Sharded Clusters are transparent at the driver layer; adding nodes scales throughput linearly without application-layer shard-key logic.
+
+**Evidence:** PostgreSQL's largest single instance handles ~5k–10k concurrent connections; architecture assumes one writer. Scaling beyond that requires Citus (adds licensing/ops burden) or application rewrites. MongoDB sharding is a first-class primitive built into drivers. The cost difference is architectural, not operational.
+
+**Falsification:** Deploy both under synthetic 10× growth in 6 months. Measure time-to-sharding and feature-development disruption. If PostgreSQL handles this growth on one instance without code changes, or if sharding retrofit takes <1 week with no application-level shard-key routing, the weakness doesn't bite.
+
+**Verdict:** severity **critical** | confidence **MEDIUM**
+
+---
+
+**Frequent schema evolution under uncertain domain**
+
+**Target: Analyst A, Analyst B**
+
+**Steelman:** If the MVP's data model is uncertain and the team must change the schema 2+ times per sprint while shipping, PostgreSQL's explicit migration model—ALTER TABLE statements, migration scripts, coordinated deployments, risk of downtime—creates velocity drag that MongoDB's schemaless model avoids. Analyst A emphasizes semi-structured data with volatile shapes; Analyst B emphasizes weekly changes forcing migration re-planning and coordination overhead.
+
+**Weakness:** PostgreSQL requires each structural change (column rename, type change, relationship addition) to be encoded as an explicit DDL script, tested, and deployed in coordination with application code. A 4-person team iterating rapidly on domain modeling pays a full context-switch cost per change. MongoDB allows developers to add fields, nest structures, and deploy code without orchestration. 
+
+However, this weakness is narrower than both peers suggest:
+- Analyst A argues PostgreSQL's JSONB column type mitigates the problem. This is a partial mitigant for *auxiliary* fields (metadata, audit logs, feature flags) but not for *core* data model changes (user/workspace relationships, main entity types). JSONB allows schema changes to auxiliary fields without ALTER TABLE, but the core schema still requires migrations.
+- Analyst B claims weekly changes exceed the cost of migrations, with a measurement strategy (commit ratio < 15%). This measurement is flawed: a single migration commit can represent 30 minutes or 3 hours depending on data volume and operation type. Commit count does not measure time cost. The underlying mechanism (migrations cost time) is sound, but the threshold is arbitrary.
+
+The team's **migration tooling matters**: Prisma migrations add overhead; raw SQL or Alembic reduce it. The team can recover much of the velocity advantage by using lightweight migration tools or, early in the MVP, accepting downtime windows for schema changes.
+
+**Evidence:**
+- PostgreSQL mechanism: each structural change (non-trivial ALTER TABLE, new foreign key, type change) requires a migration script, code review, and coordinated deployment. Blocking operations risk downtime; zero-downtime patterns require advanced tooling (logical replication, online schema change).
+- MongoDB mechanism: schemaless writes allow developers to add fields and push code without coordination. Iteration is faster upfront.
+- Migration overhead depends on tooling: Prisma (which Analyst B implies) adds rebuild and file-coordination overhead; raw migrations or Alembic reduce it to [unverified] <30 minutes per simple change.
+- Analyst A's JSONB mitigation works for semi-structured auxiliary data but not for core model changes.
+
+**Falsification:**
+- Track total time from "schema change requested" to "feature live in production" for the first 12 weeks. If PostgreSQL consistently exceeds MongoDB by >1 day per change, weakness is confirmed. If the difference is <4 hours per change, overhead is acceptable given PostgreSQL's later benefits in observability and relational queries.
+- Alternatively: if the team freezes the core data model by week 4 and changes drop to <1 per sprint, the condition no longer holds, and this weakness disappears.
+
+**Verdict:** severity **high** | confidence **MEDIUM**
+
+---
+
+**Inherently document-oriented application domain**
+
+**Steelman:** Some applications naturally benefit from a document model. If the MVP's core entities are deeply nested and heterogeneous—e.g., Form → Fields → Validators → ErrorMessages, or Customer → Events (with heterogeneous event types)—PostgreSQL requires careful normalization across multiple tables with JOINs, introducing design and query complexity. MongoDB's document model embeds structures directly; a Form is one document, fetched atomically.
+
+**Weakness:** This advantage is narrow. Most B2B SaaS MVPs require at least some cross-entity queries: list forms by user, filter submissions by date, apply relational predicates (find customers who submitted a form in the last 7 days), or enforce referential integrity. MongoDB's schemaless advantage evaporates the moment the MVP needs:
+- Cross-entity JOINs (forms by user, submissions by form).
+- Aggregations across documents (sum revenue by customer, count submissions per form).
+- Referential integrity (prevent deletion of a user if forms exist).
+
+The majority of MVPs discover one of these requirements within 6 months. Analyst A2 correctly notes the condition is narrow; applying to only 15–20% of SaaS domains (form builders, headless CMS, customer analytics, note-taking)—not to marketplaces, booking systems, financial transactions, or user-management-heavy products. In relational workloads, PostgreSQL's model is actually superior because it avoids denormalization and the N+1 query problem endemic to document reads.
+
+**Evidence:**
+- Document advantage: A Form embedded with Fields, Validators, and ErrorMessages is a single atomic read in MongoDB; the Postgres equivalent is forms LEFT JOIN fields LEFT JOIN validators, with result assembly.
+- Relational advantage: A query like "find all forms submitted to by users in cohort X with >N submissions" is one SQL query in Postgres, multiple queries + application-level filtering in MongoDB (or denormalization with consistency risk).
+- Scope: Only ~15–20% of SaaS fits the pure-document pattern (form builders, headless CMS, audit-log-heavy systems with single-aggregate reads).
+
+**Falsification:**
+- Build a prototype of the core domain model in both databases. If the 10 most frequently executed queries are all single-document reads (no JOINs, no aggregations), MongoDB is likely better. If >3 queries require cross-entity composition or aggregation, Postgres wins due to JOIN efficiency and simpler code.
+
+**Verdict:** severity **medium** | confidence **MEDIUM**
+
+---
+
+**Condition under which the proposal is acceptable:**
+
+PostgreSQL as the default is acceptable if the MVP meets **at least 2** of the following:
+
+1. **Stable core schema** (≤1 change per sprint after week 4) **and** team has migration discipline (Alembic, Flyway, or equivalent in place).
+2. **Relational workload**: application requires JOINs, aggregations, or referential constraints across entities (multi-entity queries, deletion cascades, reporting).
+3. **Relational domain**: marketplace, booking system, financial ledger, access control, or transaction-heavy product.
+
+PostgreSQL **fails** only if **all three** of the following hold simultaneously:
+
+- Core data model is volatile (2+ schema changes per sprint throughout 6 months),
+- Team lacks migration discipline and adopts an ORM with unoptimized migration overhead (e.g., Prisma without custom tooling),
+- Application is document-centric (form builder, headless CMS, audit-log-heavy, single-aggregate-read patterns).
+
+If only 1 or 2 of these failure conditions hold, MongoDB provides marginal velocity advantage (0–20% dev-time savings) that may not offset PostgreSQL's later strengths in cross-entity queries, relational integrity, and observability.
