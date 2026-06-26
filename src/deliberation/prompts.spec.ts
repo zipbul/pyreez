@@ -439,7 +439,10 @@ describe("buildAdversarialDebateR1", () => {
     const user = buildAdversarialDebateR1(makeCtx(), undefined, undefined, 0)[1]!.content!;
     expect(user).toContain("<approach>");
     expect(user).toMatch(/Do not soften your criticism/i);
-    expect(user).toMatch(/substantive and falsifiable/i);
+    // "substantive and falsifiable" removed: "substantive" is covered by the role
+    // ("evidence-backed weaknesses") + the required evidence field, and "falsifiable" by the
+    // required falsification field — introspection (3 heterogeneous workers) reported the clause
+    // double-covered, with the falsification field the operative driver.
     // R1 has no peers/prior round: peer-relative directives must NOT appear here
     expect(user).not.toContain("another analyst");
     expect(user).not.toContain("reach consensus");

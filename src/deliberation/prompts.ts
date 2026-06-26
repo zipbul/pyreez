@@ -321,7 +321,7 @@ function adversarialSystem(webAccess = false): string {
 // not-restating) would be dead weight; they appear only from R2. Steelmanning lives in the output-format
 // steelman field, not here.
 const ADVERSARIAL_APPROACH_R1 = `<approach>
-Do not soften your criticism. Every finding must be substantive and falsifiable.
+Do not soften your criticism.
 </approach>`;
 
 const ADVERSARIAL_APPROACH_PEER = `<approach>

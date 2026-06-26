@@ -22,6 +22,8 @@ pyreez의 호스트 질문/요청 기법, 프로토콜 설계, 워커 prompt 구
 | [07-protocol-specific.md](./07-protocol-specific.md) | 6 프로토콜별 검증 자료 (shared_convergence/adversarial_debate/host_interrogation/sequential_refinement/evaluation_scoring/red_team) |
 | [08-reasoning-models-2026.md](./08-reasoning-models-2026.md) | Anthropic adaptive thinking, "step by step" 폐기, thinking.effort API |
 | [09-known-gaps.md](./09-known-gaps.md) | 자료 부족 영역 정직 라벨 (어떤 결정이 추정에 의존하는지) |
+| [10-instruction-adherence.md](./10-instruction-adherence.md) | IFEval/Constitutional AI 세대 instruction-following (2026-04-25 시점) |
+| [11-2026-06-update.md](./11-2026-06-update.md) | **분기 갱신**: 멀티벤더(OpenAI/Gemini/xAI/Anthropic) cross-provider PE + 2024–2026 학계 델타(IFScale·LLMLingua·Why-LMs-Hallucinate·CriticGPT·To-CoT-or-not 등 코퍼스 부재 논문) |
 
 ## 신뢰 등급
 | 등급 | 의미 | 예 |
@@ -35,7 +37,7 @@ pyreez의 호스트 질문/요청 기법, 프로토콜 설계, 워커 prompt 구
 각 자료에 등급 명시 필수. 등급 부재 자료는 **사용 금지**.
 
 ## 갱신 정책
-- LLM 분야 6개월 단위 변화 — 본 corpus는 **2026-04-25 시점 스냅샷**
+- LLM 분야 6개월 단위 변화 — 00–10은 **2026-04-25 스냅샷**, 11은 **2026-06-27 분기 갱신**(델타만 추가, 원 스냅샷 무결성 보존)
 - 갱신 주기: 분기 1회 또는 메이저 venue 발표 직후 (NeurIPS, ICLR, ACL 발표 후 2주 내)
 - 갱신 시 deprecated 자료는 별도 섹션 보존 (history)
 
