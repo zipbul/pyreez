@@ -6,7 +6,7 @@
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { serializeMessages, toCliModelId } from "./claude-cli";
+import { serializeMessages, toCliModelId } from "./message-util";
 import { buildSdkResponse, toSdkError } from "./sdk-util";
 import type {
   LLMProvider,

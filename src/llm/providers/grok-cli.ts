@@ -5,14 +5,14 @@
  * could never verify claims and confabulated DB/tech mechanisms in no-lookup mode. The CLI
  * grants web_search/web_fetch tools (on by default), letting Grok workers VERIFY before asserting.
  *
- * Mirrors ClaudeCliProvider: serialize messages, pass the system block via --system-prompt-override,
- * read the plain-text response from stdout. Spawned by name ("grok") — under `bun run`, the pinned
+ * Serializes messages, passes the system block via --system-prompt-override, reads the plain-text
+ * response from stdout. Spawned by name ("grok") — under `bun run`, the pinned
  * node_modules/.bin/grok precedes any global install on PATH.
  */
 
 import { LLMClientError } from "../errors";
 import { spawnWithIdleTimeout, IdleTimeoutError } from "./spawn-with-idle";
-import { serializeMessages } from "./claude-cli";
+import { serializeMessages } from "./message-util";
 import type {
   LLMProvider,
   ChatCompletionRequest,

@@ -7,7 +7,7 @@
  */
 
 import { Codex } from "@openai/codex-sdk";
-import { serializeMessages } from "./claude-cli";
+import { serializeMessages } from "./message-util";
 import { buildSdkResponse, toSdkError } from "./sdk-util";
 import type {
   LLMProvider,
