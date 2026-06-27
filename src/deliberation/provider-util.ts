@@ -18,12 +18,17 @@ export function extractProvider(modelId: string): string {
 /**
  * Whether a model's provider actually grants web search/fetch tools under webAccess.
  *
- * Mirrors tool-granting in src/llm/providers/claude-cli.ts (only the claude/anthropic provider
- * pushes WebSearch/WebFetch). codex (openai) and xai grant no web tools — so they must NOT receive
- * the verify-with-tools prompt during a --web-access run: it would instruct them to fetch/cite from
- * tools they lack, producing citation theater (fabricated "I fetched it / per the docs, lines N-M").
- * Keep this in sync if another provider gains web tools.
+ * All four providers now grant server-side web search via their official agent SDK / CLI:
+ * claude-agent (WebSearch/WebFetch), codex-sdk (webSearchEnabled), gemini-cli (google_web_search,
+ * on by default), grok-cli (web_search/web_fetch, on by default). So every provider may receive the
+ * verify-with-tools prompt under a --web-access run. Keep this in sync if a provider loses web tools.
  */
 export function providerGetsWebTools(modelId: string): boolean {
-  return extractProvider(modelId) === "anthropic";
+  const provider = extractProvider(modelId);
+  return (
+    provider === "anthropic" ||
+    provider === "openai" ||
+    provider === "google" ||
+    provider === "xai"
+  );
 }

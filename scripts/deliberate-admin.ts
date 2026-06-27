@@ -6,7 +6,7 @@
 import { loadConfigFromEnv, loadRoutingConfig } from "../src/config";
 import { createChatAdapter, createDeliberateFn } from "../src/deliberation/wire";
 import { ProviderRegistry } from "../src/llm/registry";
-import { XaiProvider } from "../src/llm/providers/xai";
+import { GrokCliProvider } from "../src/llm/providers/grok-cli";
 import { ClaudeCliProvider } from "../src/llm/providers/claude-cli";
 import type { LLMProvider } from "../src/llm/types";
 import { ModelRegistry } from "../src/model/registry";
@@ -61,7 +61,7 @@ async function main() {
   providers.push(new (await import("../src/llm/providers/gemini-cli")).GeminiCliProvider());
   providers.push(new (await import("../src/llm/providers/codex-cli")).CodexCliProvider());
   if (config.providers.xai) {
-    providers.push(new XaiProvider(config.providers.xai));
+    providers.push(new GrokCliProvider(config.providers.xai));
   }
 
   const providerRegistry = new ProviderRegistry(

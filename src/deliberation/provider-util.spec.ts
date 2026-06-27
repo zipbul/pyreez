@@ -16,11 +16,15 @@ describe("providerGetsWebTools", () => {
     expect(providerGetsWebTools("anthropic/claude-sonnet-4.6")).toBe(true);
   });
 
-  it("is false for an openai model (codex provider grants no web tools)", () => {
-    expect(providerGetsWebTools("openai/gpt-5.4")).toBe(false);
+  it("is true for an openai model (codex-sdk webSearchEnabled)", () => {
+    expect(providerGetsWebTools("openai/gpt-5.4")).toBe(true);
   });
 
-  it("is false for an xai model (no tool support)", () => {
-    expect(providerGetsWebTools("xai/grok-4-1-fast")).toBe(false);
+  it("is true for a google model (gemini-cli google_web_search on by default)", () => {
+    expect(providerGetsWebTools("google/gemini-3.5-flash")).toBe(true);
+  });
+
+  it("is true for an xai model (grok-cli has web_search/web_fetch on by default)", () => {
+    expect(providerGetsWebTools("xai/grok-4-1-fast")).toBe(true);
   });
 });

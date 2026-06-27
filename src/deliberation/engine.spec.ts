@@ -209,14 +209,16 @@ describe("executeRound", () => {
     expect(workerIndices).toEqual([0, 1, 2]);
   });
 
-  it("gates webAccess per worker by provider capability (tool-less providers get the no-lookup prompt)", async () => {
-    // Bug guard: a global --web-access flag must NOT reach a tool-less provider's prompt. claude
-    // gets WebSearch/WebFetch; openai/xai do not, so sending them "fetch the page" causes citation
-    // theater. The engine gates the per-worker webAccess passed to the prompt builder.
+  it("passes per-worker webAccess through the providerGetsWebTools gate (all current providers grant web tools)", async () => {
+    // The engine gates the per-worker webAccess passed to the prompt builder by provider capability.
+    // All current providers grant server-side web search (claude-agent WebSearch/WebFetch, codex-sdk
+    // webSearchEnabled, gemini-cli google_web_search, grok-cli web_search), so under --web-access every
+    // worker gets the verify-with-tools prompt. The gate predicate itself is unit-tested in
+    // provider-util.spec — if a future provider loses web tools it falls back to the no-lookup prompt.
     const team: TeamComposition = {
       workers: [
         { model: "anthropic/claude-sonnet-4.6", role: "worker" }, // gets web tools
-        { model: "openai/gpt-5.4", role: "worker" }, // no web tools
+        { model: "openai/gpt-5.4", role: "worker" }, // codex-sdk → gets web tools
       ],
     };
     const input = makeInput({ webAccess: true });
@@ -236,7 +238,7 @@ describe("executeRound", () => {
     await executeRound(ctx, 1, deps, config, input);
 
     expect(seen.find((s) => s.workerIndex === 0)?.webAccess).toBe(true); // anthropic → verify-with-tools
-    expect(seen.find((s) => s.workerIndex === 1)?.webAccess).toBe(false); // openai → no-lookup
+    expect(seen.find((s) => s.workerIndex === 1)?.webAccess).toBe(true); // openai (codex-sdk) → verify-with-tools
   });
 });
 

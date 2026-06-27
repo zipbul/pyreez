@@ -104,10 +104,10 @@ async function buildConfig(): Promise<HandlersConfig> {
   const { createChatAdapter, createDeliberateFn } = await import("./deliberation/wire");
   const { FileDeliberationStore } = await import("./deliberation/file-store");
   const { ProviderRegistry } = await import("./llm/registry");
-  const { ClaudeCliProvider } = await import("./llm/providers/claude-cli");
+  const { ClaudeAgentProvider } = await import("./llm/providers/claude-agent");
   const { GeminiCliProvider } = await import("./llm/providers/gemini-cli");
-  const { CodexCliProvider } = await import("./llm/providers/codex-cli");
-  const { XaiProvider } = await import("./llm/providers/xai");
+  const { CodexSdkProvider } = await import("./llm/providers/codex-sdk");
+  const { GrokCliProvider } = await import("./llm/providers/grok-cli");
   const { ModelRegistry } = await import("./model/registry");
   const { BunFileIO } = await import("./report/bun-file-io");
   const { FileRunLogger } = await import("./report/run-logger");
@@ -123,11 +123,11 @@ async function buildConfig(): Promise<HandlersConfig> {
 
   // Build providers
   const providers: import("./llm/types").LLMProvider[] = [];
-  providers.push(new ClaudeCliProvider());
+  providers.push(new ClaudeAgentProvider());
   providers.push(new GeminiCliProvider());
-  providers.push(new CodexCliProvider());
+  providers.push(new CodexSdkProvider());
   if (config.providers.xai) {
-    providers.push(new XaiProvider(config.providers.xai));
+    providers.push(new GrokCliProvider(config.providers.xai));
   }
 
   const providerRegistry = new ProviderRegistry(
