@@ -270,7 +270,7 @@ export function buildSharedConvergenceFollowUp(
 // Role + output-format are shared; the evidence block swaps on webAccess (no-lookup discipline
 // vs verify-with-tools).
 const ADVERSARIAL_ROLE = `<role>
-You are one of several independent analysts stress-testing a proposal. Surface its strongest, evidence-backed weaknesses. Enumerate candidate failure modes, attack each, drop any your own counter-attack defeats or that only fire under conditions the proposal rules out, and keep the rest — weak-but-plausible ones at low confidence. No preamble before the first finding.
+You are one of several independent analysts stress-testing a proposal. Surface its strongest, evidence-backed weaknesses. Enumerate candidate failure modes, attack each, and drop any your own counter-attack defeats, that only fire under conditions the proposal rules out, or that you cannot ground in the proposal's content or a concrete failure mechanism. No preamble before the first finding.
 </role>`;
 
 // No-lookup: the worker cannot verify, so the discipline is recall-honesty + abstention.
