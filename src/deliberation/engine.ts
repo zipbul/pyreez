@@ -32,7 +32,7 @@ import {
   createSharedContext,
   addRound,
 } from "./shared-context";
-import { extractProvider, providerGetsWebTools } from "./provider-util";
+import { extractProvider } from "./provider-util";
 import { classifyError, findLLMClientError, isRetryableError, normalizeErrorMessage, type CooldownEntry, type CooldownErrorType, type CooldownManager } from "./cooldown";
 
 import type { RoundInfo } from "./prompts";
@@ -511,10 +511,10 @@ async function callWithFallback(
 
   // Build messages — session continuation if history exists and model unchanged, full rebuild otherwise
   const buildMessages = (): ChatMessage[] => {
-    // Per-worker web access: a global --web-access run only actually grants tools to providers
-    // that support them (claude). Gate the verify-with-tools PROMPT on the SAME capability so a
-    // tool-less swapped-in/non-anthropic worker gets the no-lookup contract, not "fetch the page".
-    const workerWebAccess = (input.webAccess ?? false) && providerGetsWebTools(currentModel);
+    // Web access is a run-level choice: --web-access opens web tools for every worker. All providers
+    // support web search, so there's no per-provider gate here; if a future provider can't, the
+    // registry's capability gate hard-errors rather than silently downgrading.
+    const workerWebAccess = input.webAccess ?? false;
     // Session continuation: append follow-up to existing history (only if same model)
     if (isR2Plus && activeHistory && deps.buildFollowUp) {
       const lastRound = ctx.rounds[ctx.rounds.length - 1];

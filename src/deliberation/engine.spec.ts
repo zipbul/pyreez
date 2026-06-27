@@ -209,12 +209,10 @@ describe("executeRound", () => {
     expect(workerIndices).toEqual([0, 1, 2]);
   });
 
-  it("passes per-worker webAccess through the providerGetsWebTools gate (all current providers grant web tools)", async () => {
-    // The engine gates the per-worker webAccess passed to the prompt builder by provider capability.
-    // All current providers grant server-side web search (claude-agent WebSearch/WebFetch, codex-sdk
-    // webSearchEnabled, gemini-cli google_web_search, grok-cli web_search), so under --web-access every
-    // worker gets the verify-with-tools prompt. The gate predicate itself is unit-tested in
-    // provider-util.spec — if a future provider loses web tools it falls back to the no-lookup prompt.
+  it("passes run-level webAccess to every worker (no per-provider gate; all providers grant web)", async () => {
+    // Web access is a run-level choice: --web-access opens web tools for every worker, since all
+    // providers grant server-side web search. There is no per-provider prompt gate; if a future
+    // provider can't do web, the registry's capability gate hard-errors instead of silently downgrading.
     const team: TeamComposition = {
       workers: [
         { model: "anthropic/claude-sonnet-4.6", role: "worker" }, // gets web tools
