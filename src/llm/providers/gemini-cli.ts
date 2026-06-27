@@ -6,11 +6,11 @@
 
 import { LLMClientError } from "../errors";
 import { spawnWithIdleTimeout, IdleTimeoutError } from "./spawn-with-idle";
+import { serializeMessages } from "./message-util";
 import type {
   LLMProvider,
   ChatCompletionRequest,
   ChatCompletionResponse,
-  ChatMessage,
 } from "../types";
 
 /** Kill CLI subprocess after 5 minutes of no stdout/stderr activity. */
@@ -26,31 +26,6 @@ export function toGeminiCliModelId(pyreezId: string): string {
     : pyreezId;
 }
 
-/**
- * Serialize chat messages into a single prompt string for `gemini -p`.
- */
-export function serializeMessages(messages: ChatMessage[]): {
-  system: string | undefined;
-  prompt: string;
-} {
-  const systemParts: string[] = [];
-  const conversationParts: string[] = [];
-
-  for (const msg of messages) {
-    if (msg.role === "system") {
-      systemParts.push(msg.content ?? "");
-    } else if (msg.role === "user") {
-      conversationParts.push(msg.content ?? "");
-    } else if (msg.role === "assistant") {
-      conversationParts.push(`[Assistant]: ${msg.content ?? ""}`);
-    }
-  }
-
-  return {
-    system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
-    prompt: conversationParts.join("\n\n"),
-  };
-}
 
 export class GeminiCliProvider implements LLMProvider {
   readonly name = "google" as const;

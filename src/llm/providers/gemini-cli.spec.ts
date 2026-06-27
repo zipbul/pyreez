@@ -1,15 +1,12 @@
 /**
- * Unit tests for GeminiCliProvider, toGeminiCliModelId, and serializeMessages.
+ * Unit tests for GeminiCliProvider and toGeminiCliModelId.
+ * (serializeMessages is shared in message-util and tested in message-util.spec.)
  */
 
 import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { LLMClientError } from "../errors";
 import { IdleTimeoutError } from "./spawn-with-idle";
-import {
-  GeminiCliProvider,
-  toGeminiCliModelId,
-  serializeMessages,
-} from "./gemini-cli";
+import { GeminiCliProvider, toGeminiCliModelId } from "./gemini-cli";
 
 // -- Pure functions --
 
@@ -20,51 +17,6 @@ describe("toGeminiCliModelId", () => {
 
   it("should return id unchanged when no google/ prefix", () => {
     expect(toGeminiCliModelId("gemini-2.5-pro")).toBe("gemini-2.5-pro");
-  });
-});
-
-describe("serializeMessages", () => {
-  it("should extract system messages separately", () => {
-    const result = serializeMessages([
-      { role: "system", content: "You are helpful." },
-      { role: "user", content: "Hello" },
-    ]);
-    expect(result.system).toBe("You are helpful.");
-    expect(result.prompt).toBe("Hello");
-  });
-
-  it("should join multiple system messages with double newline", () => {
-    const result = serializeMessages([
-      { role: "system", content: "Rule 1" },
-      { role: "system", content: "Rule 2" },
-      { role: "user", content: "Hi" },
-    ]);
-    expect(result.system).toBe("Rule 1\n\nRule 2");
-  });
-
-  it("should return undefined system when no system messages", () => {
-    const result = serializeMessages([
-      { role: "user", content: "Hello" },
-    ]);
-    expect(result.system).toBeUndefined();
-  });
-
-  it("should prefix assistant messages with role marker", () => {
-    const result = serializeMessages([
-      { role: "user", content: "Q?" },
-      { role: "assistant", content: "A." },
-      { role: "user", content: "Follow up" },
-    ]);
-    expect(result.prompt).toBe("Q?\n\n[Assistant]: A.\n\nFollow up");
-  });
-
-  it("should handle null content gracefully", () => {
-    const result = serializeMessages([
-      { role: "system", content: null },
-      { role: "user", content: null },
-    ]);
-    expect(result.system).toBe("");
-    expect(result.prompt).toBe("");
   });
 });
 
