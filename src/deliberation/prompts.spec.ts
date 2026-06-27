@@ -656,8 +656,12 @@ describe("buildAdversarialDebateR2", () => {
   it("approach re-injects a conditional substantive-critique rule (add if one survives, else say so — no quota)", () => {
     const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
     expect(user).toMatch(/If a new substantive, falsifiable critique survives your counter-attack, add it/i);
-    // anti-quota with a non-skippable fallback: if nothing new, refute the weakest peer (no free exit, no filler)
-    expect(user).toMatch(/pick the peer finding you judge weakest and try to refute it/i);
+    // anti-quota with a non-skippable fallback: if nothing new, engage the weakest peer finding (no free
+    // exit, no filler). Folded into a finding's fields (closing-compatible) rather than a standalone
+    // holds/refuted artifact, which contradicted the closing's "no separate per-peer sections" + the
+    // output verdict schema (severity/confidence). Contradiction was benign in output (R2 n=6: 0 per-peer
+    // sections) but removed for prompt consistency.
+    expect(user).toMatch(/engage the weakest peer finding head-on within a finding/i);
   });
 
   it("webAccess swaps the no-lookup contract for a verify-with-tools contract", () => {

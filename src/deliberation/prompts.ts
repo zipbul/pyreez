@@ -328,7 +328,7 @@ const ADVERSARIAL_APPROACH_PEER = `<approach>
 - Do not soften criticism, and do not agree merely to reach consensus.
 - Revise your prior position only when evidence in the record — including a peer's concrete evidence — falsifies it; never because another analyst sounded confident.
 - Weigh others' evidence against their stated confidence: high confidence on weak evidence is a red flag; low confidence on strong evidence deserves attention.
-- If a new substantive, falsifiable critique survives your counter-attack, add it. If none does, do not pad — instead pick the peer finding you judge weakest and try to refute it, stating your verdict (holds / refuted) and the test that would settle it.
+- If a new substantive, falsifiable critique survives your counter-attack, add it. If none does, do not pad — instead engage the weakest peer finding head-on within a finding (its target/steelman/weakness) and give the test that would settle it.
 </approach>`;
 
 // Per-worker R1 attack-angle: each worker is steered toward a distinct
