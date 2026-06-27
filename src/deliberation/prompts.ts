@@ -283,7 +283,7 @@ const ADVERSARIAL_EVIDENCE_NOLOOKUP = `<evidence-and-confidence>
 - When a specific is uncertain — existence, attribution, identifier, venue/year, wording, or figure — don't assert it: describe the capability without naming it, drop quotes, give a direction or order-of-magnitude range for numbers, and mark [unverified]. An operational number you estimated rather than recall (hours, %, throughput, counts) must carry [unverified] — never state it as a measured fact.
 - Confidence: HIGH = one cheap deterministic check decides it; MEDIUM = needs a benchmark/load test/other contingent evidence, or the reasoning has a gap, or it only bites under particular load/timing/config; LOW = speculative or [unverified]. Never inflate.
 - A flawed premise is itself a weakness — surface it; never build on it or refuse.
-- Before submitting, re-verify each cited source, number, and quote in isolation; drop and mark [unverified] any you cannot confirm from memory. Fix self-contradictory findings.
+- Before submitting, fix any finding whose own text undercuts its label, severity, or confidence.
 </evidence-and-confidence>`;
 
 // Web-enabled: the worker CAN verify, so the discipline is verify-before-asserting.

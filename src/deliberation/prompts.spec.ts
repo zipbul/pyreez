@@ -635,7 +635,7 @@ describe("buildAdversarialDebateR2", () => {
     expect(sys).toMatch(/evidence:.*reasoning chain/i);
   });
 
-  it("reasoning-depth + CoVe levers: staged framing, reason-before-verdict order, factored isolation, abstention", () => {
+  it("reasoning-depth levers: staged framing, reason-before-verdict order, pre-submit consistency, abstention", () => {
     const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
     // D3 staged framing (depth without banned CoT)
     expect(sys).toMatch(/enumerate candidate failure modes/i);
@@ -643,16 +643,14 @@ describe("buildAdversarialDebateR2", () => {
     // D2 de-commit-first: the merged verdict line comes AFTER the reasoning fields (weakness/evidence)
     expect(sys.indexOf("weakness:")).toBeLessThan(sys.indexOf("verdict:"));
     expect(sys.indexOf("evidence:")).toBeLessThan(sys.indexOf("verdict:"));
-    // F1 factored isolated verification (CoVe step iii): re-judge each cited item IN ISOLATION by memory
-    // of the source, dropping only what you cannot confirm — so a confirmable exact-recall citation is not
-    // blanket-downgraded (the "exact recall only" permission stays meaningful).
-    expect(sys).toMatch(/re-verify each cited source, number, and quote in isolation/i);
-    expect(sys).toMatch(/cannot confirm from memory/i);
     // confidence calibrated by falsifier decisiveness (replaces self-assessed "deductively tight", which
     // measured ~65% inflated): contingent/load-dependent failures cap at MEDIUM
     expect(sys).toMatch(/it only bites under particular load\/timing\/config/i);
-    // self-consistency check (catches internal-contradiction defects with no external source)
-    expect(sys).toMatch(/fix self-contradictory findings/i);
+    // pre-submit check is internal-contradiction only. The CoVe cited-item re-verify clause was measured
+    // ineffective even on a citation-prone task ([unverified] marks stayed 0 with and without it, version
+    // fabrication unchanged) and removed — keep only the self-consistency fix.
+    expect(sys).toMatch(/whose own text undercuts its label/i);
+    expect(sys).not.toMatch(/re-verify each cited source/i);
   });
 
   it("approach re-injects a conditional substantive-critique rule (add if one survives, else say so — no quota)", () => {
