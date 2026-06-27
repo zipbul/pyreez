@@ -10,6 +10,7 @@ import type { LLMProvider, ChatCompletionRequest, ChatCompletionResponse } from 
 function fakeProvider(name: string): LLMProvider {
   return {
     name: name as LLMProvider["name"],
+    capabilities: { web: true, effort: true, fileAccess: true },
     chat: async (_req: ChatCompletionRequest): Promise<ChatCompletionResponse> => {
       throw new Error("not implemented");
     },

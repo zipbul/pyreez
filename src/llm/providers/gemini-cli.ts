@@ -54,6 +54,8 @@ export function serializeMessages(messages: ChatMessage[]): {
 
 export class GeminiCliProvider implements LLMProvider {
   readonly name = "google" as const;
+  // gemini CLI has no reasoning-effort flag; google_web_search is on by default; honors fileAccess via cwd.
+  readonly capabilities = { web: true, effort: false, fileAccess: true } as const;
 
   async chat(
     request: ChatCompletionRequest,

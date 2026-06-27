@@ -41,6 +41,7 @@ export function toGrokEffort(effort: string): string {
 
 export class GrokCliProvider implements LLMProvider {
   readonly name = "xai" as const;
+  readonly capabilities = { web: true, effort: true, fileAccess: false } as const;
 
   constructor(private readonly config: GrokCliProviderConfig) {}
 

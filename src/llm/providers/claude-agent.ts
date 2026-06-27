@@ -19,6 +19,7 @@ const FILE_TOOLS = ["Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"
 
 export class ClaudeAgentProvider implements LLMProvider {
   readonly name = "anthropic" as const;
+  readonly capabilities = { web: true, effort: true, fileAccess: false } as const;
 
   async chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const model = toCliModelId(request.model);

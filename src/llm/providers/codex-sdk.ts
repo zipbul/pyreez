@@ -22,6 +22,7 @@ export function toCodexModelId(pyreezId: string): string {
 
 export class CodexSdkProvider implements LLMProvider {
   readonly name = "openai" as const;
+  readonly capabilities = { web: true, effort: true, fileAccess: false } as const;
   private readonly codex: Codex;
 
   constructor() {

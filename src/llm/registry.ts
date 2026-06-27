@@ -4,6 +4,7 @@
  */
 
 import { LLMClientError } from "./errors";
+import { gateCapabilities } from "./capabilities";
 import type {
   ProviderName,
   LLMProvider,
@@ -46,6 +47,9 @@ export class ProviderRegistry {
       );
     }
 
-    return provider.chat(request);
+    // Gate the request against the provider's declared capabilities: hard-error on unsupported
+    // correctness capabilities (web/file), strip soft ones (effort) so they aren't silently ignored.
+    const { request: gated } = gateCapabilities(request, provider.capabilities);
+    return provider.chat(gated);
   }
 }

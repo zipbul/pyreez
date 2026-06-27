@@ -104,10 +104,7 @@ async function buildConfig(): Promise<HandlersConfig> {
   const { createChatAdapter, createDeliberateFn } = await import("./deliberation/wire");
   const { FileDeliberationStore } = await import("./deliberation/file-store");
   const { ProviderRegistry } = await import("./llm/registry");
-  const { ClaudeAgentProvider } = await import("./llm/providers/claude-agent");
-  const { GeminiCliProvider } = await import("./llm/providers/gemini-cli");
-  const { CodexSdkProvider } = await import("./llm/providers/codex-sdk");
-  const { GrokCliProvider } = await import("./llm/providers/grok-cli");
+  const { buildProviders } = await import("./llm/providers");
   const { ModelRegistry } = await import("./model/registry");
   const { BunFileIO } = await import("./report/bun-file-io");
   const { FileRunLogger } = await import("./report/run-logger");
@@ -121,14 +118,8 @@ async function buildConfig(): Promise<HandlersConfig> {
   const deliberationStore = new FileDeliberationStore(".pyreez/deliberations", fileIO);
   const runLogger = new FileRunLogger(".pyreez/runs", fileIO);
 
-  // Build providers
-  const providers: import("./llm/types").LLMProvider[] = [];
-  providers.push(new ClaudeAgentProvider());
-  providers.push(new GeminiCliProvider());
-  providers.push(new CodexSdkProvider());
-  if (config.providers.xai) {
-    providers.push(new GrokCliProvider(config.providers.xai));
-  }
+  // Build providers (single registration point)
+  const providers = buildProviders(config.providers);
 
   const providerRegistry = new ProviderRegistry(
     providers,

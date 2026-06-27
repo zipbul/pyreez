@@ -11,8 +11,21 @@ export type ProviderName =
   | "openai"
   | "xai";
 
+/**
+ * What a provider can honor. Declared per provider so the registry can gate requests
+ * instead of letting providers silently ignore unsupported capabilities.
+ * - web/fileAccess are correctness-affecting → gate hard-errors if requested but unsupported.
+ * - effort is a soft tuning knob → gate strips + records (degraded, not wrong).
+ */
+export interface CapabilitySet {
+  readonly web: boolean;
+  readonly effort: boolean;
+  readonly fileAccess: boolean;
+}
+
 export interface LLMProvider {
   readonly name: ProviderName;
+  readonly capabilities: CapabilitySet;
   chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse>;
 }
 
@@ -46,7 +59,6 @@ export interface ChatCompletionRequest {
   stream?: boolean;
   tools?: Tool[];
   tool_choice?: "auto" | "required" | "none";
-  response_format?: { type: "text" | "json_object" };
   seed?: number;
   stop?: string[];
   /** Enable read-only file access tools for this request.

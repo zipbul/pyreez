@@ -34,6 +34,7 @@ function makeResponse(model: string): ChatCompletionResponse {
 function makeProvider(name: ProviderName, chatImpl?: LLMProvider["chat"]): LLMProvider {
   return {
     name,
+    capabilities: { web: true, effort: true, fileAccess: true },
     chat: chatImpl ?? mock((req: ChatCompletionRequest) => Promise.resolve(makeResponse(req.model))),
   };
 }
