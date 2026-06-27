@@ -41,6 +41,7 @@ export class CodexSdkProvider implements LLMProvider {
         sandboxMode: "read-only",
         webSearchEnabled: request.webAccess ?? false,
         skipGitRepoCheck: true,
+        ...(request.reasoning_effort ? { modelReasoningEffort: request.reasoning_effort } : {}),
       } as any);
       const turn: any = await thread.run(input);
       return buildSdkResponse(turn.finalResponse ?? "", request.model, turn.usage ?? undefined);
