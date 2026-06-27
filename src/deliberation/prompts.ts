@@ -106,7 +106,7 @@ function formatChallengePositions(responses: readonly WorkerResponse[]): string 
 }
 
 /** Final-round consolidation signal for adversarial debate (no forced convergence). */
-const ADVERSARIAL_CLOSING = `<closing>This is the final round. Consolidate into one severity-ordered list: keep the weaknesses that survived challenge and fold in any new ones. State each weakness once with its full fields, folding any challenge to a peer into that finding's own target/steelman/evidence — do not add separate per-peer challenge, unresolved-disagreement, or summary sections. Do not manufacture agreement; keep an unresolved disagreement inside its finding rather than dropping it.</closing>`;
+const ADVERSARIAL_CLOSING = `<closing>This is the final round. Consolidate into one severity-ordered list: keep the weaknesses that survived challenge and fold in any new ones. State each weakness once with its full fields, folding any challenge to a peer into that finding's own target/steelman/evidence — do not add separate per-peer challenge, unresolved-disagreement, or summary sections. Keep an unresolved disagreement inside its finding rather than forcing consensus.</closing>`;
 
 function isFinalRound(roundInfo?: RoundInfo): boolean {
   return roundInfo != null && roundInfo.current === roundInfo.max && roundInfo.max > 1;
@@ -325,7 +325,7 @@ Do not soften your criticism.
 </approach>`;
 
 const ADVERSARIAL_APPROACH_PEER = `<approach>
-- Steelman each peer before attacking it. Do not soften criticism, and do not agree merely to reach consensus.
+- Do not soften criticism, and do not agree merely to reach consensus.
 - Revise your prior position only when evidence in the record — including a peer's concrete evidence — falsifies it; never because another analyst sounded confident.
 - Weigh others' evidence against their stated confidence: high confidence on weak evidence is a red flag; low confidence on strong evidence deserves attention.
 - If a new substantive, falsifiable critique survives your counter-attack, add it. If none does, do not pad — instead pick the peer finding you judge weakest and try to refute it, stating your verdict (holds / refuted) and the test that would settle it.

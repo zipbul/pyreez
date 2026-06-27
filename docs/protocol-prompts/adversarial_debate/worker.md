@@ -95,7 +95,7 @@ Position: Cannot decide without traffic profile. If reads dominate and shape is 
 <host-instructions>Tie each point to the team's stated constraints (4 people, 6-month MVP) and be concrete about the conditions under which it applies.</host-instructions>
 
 <approach>
-- Steelman each peer before attacking it. Do not soften criticism, and do not agree merely to reach consensus.
+- Do not soften criticism, and do not agree merely to reach consensus.
 - Revise your prior position only when evidence in the record — including a peer's concrete evidence — falsifies it; never because another analyst sounded confident.
 - Weigh others' evidence against their stated confidence: high confidence on weak evidence is a red flag; low confidence on strong evidence deserves attention.
 - If a new substantive, falsifiable critique survives your counter-attack, add it. If none does, do not pad — instead pick the peer finding you judge weakest and try to refute it, stating your verdict (holds / refuted) and the test that would settle it.
@@ -103,7 +103,7 @@ Position: Cannot decide without traffic profile. If reads dominate and shape is 
 
 <attack-angle>Focus on operational failure — under what conditions does this break in production?</attack-angle>
 
-<closing>This is the final round. Consolidate into one severity-ordered list: keep the weaknesses that survived challenge and fold in any new ones. State each weakness once with its full fields, folding any challenge to a peer into that finding's own target/steelman/evidence — do not add separate per-peer challenge, unresolved-disagreement, or summary sections. Do not manufacture agreement; keep an unresolved disagreement inside its finding rather than dropping it.</closing>
+<closing>This is the final round. Consolidate into one severity-ordered list: keep the weaknesses that survived challenge and fold in any new ones. State each weakness once with its full fields, folding any challenge to a peer into that finding's own target/steelman/evidence — do not add separate per-peer challenge, unresolved-disagreement, or summary sections. Keep an unresolved disagreement inside its finding rather than forcing consensus.</closing>
 
 <task>Identify 3 specific conditions under which choosing PostgreSQL as the default database produces worse outcomes than MongoDB for a 4-person SaaS team launching an MVP within 6 months.</task>
 ```
@@ -122,7 +122,7 @@ Position: Cannot decide without traffic profile. If reads dominate and shape is 
 </positions-to-challenge>
 
 <approach>
-- Steelman each peer before attacking it. Do not soften criticism, and do not agree merely to reach consensus.
+- Do not soften criticism, and do not agree merely to reach consensus.
 - Revise your prior position only when evidence in the record — including a peer's concrete evidence — falsifies it; never because another analyst sounded confident.
 - Weigh others' evidence against their stated confidence: high confidence on weak evidence is a red flag; low confidence on strong evidence deserves attention.
 - If a new substantive, falsifiable critique survives your counter-attack, add it. If none does, do not pad — instead pick the peer finding you judge weakest and try to refute it, stating your verdict (holds / refuted) and the test that would settle it.
@@ -130,7 +130,7 @@ Position: Cannot decide without traffic profile. If reads dominate and shape is 
 
 <attack-angle>Focus on operational failure — under what conditions does this break in production?</attack-angle>
 
-<closing>This is the final round. Consolidate into one severity-ordered list: keep the weaknesses that survived challenge and fold in any new ones. State each weakness once with its full fields, folding any challenge to a peer into that finding's own target/steelman/evidence — do not add separate per-peer challenge, unresolved-disagreement, or summary sections. Do not manufacture agreement; keep an unresolved disagreement inside its finding rather than dropping it.</closing>
+<closing>This is the final round. Consolidate into one severity-ordered list: keep the weaknesses that survived challenge and fold in any new ones. State each weakness once with its full fields, folding any challenge to a peer into that finding's own target/steelman/evidence — do not add separate per-peer challenge, unresolved-disagreement, or summary sections. Keep an unresolved disagreement inside its finding rather than forcing consensus.</closing>
 ```
 
 ## Notes (코드 fact 출처)
