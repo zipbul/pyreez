@@ -215,7 +215,7 @@ export async function handleAcceptance(
           const alignment = await classifyAlignment(
             w.model,
             async (model, messages) => {
-              const r = await config.chatFn!(model, messages, { temperature: 0 });
+              const r = await config.chatFn!(model, messages);
               return { content: r.content };
             },
             args.task,
@@ -235,7 +235,7 @@ export async function handleAcceptance(
 
       const judgeWorker = async (w: typeof args.workers[number]) => {
         const messages = buildAcceptanceMessages(args.synthesis, w.original_position, args.task);
-        const result = await config.chatFn!(w.model, messages, { temperature: 0 });
+        const result = await config.chatFn!(w.model, messages);
         totalInput += result.inputTokens;
         totalOutput += result.outputTokens;
 

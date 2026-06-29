@@ -69,8 +69,6 @@ type RawChatFn = (
   request: {
     model: string;
     messages: ChatMessage[];
-    temperature?: number;
-    top_p?: number;
     fileAccess?: boolean;
     webAccess?: boolean;
     reasoning_effort?: number;
@@ -91,8 +89,6 @@ export function createChatAdapter(
     const response = await chatFn({
       model,
       messages,
-      ...(params?.temperature != null ? { temperature: params.temperature } : {}),
-      ...(params?.top_p != null ? { top_p: params.top_p } : {}),
       ...(params?.fileAccess ? { fileAccess: true } : {}),
       ...(params?.webAccess ? { webAccess: true } : {}),
       ...(params?.reasoning_effort != null ? { reasoning_effort: params.reasoning_effort } : {}),
@@ -239,7 +235,6 @@ export function createDeliberateFn(
     // 6. Build engine config
     const effectiveMaxRounds = input.maxRounds ?? defaultMaxRounds(protocol);
     const workerGenParams: GenerationParams = {
-      temperature: 1.0,
       ...(input.fileAccess ? { fileAccess: true } : {}),
       ...(input.webAccess ? { webAccess: true } : {}),
       ...(input.reasoning_effort ? { reasoning_effort: input.reasoning_effort } : {}),

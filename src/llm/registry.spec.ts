@@ -131,14 +131,14 @@ describe("ProviderRegistry", () => {
     await registry.chat({
       model: "anthropic/claude-sonnet-4.6",
       messages,
-      temperature: 0.5,
+      reasoning_effort: 7,
     });
 
     // Assert
     const call = chatMock.mock.calls[0]![0] as ChatCompletionRequest;
     expect(call.model).toBe("anthropic/claude-sonnet-4.6");
     expect(call.messages).toEqual(messages);
-    expect(call.temperature).toBe(0.5);
+    expect(call.reasoning_effort).toBe(7);
   });
 
   it("should handle multiple providers correctly", async () => {

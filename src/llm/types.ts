@@ -40,33 +40,12 @@ export interface ChatMessage {
   tool_call_id?: string;
 }
 
-export interface ToolFunction {
-  name: string;
-  description?: string;
-  parameters?: Record<string, unknown>;
-}
-
-export interface Tool {
-  type: "function";
-  function: ToolFunction;
-}
-
 export interface ChatCompletionRequest {
   model: string;
   messages: ChatMessage[];
-  temperature?: number;
-  top_p?: number;
-  stream?: boolean;
-  tools?: Tool[];
-  tool_choice?: "auto" | "required" | "none";
-  seed?: number;
-  stop?: string[];
-  /** Enable read-only file access tools for this request.
-   * CLI providers: switch to read-only tool mode.
-   * API providers: include file-access tool definitions. */
+  /** Enable read-only file access for this request (provider maps to its own mechanism). */
   fileAccess?: boolean;
-  /** Enable web lookup tools (WebSearch/WebFetch) so the worker can VERIFY citations
-   * instead of recalling them. Claude CLI only (other providers ignore). */
+  /** Enable web search/fetch so the worker can VERIFY claims instead of recalling them. */
   webAccess?: boolean;
   /** Reasoning effort on a 1–10 scale. Each provider buckets it to its own level set. */
   reasoning_effort?: number;

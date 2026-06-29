@@ -42,8 +42,6 @@ export type Protocol =
 export type ReasoningEffort = number;
 
 export interface GenerationParams {
-  readonly temperature?: number;
-  readonly top_p?: number;
   readonly fileAccess?: boolean;
   readonly webAccess?: boolean;
   readonly reasoning_effort?: ReasoningEffort;

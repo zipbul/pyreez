@@ -195,13 +195,13 @@ describe("createChatAdapter", () => {
     await adapter(
       "openai/gpt-4.1",
       [{ role: "user", content: "test" }],
-      { temperature: 0.5, top_p: 0.9 },
+      { webAccess: true, reasoning_effort: 7 },
     );
 
     expect(rawChat).toHaveBeenCalledTimes(1);
     const req = rawChat.mock.calls[0]![0] as any;
-    expect(req.temperature).toBe(0.5);
-    expect(req.top_p).toBe(0.9);
+    expect(req.webAccess).toBe(true);
+    expect(req.reasoning_effort).toBe(7);
   });
 
   it("should set truncated=true when finish_reason is 'length'", async () => {

@@ -781,7 +781,7 @@ describe("GenerationParams forwarding", () => {
     const team = makeTeam(1);
     const input = makeInput();
     const config = makeConfig({
-      workerGenParams: { temperature: 1.0, top_p: 0.9 },
+      workerGenParams: { webAccess: true, reasoning_effort: 8 },
     });
 
     const chatCalls: { model: string; params: any }[] = [];
@@ -800,7 +800,7 @@ describe("GenerationParams forwarding", () => {
     // Worker call should have workerGenParams
     const workerCall = chatCalls.find((c) => c.model.startsWith("worker/"));
     expect(workerCall).toBeDefined();
-    expect(workerCall!.params).toEqual({ temperature: 1.0, top_p: 0.9 });
+    expect(workerCall!.params).toEqual({ webAccess: true, reasoning_effort: 8 });
   });
 
   it("should pass undefined params when genParams are not configured", async () => {
