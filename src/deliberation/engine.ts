@@ -19,6 +19,7 @@ import type {
   FailedWorker,
   GenerationParams,
   ModelSwap,
+  AggregationMethod,
   Protocol,
   Round,
   SharedContext,
@@ -884,7 +885,7 @@ function sparseSelect(
  */
 function aggregateEvaluationResults(
   responses: readonly WorkerResponse[],
-  method: import("./types").AggregationMethod,
+  method: AggregationMethod,
 ) {
   const parsed = responses.map((r) => {
     const scoreMatch = r.content.match(/(?:score|rating|점수|overall)\s*[:=]?\s*(\d+(?:\.\d+)?)/i)

@@ -10,6 +10,7 @@
  */
 
 import type { TaskNature } from "./task-nature";
+import type { Capabilities, FileAccess } from "../llm/types";
 
 // -- Protocol --
 
@@ -33,19 +34,12 @@ export type Protocol =
 
 // -- Generation Parameters --
 
-/**
- * Optional LLM generation parameters passed through to providers.
- * Controls temperature, response length, and sampling.
- */
 /** Provider-agnostic reasoning effort on a 1–10 scale. Each provider buckets it to its own
  *  level set (claude/grok: low..max; codex: minimal..xhigh); gemini has no effort knob. */
 export type ReasoningEffort = number;
 
-export interface GenerationParams {
-  readonly fileAccess?: boolean;
-  readonly webAccess?: boolean;
-  readonly reasoning_effort?: ReasoningEffort;
-}
+/** Per-call capabilities. Same shape as the LLM-layer request capabilities — one source of truth. */
+export type GenerationParams = Capabilities;
 
 // -- Team Composition --
 
@@ -213,9 +207,8 @@ export interface DeliberateInput {
   readonly workerOrder?: readonly number[];
 
   /** Enable read-only file access for workers during deliberation.
-   * CLI providers: enables file read tools + sets cwd to project directory.
-   * API providers: enables function calling with read-only file tools. */
-  readonly fileAccess?: boolean;
+   * "read" (review files, no writes) or "write" (also edit). Provider maps to its own mechanism. */
+  readonly fileAccess?: FileAccess;
 
   /** Enable web lookup tools so workers VERIFY citations instead of recalling them.
    * Claude CLI only. Significant cost/latency — opt-in. */

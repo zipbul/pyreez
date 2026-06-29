@@ -57,10 +57,10 @@ describe("GeminiCliProvider", () => {
     expect(opts.cwd).toBe("/tmp");
   });
 
-  it("should use process.cwd() when fileAccess is true", async () => {
+  it("should use process.cwd() when fileAccess is set", async () => {
     setSpawnResult(JSON.stringify({ response: "ok" }));
     const provider = new GeminiCliProvider();
-    await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }], fileAccess: true });
+    await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }], fileAccess: "read" });
     const opts = spawnMod.spawnWithIdleTimeout.mock.calls[0]![1] as { cwd: string };
     expect(opts.cwd).toBe(process.cwd());
   });

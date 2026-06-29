@@ -10,7 +10,7 @@
  * @module Deliberation Wire
  */
 
-import type { ChatMessage, ChatCompletionResponse } from "../llm/types";
+import type { ChatMessage, ChatCompletionResponse, FileAccess } from "../llm/types";
 import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput, GenerationParams, Protocol } from "./types";
 import type { ChatResult, EngineDeps, EngineConfig, FallbackDeps } from "./engine";
@@ -20,6 +20,7 @@ import type { DeliberationStore } from "./store-types";
 import { composeTeam } from "./team-composer";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
+import type { CooldownManager } from "./cooldown";
 import {
   buildSharedConvergenceR1,
   buildSharedConvergenceR2,
@@ -43,7 +44,7 @@ export interface WireDeps {
   readonly chat: (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<ChatResult>;
   readonly store?: DeliberationStore;
   /** Shared CooldownManager (process-scoped). When omitted, a per-call instance is created. */
-  readonly cooldown?: import("./cooldown").CooldownManager;
+  readonly cooldown?: CooldownManager;
 }
 
 // -- Think Tag Stripping --
@@ -71,7 +72,7 @@ type RawChatFn = (
     model: string;
     system?: string;
     messages: ChatMessage[];
-    fileAccess?: boolean;
+    fileAccess?: FileAccess;
     webAccess?: boolean;
     reasoning_effort?: number;
   },
@@ -95,7 +96,7 @@ export function createChatAdapter(
       model,
       messages: conversation,
       ...(system ? { system } : {}),
-      ...(params?.fileAccess ? { fileAccess: true } : {}),
+      ...(params?.fileAccess ? { fileAccess: params.fileAccess } : {}),
       ...(params?.webAccess ? { webAccess: true } : {}),
       ...(params?.reasoning_effort != null ? { reasoning_effort: params.reasoning_effort } : {}),
     });
@@ -119,7 +120,7 @@ export function createChatAdapter(
  */
 function createEngineDepsForProtocol(
   protocol: Protocol,
-  chatFn: (model: string, messages: import("../llm/types").ChatMessage[], params?: GenerationParams) => Promise<ChatResult>,
+  chatFn: (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<ChatResult>,
   webAccess = false,
 ): EngineDeps {
   switch (protocol) {
@@ -241,7 +242,7 @@ export function createDeliberateFn(
     // 6. Build engine config
     const effectiveMaxRounds = input.maxRounds ?? defaultMaxRounds(protocol);
     const workerGenParams: GenerationParams = {
-      ...(input.fileAccess ? { fileAccess: true } : {}),
+      ...(input.fileAccess ? { fileAccess: input.fileAccess } : {}),
       ...(input.webAccess ? { webAccess: true } : {}),
       ...(input.reasoning_effort ? { reasoning_effort: input.reasoning_effort } : {}),
     };

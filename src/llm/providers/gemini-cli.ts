@@ -53,7 +53,8 @@ export class GeminiCliProvider implements LLMProvider {
     // can read context but never edit/run, so deliberation cannot mutate the workspace. This
     // replaces the former `-y` (YOLO: auto-approve ALL tools incl. writes), which gave gemini
     // write/shell access the other providers never had.
-    args.push("--approval-mode", "plan");
+    // Map the file-access level: read (and no-access) → plan (read-only, no edits); write → auto_edit.
+    args.push("--approval-mode", request.fileAccess === "write" ? "auto_edit" : "plan");
     // gemini 0.40+ aborts (exit 55) in an untrusted directory; both cwd modes (/tmp and the
     // project dir under fileAccess) are untrusted. Trust the workspace for this headless session.
     args.push("--skip-trust");

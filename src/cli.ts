@@ -7,7 +7,8 @@
  *   bun run src/cli.ts acceptance --task "..." --synthesis "..." --workers '[...]'
  */
 
-import type { HandlersConfig } from "./handlers";
+import type { HandlersConfig, HandlerResult } from "./handlers";
+import type { FileAccess } from "./llm/types";
 import { handleDeliberate, handleAcceptance } from "./handlers";
 import { CooldownStateSchema, AcceptanceWorkersArraySchema, parseWithSchema } from "./validation/schemas";
 
@@ -187,7 +188,7 @@ async function main(): Promise<void> {
 
   const config = await buildConfig();
 
-  let result: import("./handlers").HandlerResult;
+  let result: HandlerResult;
 
   switch (command) {
     case "models": {
@@ -224,6 +225,11 @@ async function main(): Promise<void> {
       if (reasoningEffort !== undefined && (!Number.isInteger(reasoningEffort) || reasoningEffort < 1 || reasoningEffort > 10)) {
         die(`--reasoning-effort must be an integer 1–10`);
       }
+      // File access level for host-delegated review: read (no writes) or write.
+      const fileAccess = flags["file-access"];
+      if (fileAccess !== undefined && fileAccess !== "read" && fileAccess !== "write") {
+        die(`--file-access must be "read" or "write"`);
+      }
 
       result = await handleDeliberate(config, {
         task: task!,
@@ -236,9 +242,9 @@ async function main(): Promise<void> {
         criteria,
         subject,
         aggregation: flags["aggregation"],
-        file_access: flags["file-access"] === "true" ? true : undefined,
+        file_access: fileAccess as FileAccess | undefined,
         web_access: flags["web-access"] === "true" ? true : undefined,
-        reasoning_effort: reasoningEffort as import("./deliberation/types").ReasoningEffort | undefined,
+        reasoning_effort: reasoningEffort,
         onRound: (round) => {
           const models = round.responses.map((r) => r.model).join(", ");
           const failed = round.failedWorkers?.length ?? 0;

@@ -17,7 +17,7 @@ describe("gateCapabilities", () => {
   });
 
   it("hard-errors when fileAccess is requested but unsupported", () => {
-    expect(() => gateCapabilities(req({ fileAccess: true }), { ...ALL, fileAccess: false })).toThrow(
+    expect(() => gateCapabilities(req({ fileAccess: "read" }), { ...ALL, fileAccess: false })).toThrow(
       /fileAccess/,
     );
   });
@@ -32,7 +32,7 @@ describe("gateCapabilities", () => {
   });
 
   it("passes supported capabilities through unchanged", () => {
-    const r = req({ webAccess: true, reasoning_effort: 7, fileAccess: true });
+    const r = req({ webAccess: true, reasoning_effort: 7, fileAccess: "read" });
     const { request, stripped } = gateCapabilities(r, ALL);
     expect(request).toBe(r);
     expect(stripped).toEqual([]);

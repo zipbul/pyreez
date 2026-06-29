@@ -6,6 +6,7 @@
 
 import type { RunLogger } from "./report/run-logger";
 import type { DeliberateInput, DeliberateOutput } from "./deliberation/types";
+import type { FileAccess, ChatMessage } from "./llm/types";
 import { NoModelsAvailableError } from "./deliberation/team-composer";
 import { TeamDegradedError } from "./deliberation/engine";
 import { buildAcceptanceMessages } from "./deliberation/prompts";
@@ -22,7 +23,7 @@ export interface HandlersConfig {
   };
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
   runLogger?: RunLogger;
-  chatFn?: (model: string, messages: import("./llm/types").ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
+  chatFn?: (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
 }
 
 /** Max characters for error messages. */
@@ -91,7 +92,7 @@ export async function handleDeliberate(
     criteria?: string;
     subject?: string;
     aggregation?: string;
-    file_access?: boolean;
+    file_access?: FileAccess;
     web_access?: boolean;
     reasoning_effort?: DeliberateInput["reasoning_effort"];
   },
@@ -133,7 +134,7 @@ export async function handleDeliberate(
         ...(args.subject ? { subject: args.subject } : {}),
         ...(args.aggregation ? { aggregation: args.aggregation as DeliberateInput["aggregation"] } : {}),
         ...(args.onRound ? { onRound: args.onRound } : {}),
-        ...(args.file_access ? { fileAccess: true } : {}),
+        ...(args.file_access ? { fileAccess: args.file_access } : {}),
         ...(args.web_access ? { webAccess: true } : {}),
         ...(args.reasoning_effort ? { reasoning_effort: args.reasoning_effort } : {}),
       };
