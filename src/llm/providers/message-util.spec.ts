@@ -3,7 +3,31 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { toCliModelId, serializeMessages } from "./message-util";
+import { toCliModelId, serializeMessages, bucketEffort } from "./message-util";
+
+describe("bucketEffort", () => {
+  const L5 = ["a", "b", "c", "d", "e"] as const;
+
+  it("maps the low end to the first level and the high end to the last", () => {
+    expect(bucketEffort(1, L5)).toBe("a");
+    expect(bucketEffort(10, L5)).toBe("e");
+  });
+
+  it("buckets the mid value to a middle level", () => {
+    expect(bucketEffort(5, L5)).toBe("c");
+  });
+
+  it("clamps out-of-range values into 1–10", () => {
+    expect(bucketEffort(0, L5)).toBe("a");
+    expect(bucketEffort(99, L5)).toBe("e");
+  });
+
+  it("works for a 5-level set used by codex (minimal..xhigh)", () => {
+    const codex = ["minimal", "low", "medium", "high", "xhigh"] as const;
+    expect(bucketEffort(1, codex)).toBe("minimal");
+    expect(bucketEffort(10, codex)).toBe("xhigh");
+  });
+});
 
 describe("toCliModelId", () => {
   it("should strip anthropic/ prefix and replace dots with dashes", () => {

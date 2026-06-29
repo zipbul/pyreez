@@ -217,12 +217,12 @@ async function main(): Promise<void> {
       const criteria = flags["criteria"];
       const subject = flags["subject"];
       const questionsRaw = flags["questions"];
-      // Vendor reasoning-effort: the sanctioned depth lever (claude --effort / codex model_reasoning_effort).
-      // Caller opt-in only — no baked default. e.g. --reasoning-effort high for deep stress-tests.
-      const VALID_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
-      const reasoningEffort = flags["reasoning-effort"];
-      if (reasoningEffort !== undefined && !VALID_EFFORTS.has(reasoningEffort)) {
-        die(`--reasoning-effort must be one of: minimal, low, medium, high, xhigh`);
+      // Reasoning effort on a 1–10 scale (each provider buckets to its own levels).
+      // Caller opt-in only — no baked default. e.g. --reasoning-effort 8 for deep stress-tests.
+      const effortRaw = flags["reasoning-effort"];
+      const reasoningEffort = effortRaw !== undefined ? Number(effortRaw) : undefined;
+      if (reasoningEffort !== undefined && (!Number.isInteger(reasoningEffort) || reasoningEffort < 1 || reasoningEffort > 10)) {
+        die(`--reasoning-effort must be an integer 1–10`);
       }
 
       result = await handleDeliberate(config, {

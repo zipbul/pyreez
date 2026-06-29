@@ -7,7 +7,10 @@
  */
 
 import { Codex } from "@openai/codex-sdk";
-import { serializeMessages } from "./message-util";
+import { serializeMessages, bucketEffort } from "./message-util";
+
+// Codex effort vocabulary (has "minimal"; no "max").
+const CODEX_EFFORT = ["minimal", "low", "medium", "high", "xhigh"] as const;
 import { buildSdkResponse, toSdkError } from "./sdk-util";
 import type {
   LLMProvider,
@@ -42,7 +45,7 @@ export class CodexSdkProvider implements LLMProvider {
         sandboxMode: "read-only",
         webSearchEnabled: request.webAccess ?? false,
         skipGitRepoCheck: true,
-        ...(request.reasoning_effort ? { modelReasoningEffort: request.reasoning_effort } : {}),
+        ...(request.reasoning_effort ? { modelReasoningEffort: bucketEffort(request.reasoning_effort, CODEX_EFFORT) } : {}),
       } as any);
       const turn: any = await thread.run(input);
       return buildSdkResponse(turn.finalResponse ?? "", request.model, turn.usage ?? undefined);

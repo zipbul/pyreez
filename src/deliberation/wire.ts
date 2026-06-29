@@ -73,7 +73,7 @@ type RawChatFn = (
     top_p?: number;
     fileAccess?: boolean;
     webAccess?: boolean;
-    reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+    reasoning_effort?: number;
   },
 ) => Promise<ChatCompletionResponse>;
 

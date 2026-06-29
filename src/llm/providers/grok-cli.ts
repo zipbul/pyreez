@@ -12,7 +12,7 @@
 
 import { LLMClientError } from "../errors";
 import { spawnWithIdleTimeout, IdleTimeoutError } from "./spawn-with-idle";
-import { serializeMessages } from "./message-util";
+import { serializeMessages, bucketEffort } from "./message-util";
 import type {
   LLMProvider,
   ChatCompletionRequest,
@@ -34,10 +34,8 @@ export function toGrokCliModelId(pyreezId: string): string {
   return pyreezId.startsWith("xai/") ? pyreezId.slice("xai/".length) : pyreezId;
 }
 
-/** Map pyreez reasoning_effort to a Grok CLI --reasoning-effort value (Grok has no "minimal"). */
-export function toGrokEffort(effort: string): string {
-  return effort === "minimal" ? "low" : effort;
-}
+// Grok effort vocabulary (no "minimal"; has "max").
+const GROK_EFFORT = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export class GrokCliProvider implements LLMProvider {
   readonly name = "xai" as const;
@@ -65,7 +63,7 @@ export class GrokCliProvider implements LLMProvider {
     if (system) args.push("--system-prompt-override", system);
 
     if (request.reasoning_effort) {
-      args.push("--reasoning-effort", toGrokEffort(request.reasoning_effort));
+      args.push("--reasoning-effort", bucketEffort(request.reasoning_effort, GROK_EFFORT));
     }
 
     // Web search + web fetch tools are ON by default; disable them for no-lookup workers.

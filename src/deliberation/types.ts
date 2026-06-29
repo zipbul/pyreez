@@ -37,11 +37,9 @@ export type Protocol =
  * Optional LLM generation parameters passed through to providers.
  * Controls temperature, response length, and sampling.
  */
-/** Vendor reasoning-effort level. Mapped per provider:
- *  - claude CLI: `--effort <level>`
- *  - codex CLI:  `-c model_reasoning_effort=<level>`
- *  - gemini CLI: unsupported, silently ignored. */
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+/** Provider-agnostic reasoning effort on a 1–10 scale. Each provider buckets it to its own
+ *  level set (claude/grok: low..max; codex: minimal..xhigh); gemini has no effort knob. */
+export type ReasoningEffort = number;
 
 export interface GenerationParams {
   readonly temperature?: number;

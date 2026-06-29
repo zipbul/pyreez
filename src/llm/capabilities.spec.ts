@@ -23,7 +23,7 @@ describe("gateCapabilities", () => {
   });
 
   it("strips and records reasoning_effort when unsupported (soft)", () => {
-    const { request, stripped } = gateCapabilities(req({ reasoning_effort: "high" }), {
+    const { request, stripped } = gateCapabilities(req({ reasoning_effort: 7 }), {
       ...ALL,
       effort: false,
     });
@@ -32,7 +32,7 @@ describe("gateCapabilities", () => {
   });
 
   it("passes supported capabilities through unchanged", () => {
-    const r = req({ webAccess: true, reasoning_effort: "high", fileAccess: true });
+    const r = req({ webAccess: true, reasoning_effort: 7, fileAccess: true });
     const { request, stripped } = gateCapabilities(r, ALL);
     expect(request).toBe(r);
     expect(stripped).toEqual([]);

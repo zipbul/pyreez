@@ -6,7 +6,10 @@
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { serializeMessages, toCliModelId } from "./message-util";
+import { serializeMessages, toCliModelId, bucketEffort } from "./message-util";
+
+// Claude Agent SDK effort vocabulary (no "minimal"; has "max").
+const CLAUDE_EFFORT = ["low", "medium", "high", "xhigh", "max"] as const;
 import { buildSdkResponse, toSdkError } from "./sdk-util";
 import type {
   LLMProvider,
@@ -32,7 +35,7 @@ export class ClaudeAgentProvider implements LLMProvider {
       allowedTools: request.webAccess ? ["WebSearch", "WebFetch"] : [],
     };
     if (system) options.systemPrompt = system;
-    if (request.reasoning_effort) options.effort = request.reasoning_effort;
+    if (request.reasoning_effort) options.effort = bucketEffort(request.reasoning_effort, CLAUDE_EFFORT);
 
     try {
       let text = "";

@@ -68,8 +68,8 @@ export interface ChatCompletionRequest {
   /** Enable web lookup tools (WebSearch/WebFetch) so the worker can VERIFY citations
    * instead of recalling them. Claude CLI only (other providers ignore). */
   webAccess?: boolean;
-  /** Vendor reasoning-effort level. Provider maps to its own flag. */
-  reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  /** Reasoning effort on a 1–10 scale. Each provider buckets it to its own level set. */
+  reasoning_effort?: number;
 }
 
 // --- Response Types ---
