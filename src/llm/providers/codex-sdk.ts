@@ -7,7 +7,7 @@
  */
 
 import { Codex } from "@openai/codex-sdk";
-import { serializeMessages, bucketEffort } from "./message-util";
+import { composeSystemPrompt, flattenConversation, bucketEffort } from "./message-util";
 
 // Codex effort vocabulary (has "minimal"; no "max").
 const CODEX_EFFORT = ["minimal", "low", "medium", "high", "xhigh"] as const;
@@ -35,9 +35,8 @@ export class CodexSdkProvider implements LLMProvider {
 
   async chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const model = toCodexModelId(request.model);
-    // Codex has no system-prompt option — prepend the system block to the prompt text.
-    const { system, prompt } = serializeMessages(request.messages);
-    const input = system ? `${system}\n\n${prompt}` : prompt;
+    // Codex has no system-prompt option — frame the system block into the prompt.
+    const input = composeSystemPrompt(request.system, flattenConversation(request.messages));
 
     try {
       const thread = this.codex.startThread({

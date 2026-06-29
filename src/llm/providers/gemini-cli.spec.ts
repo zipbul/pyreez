@@ -316,19 +316,18 @@ describe("GeminiCliProvider", () => {
     expect(args).toContain("--skip-trust");
   });
 
-  it("should prepend system prompt to the -p value when system messages exist", async () => {
+  it("frames request.system into the -p value via the XML boundary (no native system flag)", async () => {
     setSpawnResult(JSON.stringify({ response: "ok" }));
     const provider = new GeminiCliProvider();
     await provider.chat({
       model: "google/gemini-3.1-pro-preview",
-      messages: [
-        { role: "system", content: "Be concise." },
-        { role: "user", content: "Hello" },
-      ],
+      system: "Be concise.",
+      messages: [{ role: "user", content: "Hello" }],
     });
     const args = spawnMod.spawnWithIdleTimeout.mock.calls[0]![0] as string[];
     const pIdx = args.indexOf("-p");
     const prompt = args[pIdx + 1]!;
+    expect(prompt).toContain("<system-instructions>");
     expect(prompt).toContain("Be concise.");
     expect(prompt).toContain("Hello");
   });

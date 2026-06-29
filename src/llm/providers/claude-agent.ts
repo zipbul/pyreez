@@ -6,7 +6,7 @@
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { serializeMessages, toCliModelId, bucketEffort } from "./message-util";
+import { flattenConversation, toCliModelId, bucketEffort } from "./message-util";
 
 // Claude Agent SDK effort vocabulary (no "minimal"; has "max").
 const CLAUDE_EFFORT = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -26,7 +26,7 @@ export class ClaudeAgentProvider implements LLMProvider {
 
   async chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const model = toCliModelId(request.model);
-    const { system, prompt } = serializeMessages(request.messages);
+    const prompt = flattenConversation(request.messages);
 
     const options: Record<string, unknown> = {
       model,
@@ -34,7 +34,7 @@ export class ClaudeAgentProvider implements LLMProvider {
       disallowedTools: FILE_TOOLS,
       allowedTools: request.webAccess ? ["WebSearch", "WebFetch"] : [],
     };
-    if (system) options.systemPrompt = system;
+    if (request.system) options.systemPrompt = request.system;
     if (request.reasoning_effort) options.effort = bucketEffort(request.reasoning_effort, CLAUDE_EFFORT);
 
     try {

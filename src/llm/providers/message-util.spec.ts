@@ -3,7 +3,13 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { toCliModelId, serializeMessages, bucketEffort } from "./message-util";
+import {
+  toCliModelId,
+  splitSystemMessages,
+  flattenConversation,
+  composeSystemPrompt,
+  bucketEffort,
+} from "./message-util";
 
 describe("bucketEffort", () => {
   const L5 = ["a", "b", "c", "d", "e"] as const;
@@ -43,45 +49,44 @@ describe("toCliModelId", () => {
   });
 });
 
-describe("serializeMessages", () => {
-  it("should extract system messages separately", () => {
-    const result = serializeMessages([
-      { role: "system", content: "You are a helpful assistant." },
-      { role: "user", content: "Hello" },
-    ]);
-    expect(result.system).toBe("You are a helpful assistant.");
-    expect(result.prompt).toBe("Hello");
-  });
-
-  it("should join multiple system messages with double newline", () => {
-    const result = serializeMessages([
+describe("splitSystemMessages", () => {
+  it("separates joined system text from the conversation messages", () => {
+    const { system, conversation } = splitSystemMessages([
       { role: "system", content: "Rule 1" },
       { role: "system", content: "Rule 2" },
       { role: "user", content: "Hi" },
     ]);
-    expect(result.system).toBe("Rule 1\n\nRule 2");
+    expect(system).toBe("Rule 1\n\nRule 2");
+    expect(conversation).toEqual([{ role: "user", content: "Hi" }]);
   });
 
-  it("should return undefined system when no system messages", () => {
-    const result = serializeMessages([{ role: "user", content: "Hello" }]);
-    expect(result.system).toBeUndefined();
+  it("returns undefined system + the full list when no system messages", () => {
+    const { system, conversation } = splitSystemMessages([{ role: "user", content: "Hello" }]);
+    expect(system).toBeUndefined();
+    expect(conversation).toEqual([{ role: "user", content: "Hello" }]);
+  });
+});
+
+describe("flattenConversation", () => {
+  it("joins user turns and marks assistant turns", () => {
+    expect(
+      flattenConversation([
+        { role: "user", content: "What is 2+2?" },
+        { role: "assistant", content: "4" },
+        { role: "user", content: "And 3+3?" },
+      ]),
+    ).toBe("What is 2+2?\n\n[Assistant]: 4\n\nAnd 3+3?");
+  });
+});
+
+describe("composeSystemPrompt", () => {
+  it("returns just the conversation when there is no system block", () => {
+    expect(composeSystemPrompt(undefined, "hello")).toBe("hello");
   });
 
-  it("should prefix assistant messages with role marker", () => {
-    const result = serializeMessages([
-      { role: "user", content: "What is 2+2?" },
-      { role: "assistant", content: "4" },
-      { role: "user", content: "And 3+3?" },
-    ]);
-    expect(result.prompt).toBe("What is 2+2?\n\n[Assistant]: 4\n\nAnd 3+3?");
-  });
-
-  it("should handle null content gracefully", () => {
-    const result = serializeMessages([
-      { role: "system", content: null },
-      { role: "user", content: null },
-    ]);
-    expect(result.system).toBe("");
-    expect(result.prompt).toBe("");
+  it("frames the system block in an XML boundary, raw (no escaping)", () => {
+    expect(composeSystemPrompt("<role>critic</role>", "task")).toBe(
+      "<system-instructions>\n<role>critic</role>\n</system-instructions>\n\ntask",
+    );
   });
 });

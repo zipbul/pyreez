@@ -27,29 +27,43 @@ export function toCliModelId(pyreezId: string): string {
 }
 
 /**
- * Split chat messages into a system block + a single conversation prompt string.
- * System messages are joined separately (passed via the provider's system-prompt option);
- * assistant turns are prefixed with a role marker so multi-turn context survives flattening.
+ * Separate system messages from the conversation. Returns the joined system block (if any) and the
+ * remaining conversation as a message list. Called once at the adapter boundary to hoist system out.
  */
-export function serializeMessages(messages: ChatMessage[]): {
-  system: string | undefined;
-  prompt: string;
+export function splitSystemMessages(messages: ChatMessage[]): {
+  system?: string;
+  conversation: ChatMessage[];
 } {
   const systemParts: string[] = [];
-  const conversationParts: string[] = [];
-
+  const conversation: ChatMessage[] = [];
   for (const msg of messages) {
-    if (msg.role === "system") {
-      systemParts.push(msg.content ?? "");
-    } else if (msg.role === "user") {
-      conversationParts.push(msg.content ?? "");
-    } else if (msg.role === "assistant") {
-      conversationParts.push(`[Assistant]: ${msg.content ?? ""}`);
-    }
+    if (msg.role === "system") systemParts.push(msg.content ?? "");
+    else conversation.push(msg);
   }
-
   return {
     system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
-    prompt: conversationParts.join("\n\n"),
+    conversation,
   };
+}
+
+/**
+ * Flatten a conversation (user/assistant turns) into one prompt string. Assistant turns keep a
+ * role marker so multi-turn context (re-sent every round during session continuation) survives.
+ */
+export function flattenConversation(messages: ChatMessage[]): string {
+  return messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => (m.role === "assistant" ? `[Assistant]: ${m.content ?? ""}` : (m.content ?? "")))
+    .join("\n\n");
+}
+
+/**
+ * Compose a system block + conversation into ONE prompt for providers with no native system param
+ * (codex, gemini). The system block is framed in an XML boundary so the model treats it as
+ * authoritative standing instructions, not just leading prose. The system body is wrapped raw — it
+ * already contains intentional XML tags (<role>, <task>) and must NOT be escaped.
+ */
+export function composeSystemPrompt(system: string | undefined, conversation: string): string {
+  if (!system) return conversation;
+  return `<system-instructions>\n${system}\n</system-instructions>\n\n${conversation}`;
 }

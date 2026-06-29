@@ -15,6 +15,7 @@ import type { ModelInfo } from "../model/types";
 import type { DeliberateInput, DeliberateOutput, GenerationParams, Protocol } from "./types";
 import type { ChatResult, EngineDeps, EngineConfig, FallbackDeps } from "./engine";
 import { createFallbackPool } from "./engine";
+import { splitSystemMessages } from "../llm/providers/message-util";
 import type { DeliberationStore } from "./store-types";
 import { composeTeam } from "./team-composer";
 import { deliberate } from "./engine";
@@ -68,6 +69,7 @@ export function stripThinkTags(text: string): string {
 type RawChatFn = (
   request: {
     model: string;
+    system?: string;
     messages: ChatMessage[];
     fileAccess?: boolean;
     webAccess?: boolean;
@@ -86,9 +88,13 @@ export function createChatAdapter(
   chatFn: RawChatFn,
 ): (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<ChatResult> {
   return async (model, messages, params) => {
+    // Hoist the system block out of the message list once, here — providers receive it as a
+    // first-class field and inject it their own way (native param vs framed into the prompt).
+    const { system, conversation } = splitSystemMessages(messages);
     const response = await chatFn({
       model,
-      messages,
+      messages: conversation,
+      ...(system ? { system } : {}),
       ...(params?.fileAccess ? { fileAccess: true } : {}),
       ...(params?.webAccess ? { webAccess: true } : {}),
       ...(params?.reasoning_effort != null ? { reasoning_effort: params.reasoning_effort } : {}),

@@ -42,6 +42,9 @@ export interface ChatMessage {
 
 export interface ChatCompletionRequest {
   model: string;
+  /** Standing instructions, hoisted out of `messages` at the adapter. Each provider injects it its
+   * own way: a native system param (claude, grok) or framed into the prompt (codex, gemini). */
+  system?: string;
   messages: ChatMessage[];
   /** Enable read-only file access for this request (provider maps to its own mechanism). */
   fileAccess?: boolean;

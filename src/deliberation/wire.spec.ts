@@ -204,6 +204,27 @@ describe("createChatAdapter", () => {
     expect(req.reasoning_effort).toBe(7);
   });
 
+  it("hoists the system message out of the list into request.system (incl. multi-turn history)", async () => {
+    const rawChat = mock((_req: any) => Promise.resolve(makeChatResponse("ok", 10, 20)));
+    const adapter = createChatAdapter(rawChat);
+
+    // Mirrors session-continuation: history carries [system, user, assistant, user].
+    await adapter("anthropic/claude-sonnet-4.6", [
+      { role: "system", content: "Be terse." },
+      { role: "user", content: "Q1" },
+      { role: "assistant", content: "A1" },
+      { role: "user", content: "Q2" },
+    ]);
+
+    const req = rawChat.mock.calls[0]![0] as any;
+    expect(req.system).toBe("Be terse.");
+    expect(req.messages).toEqual([
+      { role: "user", content: "Q1" },
+      { role: "assistant", content: "A1" },
+      { role: "user", content: "Q2" },
+    ]);
+  });
+
   it("should set truncated=true when finish_reason is 'length'", async () => {
     const rawChat = mock(() =>
       Promise.resolve({

@@ -12,7 +12,7 @@
 
 import { LLMClientError } from "../errors";
 import { spawnWithIdleTimeout, IdleTimeoutError } from "./spawn-with-idle";
-import { serializeMessages, bucketEffort } from "./message-util";
+import { flattenConversation, bucketEffort } from "./message-util";
 import type {
   LLMProvider,
   ChatCompletionRequest,
@@ -45,7 +45,7 @@ export class GrokCliProvider implements LLMProvider {
 
   async chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const modelId = toGrokCliModelId(request.model);
-    const { system, prompt } = serializeMessages(request.messages);
+    const prompt = flattenConversation(request.messages);
 
     const args = [
       "-p", prompt,
@@ -60,7 +60,7 @@ export class GrokCliProvider implements LLMProvider {
     ];
 
     // Replace the CLI's default coding-agent system prompt with the worker's system block.
-    if (system) args.push("--system-prompt-override", system);
+    if (request.system) args.push("--system-prompt-override", request.system);
 
     if (request.reasoning_effort) {
       args.push("--reasoning-effort", bucketEffort(request.reasoning_effort, GROK_EFFORT));

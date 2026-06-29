@@ -6,7 +6,7 @@
 
 import { LLMClientError } from "../errors";
 import { spawnWithIdleTimeout, IdleTimeoutError } from "./spawn-with-idle";
-import { serializeMessages } from "./message-util";
+import { composeSystemPrompt, flattenConversation } from "./message-util";
 import type {
   LLMProvider,
   ChatCompletionRequest,
@@ -36,11 +36,8 @@ export class GeminiCliProvider implements LLMProvider {
     request: ChatCompletionRequest,
   ): Promise<ChatCompletionResponse> {
     const modelId = toGeminiCliModelId(request.model);
-    const { system, prompt } = serializeMessages(request.messages);
-
-    const fullPrompt = system
-      ? `${system}\n\n${prompt}`
-      : prompt;
+    // gemini CLI has no system-prompt flag — frame the system block into the prompt.
+    const fullPrompt = composeSystemPrompt(request.system, flattenConversation(request.messages));
 
     const args = [
       "-p", fullPrompt,
