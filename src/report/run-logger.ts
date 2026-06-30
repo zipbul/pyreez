@@ -1,5 +1,5 @@
 /**
- * FileRunLogger — JSONL-based run archive for MCP tool invocations.
+ * FileRunLogger — JSONL-based run archive for CLI tool invocations.
  *
  * Records each tool call (tool name, duration, success/error) to
  * `.pyreez/runs/{date}.jsonl` for debugging and monitoring.
@@ -17,7 +17,7 @@ import type { FileIO } from "./types";
 // -- Public Types --
 
 /**
- * A single MCP tool invocation record.
+ * A single tool invocation record.
  */
 export interface RunRecord {
   readonly id: string;

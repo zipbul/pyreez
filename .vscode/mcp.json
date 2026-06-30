@@ -6,11 +6,6 @@
         "-y",
         "@modelcontextprotocol/server-sequential-thinking"
       ]
-    },
-    "pyreez": {
-      "command": "bun",
-      "args": ["run", "src/index.ts"],
-      "envFile": "${workspaceFolder}/.env"
     }
   }
 }

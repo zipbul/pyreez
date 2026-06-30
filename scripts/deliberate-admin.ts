@@ -1,5 +1,5 @@
 /**
- * Admin deliberation script — bypasses MCP to call internal API with explicit models.
+ * Admin deliberation script — bypasses the CLI to call the internal API with explicit models.
  * Usage: bun run scripts/deliberate-admin.ts
  */
 
