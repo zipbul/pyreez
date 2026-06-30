@@ -11,6 +11,23 @@ import type { HandlersConfig, HandlerResult } from "./handlers";
 import type { FileAccess } from "./llm/types";
 import { handleDeliberate, handleAcceptance } from "./handlers";
 import { CooldownStateSchema, AcceptanceWorkersArraySchema, parseWithSchema } from "./validation/schemas";
+import { loadConfigFromEnv, loadRoutingConfig } from "./config";
+import { createChatAdapter, createDeliberateFn } from "./deliberation/wire";
+import { FileDeliberationStore } from "./deliberation/file-store";
+import { ProviderRegistry } from "./llm/registry";
+import { buildProviders } from "./llm/providers";
+import { ModelRegistry } from "./model/registry";
+import { BunFileIO } from "./report/bun-file-io";
+import { FileRunLogger } from "./report/run-logger";
+import { createCooldownManager } from "./deliberation/cooldown";
+import { filterModelsByProviders } from "./index";
+import { rankByPairwise } from "./synthesis/pairranker";
+import { createLLMJudge } from "./synthesis/llm-judge";
+import { crossValidate } from "./quality/cross-validate";
+import { createLLMCrossValidator } from "./quality/llm-cross-validator";
+import { judgeConvergence } from "./quality/convergence-judge";
+import { runInspection } from "./inspect/inspect";
+import { fuseCandidates } from "./synthesis/fuser";
 
 // -- Arg parsing --
 
@@ -101,16 +118,6 @@ Run "bun run src/cli.ts <command> --help" for command-specific help.`);
 // -- Wiring (same as index.ts) --
 
 async function buildConfig(): Promise<HandlersConfig> {
-  const { loadConfigFromEnv, loadRoutingConfig } = await import("./config");
-  const { createChatAdapter, createDeliberateFn } = await import("./deliberation/wire");
-  const { FileDeliberationStore } = await import("./deliberation/file-store");
-  const { ProviderRegistry } = await import("./llm/registry");
-  const { buildProviders } = await import("./llm/providers");
-  const { ModelRegistry } = await import("./model/registry");
-  const { BunFileIO } = await import("./report/bun-file-io");
-  const { FileRunLogger } = await import("./report/run-logger");
-  const { createCooldownManager } = await import("./deliberation/cooldown");
-  const { filterModelsByProviders } = await import("./index");
 
   const routing = await loadRoutingConfig();
   const config = loadConfigFromEnv(routing);
@@ -294,8 +301,6 @@ async function main(): Promise<void> {
         die(`--candidates parse failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      const { rankByPairwise } = await import("./synthesis/pairranker");
-      const { createLLMJudge } = await import("./synthesis/llm-judge");
       if (!config.chatFn) die("chat function not available");
       const lazy = flags["lazy"] === "true";
       const judge = createLLMJudge(judgeModel!, async (model, messages) => {
@@ -327,8 +332,6 @@ async function main(): Promise<void> {
         die(`--responses parse failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      const { crossValidate } = await import("./quality/cross-validate");
-      const { createLLMCrossValidator } = await import("./quality/llm-cross-validator");
       if (!config.chatFn) die("chat function not available");
       const judge = createLLMCrossValidator(judgeModel!, async (model, messages) => {
         const r = await config.chatFn!(model, messages);
@@ -361,7 +364,6 @@ async function main(): Promise<void> {
         die(`--responses parse failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      const { judgeConvergence } = await import("./quality/convergence-judge");
       if (!config.chatFn) die("chat function not available");
       const verdict = await judgeConvergence(judgeModel!, async (model, messages) => {
         const r = await config.chatFn!(model, messages);
@@ -388,7 +390,6 @@ async function main(): Promise<void> {
         die(`--deliberate parse failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      const { runInspection } = await import("./inspect/inspect");
       if (!config.chatFn) die("chat function not available");
       const inspection = await runInspection({
         task: task!,
@@ -439,7 +440,6 @@ async function main(): Promise<void> {
         }
       }
 
-      const { fuseCandidates } = await import("./synthesis/fuser");
       if (!config.chatFn) die("chat function not available");
       const fuseResult = await fuseCandidates(
         judgeModel!,

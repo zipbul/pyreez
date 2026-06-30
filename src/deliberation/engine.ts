@@ -37,6 +37,13 @@ import { extractProvider } from "./provider-util";
 import { classifyError, findLLMClientError, isRetryableError, normalizeErrorMessage, type CooldownEntry, type CooldownErrorType, type CooldownManager } from "./cooldown";
 
 import type { RoundInfo } from "./prompts";
+import {
+  buildSequentialRefinementMessages,
+  buildHostInterrogationMessages,
+  buildEvaluationScoringMessages,
+  buildRedTeamGeneratorMessages,
+  buildRedTeamAttackerMessages,
+} from "./prompts";
 
 // Re-export ChatResult from canonical location for backward compatibility
 export type { ChatResult } from "../axis/types";
@@ -671,7 +678,6 @@ async function executeSequentialRound(
   let totalOutput = 0;
   let previousOutput: string | undefined;
 
-  const { buildSequentialRefinementMessages } = await import("./prompts");
 
   for (const workerIdx of order) {
     const participant = participants[workerIdx];
@@ -739,7 +745,6 @@ async function executeInterrogationRound(
 ): Promise<RoundResult> {
   const participants = [...ctx.team.workers];
   const questions = input.questions ?? [];
-  const { buildHostInterrogationMessages } = await import("./prompts");
 
   // Each worker gets a question with fallback support
   const results = await Promise.allSettled(
@@ -774,7 +779,6 @@ async function executeEvaluationRound(
   const participants = [...ctx.team.workers];
   const criteria = input.criteria ?? "Evaluate the quality, correctness, and completeness.";
   const subject = input.subject ?? ctx.task;
-  const { buildEvaluationScoringMessages } = await import("./prompts");
 
   const results = await Promise.allSettled(
     participants.map((participant, index) => {
@@ -803,7 +807,6 @@ async function executeRedTeamRound(
 ): Promise<RoundResult> {
   const participants = [...ctx.team.workers];
   const roles = input.roles;
-  const { buildRedTeamGeneratorMessages, buildRedTeamAttackerMessages } = await import("./prompts");
 
   const getRole = (idx: number): "generator" | "attacker" => {
     if (roles?.[idx]) return roles[idx]!;

@@ -17,7 +17,7 @@ import type { ChatResult, EngineDeps, EngineConfig, FallbackDeps } from "./engin
 import { createFallbackPool } from "./engine";
 import { splitSystemMessages } from "../llm/providers/message-util";
 import type { DeliberationStore } from "./store-types";
-import { composeTeam } from "./team-composer";
+import { composeTeam, scoreModel } from "./team-composer";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
 import type { CooldownManager } from "./cooldown";
@@ -253,7 +253,6 @@ export function createDeliberateFn(
     };
 
     // 7. Build fallback pool + replenishment
-    const { scoreModel } = await import("./team-composer");
     const allAvailable = deps.registry.getAvailable();
     const sortedByScore = [...allAvailable].sort(
       (a, b) => scoreModel(b) - scoreModel(a) || b.cost.outputPer1M - a.cost.outputPer1M,

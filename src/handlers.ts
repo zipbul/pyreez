@@ -10,6 +10,7 @@ import type { FileAccess, ChatMessage } from "./llm/types";
 import { NoModelsAvailableError } from "./deliberation/team-composer";
 import { TeamDegradedError } from "./deliberation/engine";
 import { buildAcceptanceMessages } from "./deliberation/prompts";
+import { classifyAlignment } from "./quality/alignment-classifier";
 import type { GenerationParams } from "./deliberation/types";
 import type { ModelInfo } from "./model/types";
 
@@ -209,7 +210,6 @@ export async function handleAcceptance(
 
       // Auto-classify alignment for workers that didn't specify one.
       // Defaults to on-task if classification fails (preserves verdict participation).
-      const { classifyAlignment } = await import("./quality/alignment-classifier");
       const classifiedWorkers = await Promise.all(args.workers.map(async (w) => {
         if (w.alignment) return w;
         try {
