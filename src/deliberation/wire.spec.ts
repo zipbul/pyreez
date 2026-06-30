@@ -204,6 +204,32 @@ describe("createChatAdapter", () => {
     expect(req.reasoning_effort).toBe(7);
   });
 
+  it("forwards opts.resumeSessionId into the request and surfaces response.sessionId", async () => {
+    const rawChat = mock((_req: any) =>
+      Promise.resolve({ ...makeChatResponse("ok", 10, 20), sessionId: "S1" }),
+    );
+    const adapter = createChatAdapter(rawChat);
+
+    const result = await adapter(
+      "openai/gpt-4.1",
+      [{ role: "user", content: "follow-up" }],
+      { reasoning_effort: 7 },
+      { resumeSessionId: "S1" },
+    );
+
+    const req = rawChat.mock.calls[0]![0] as any;
+    expect(req.resumeSessionId).toBe("S1");
+    expect(result.sessionId).toBe("S1");
+  });
+
+  it("omits resumeSessionId from the request when no opts are given", async () => {
+    const rawChat = mock((_req: any) => Promise.resolve(makeChatResponse("ok", 10, 20)));
+    const adapter = createChatAdapter(rawChat);
+    await adapter("openai/gpt-4.1", [{ role: "user", content: "x" }]);
+    const req = rawChat.mock.calls[0]![0] as any;
+    expect("resumeSessionId" in req).toBe(false);
+  });
+
   it("hoists the system message out of the list into request.system (incl. multi-turn history)", async () => {
     const rawChat = mock((_req: any) => Promise.resolve(makeChatResponse("ok", 10, 20)));
     const adapter = createChatAdapter(rawChat);

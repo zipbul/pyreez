@@ -62,6 +62,9 @@ export interface ChatCompletionRequest extends Capabilities {
    * own way: a native system param (claude, grok) or framed into the prompt (codex, gemini). */
   system?: string;
   messages: ChatMessage[];
+  /** Resume an existing provider session by id instead of starting fresh (debugging/interrogate).
+   * The provider re-enters the recorded session; `messages` then carries only the new turn. */
+  resumeSessionId?: string;
 }
 
 // --- Response Types ---
@@ -98,6 +101,9 @@ export interface ChatCompletionResponse {
   model: string;
   choices: ChatCompletionChoice[];
   usage?: ChatCompletionUsage;
+  /** Provider session id for this call, captured so the session can be resumed later (interrogate).
+   * undefined when the provider exposes none. */
+  sessionId?: string;
 }
 
 // --- Error Types ---

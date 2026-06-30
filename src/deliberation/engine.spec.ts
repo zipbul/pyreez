@@ -2913,4 +2913,30 @@ describe("recordTranscript", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0].model).toBe("worker/model-1");
   });
+
+  it("records the captured sessionId and the worker's settings (for resume + replay)", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const entries: any[] = [];
+    const config = makeConfig({
+      recordTranscript: (e: any) => entries.push(e),
+      workerGenParams: { reasoning_effort: 7, webAccess: true },
+    });
+
+    const deps = makeDeps({
+      chat: mock(async () => ({ content: "ok", inputTokens: 1, outputTokens: 1, sessionId: "sess-abc" })),
+      buildR1Messages: mock(() => [
+        { role: "system" as const, content: "SYS" },
+        { role: "user" as const, content: "U" },
+      ]),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+    await executeRound(ctx, 1, deps, config, input);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].sessionId).toBe("sess-abc");
+    expect(entries[0].settings).toEqual({ system: "SYS", reasoning_effort: 7, webAccess: true });
+  });
 });

@@ -117,10 +117,11 @@ Commands:
   convergence-check  LLM-judge semantic convergence across responses (HIGH/MODERATE/DIVERSE)
   inspect       Integrated post-deliberate inspection: convergence + (rank if N≥4) + quality (opt-in)
   fuse          Fuse ranked candidates into a single synthesis draft (LLM-Blender GenFuser)
-  interrogate   Re-question a captured worker (--transcript <dir> --round N --worker I --question "...")
+  interrogate   Re-question a captured worker (--run <id> | --transcript <dir>) --round N --worker I --question "..."
 
-Deliberate capture: add --transcript <dir> to "deliberate" to save each worker's exact
-prompt+output and the result, for prompt debugging/optimization and interrogate.
+Debug capture: "deliberate" ALWAYS records each worker's prompt+output+sessionId+settings to
+.pyreez/debug/<id> (printed at the end) so any run is debuggable. interrogate re-enters the worker's
+provider session by id (or reconstructs if the session is gone). Disable with --no-debug-capture.
 
 Run "bun run src/cli.ts <command> --help" for command-specific help.`);
   process.exit(1);
@@ -188,7 +189,7 @@ async function buildConfig(recordTranscript?: TranscriptRecorder): Promise<Handl
     filteredRegistry,
     deliberateFn,
     runLogger,
-    chatFn: (model, messages, params) => chatAdapter(model, messages, params),
+    chatFn: (model, messages, params, opts) => chatAdapter(model, messages, params, opts),
   };
 }
 
@@ -205,9 +206,12 @@ async function main(): Promise<void> {
   // more than one "-" flag. After this, flags hold literal content and no command re-reads stdin.
   await resolveStdinFlags(flags);
 
-  // Optional transcript capture (deliberate only): accumulate per-worker prompt+output during the
-  // run, then write the entries + the deliberate result to --transcript <dir> afterwards.
-  const transcriptDir = command === "deliberate" ? flags["transcript"] : undefined;
+  // Debug capture (deliberate): ALWAYS on so a run is debuggable after the fact — accumulate each
+  // worker's prompt+output+session+settings during the run, then write them. Goes to .pyreez/debug/<id>
+  // unless --transcript overrides the dir; disable with --no-debug-capture for sensitive runs.
+  const transcriptDir = command === "deliberate" && flags["no-debug-capture"] !== "true"
+    ? (flags["transcript"] ?? `.pyreez/debug/${crypto.randomUUID()}`)
+    : undefined;
   const transcriptEntries: TranscriptEntry[] = [];
   const config = await buildConfig(
     transcriptDir ? (e) => { transcriptEntries.push(e); } : undefined,
@@ -474,8 +478,8 @@ async function main(): Promise<void> {
     }
 
     case "interrogate": {
-      const dir = flags["transcript"];
-      if (!dir) die("--transcript <dir> is required for interrogate");
+      const dir = flags["transcript"] ?? (flags["run"] ? `.pyreez/debug/${flags["run"]}` : undefined);
+      if (!dir) die("--transcript <dir> or --run <id> is required for interrogate");
       const round = flags["round"] !== undefined ? Number(flags["round"]) : NaN;
       const worker = flags["worker"] !== undefined ? Number(flags["worker"]) : NaN;
       if (!Number.isInteger(round) || round < 1) die("--round must be an integer >= 1");
@@ -485,9 +489,38 @@ async function main(): Promise<void> {
       if (!config.chatFn) die("chat function not available");
 
       const entry = await loadTranscriptEntry(dir!, round, worker, new BunFileIO());
-      const messages = buildInterrogationMessages(entry, question!);
-      const r = await config.chatFn(entry.model, messages);
-      result = { data: { model: entry.model, round: entry.round, workerIndex: entry.workerIndex, answer: r.content } };
+      const s = entry.settings ?? {};
+      // Re-apply the worker's exact knobs so the debug call matches the original (system goes into the
+      // message list; web/effort/fileAccess into params).
+      const params = {
+        ...(s.reasoning_effort != null ? { reasoning_effort: s.reasoning_effort } : {}),
+        ...(s.webAccess ? { webAccess: true } : {}),
+        ...(s.fileAccess ? { fileAccess: s.fileAccess } : {}),
+      };
+
+      let answer: string | undefined;
+      let mode: "resumed" | "reconstructed" = "reconstructed";
+      // Resume-first: re-enter the real provider session (recovers the worker's hidden reasoning/tool
+      // state + reuses the prompt cache). The session restores history, so send only the new question.
+      if (entry.sessionId) {
+        try {
+          const resumeMessages = [
+            ...(s.system ? [{ role: "system" as const, content: s.system }] : []),
+            { role: "user" as const, content: question! },
+          ];
+          const r = await config.chatFn(entry.model, resumeMessages, params, { resumeSessionId: entry.sessionId });
+          answer = r.content;
+          mode = "resumed";
+        } catch {
+          // Session gone (expired/GC) or provider error — fall back to reconstruction below.
+        }
+      }
+      if (answer === undefined) {
+        // Reconstruct: replay the recorded prompt + the worker's own output + the question.
+        const r = await config.chatFn(entry.model, buildInterrogationMessages(entry, question!), params);
+        answer = r.content;
+      }
+      result = { data: { mode, model: entry.model, round: entry.round, workerIndex: entry.workerIndex, ...(mode === "resumed" ? { sessionId: entry.sessionId } : {}), answer } };
       break;
     }
 

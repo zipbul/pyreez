@@ -12,8 +12,16 @@
  * final text response. Interrogation therefore probes the text output, not hidden reasoning state.
  */
 
-import type { ChatMessage } from "../llm/types";
+import type { ChatMessage, FileAccess } from "../llm/types";
 import type { FileIO } from "../report/types";
+
+/** The exact knobs a worker ran under, re-applied verbatim when debugging it (interrogate). */
+export interface WorkerSettings {
+  readonly system?: string;
+  readonly reasoning_effort?: number;
+  readonly webAccess?: boolean;
+  readonly fileAccess?: FileAccess;
+}
 
 /** One worker's full input + output for a single round. Keyed by round + workerIndex. */
 export interface TranscriptEntry {
@@ -21,6 +29,10 @@ export interface TranscriptEntry {
   readonly workerIndex: number;
   /** The model that actually produced the output (the final model after any fallback swap). */
   readonly model: string;
+  /** Provider session id, so interrogate can re-enter the real session (undefined if none captured). */
+  readonly sessionId?: string;
+  /** The settings the worker ran under; interrogate re-applies them so the call matches the original. */
+  readonly settings?: WorkerSettings;
   /** Exact messages sent to the worker, including the system block (pre-adapter form). */
   readonly messages: ChatMessage[];
   readonly output: string;

@@ -56,18 +56,23 @@ export class ClaudeAgentProvider implements LLMProvider {
     if (request.fileAccess) options.cwd = process.cwd();
     if (request.system) options.systemPrompt = request.system;
     if (request.reasoning_effort) options.effort = bucketEffort(request.reasoning_effort, CLAUDE_EFFORT);
+    // Resume the recorded session (interrogate) instead of starting fresh; the SDK replays its history.
+    if (request.resumeSessionId) options.resume = request.resumeSessionId;
 
     try {
       let text = "";
+      let sessionId: string | undefined;
       for await (const message of query({ prompt, options } as any)) {
         const msg = message as any;
+        // Every SDK message carries the session_id; capture it so the session can be resumed later.
+        if (typeof msg.session_id === "string") sessionId = msg.session_id;
         if (msg.type === "assistant") {
           for (const block of msg.message?.content ?? []) {
             if (block?.type === "text" && typeof block.text === "string") text += block.text;
           }
         }
       }
-      return buildSdkResponse(text, request.model);
+      return buildSdkResponse(text, request.model, undefined, sessionId);
     } catch (error) {
       throw toSdkError(error, "claude");
     }

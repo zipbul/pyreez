@@ -24,7 +24,7 @@ export interface HandlersConfig {
   };
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
   runLogger?: RunLogger;
-  chatFn?: (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
+  chatFn?: (model: string, messages: ChatMessage[], params?: GenerationParams, opts?: { resumeSessionId?: string }) => Promise<{ content: string; inputTokens: number; outputTokens: number; sessionId?: string }>;
 }
 
 /** Max characters for error messages. */

@@ -589,13 +589,24 @@ async function callWithFallback(
         throw new Error(`empty response from ${currentModel}`);
       }
 
-      // Capture the exact prompt+output (the data already exists here) for transcript/interrogate.
+      // Capture the exact prompt+output+session+settings (all already here) for transcript/interrogate.
+      // Settings = the knobs this worker ran under (system + genParams), so a debug call matches exactly.
+      const recordedSystem = messages.find((m) => m.role === "system")?.content;
+      const gp = config.workerGenParams;
+      const settings = {
+        ...(recordedSystem ? { system: recordedSystem } : {}),
+        ...(gp?.reasoning_effort != null ? { reasoning_effort: gp.reasoning_effort } : {}),
+        ...(gp?.webAccess ? { webAccess: true } : {}),
+        ...(gp?.fileAccess ? { fileAccess: gp.fileAccess } : {}),
+      };
       config.recordTranscript?.({
         round: roundNumber,
         workerIndex,
         model: currentModel,
         messages,
         output: result.content,
+        ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+        ...(Object.keys(settings).length ? { settings } : {}),
         ...(result.truncated ? { truncated: true } : {}),
       });
 

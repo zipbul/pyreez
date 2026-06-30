@@ -9,6 +9,7 @@ export function buildSdkResponse(
   text: string,
   originalModel: string,
   usage?: { input_tokens?: number; output_tokens?: number },
+  sessionId?: string,
 ): ChatCompletionResponse {
   return {
     id: `sdk-${Date.now()}`,
@@ -31,6 +32,7 @@ export function buildSdkResponse(
           },
         }
       : {}),
+    ...(sessionId ? { sessionId } : {}),
   };
 }
 

@@ -41,7 +41,7 @@ export class CodexSdkProvider implements LLMProvider {
     const input = composeSystemPrompt(request.system, flattenConversation(request.messages));
 
     try {
-      const thread = this.codex.startThread({
+      const threadOptions = {
         model,
         sandboxMode: request.fileAccess === "write" ? "workspace-write" : "read-only",
         webSearchEnabled: request.webAccess ?? false,
@@ -49,9 +49,15 @@ export class CodexSdkProvider implements LLMProvider {
         // Anchor at the host workspace only when file access is granted; otherwise leave the SDK default.
         ...(request.fileAccess ? { workingDirectory: process.cwd() } : {}),
         ...(request.reasoning_effort ? { modelReasoningEffort: bucketEffort(request.reasoning_effort, CODEX_EFFORT) } : {}),
-      } as any);
+      };
+      // Resume the recorded thread (interrogate) instead of starting fresh; settings are re-passed.
+      const thread: any = request.resumeSessionId
+        ? this.codex.resumeThread(request.resumeSessionId, threadOptions as any)
+        : this.codex.startThread(threadOptions as any);
       const turn: any = await thread.run(input);
-      return buildSdkResponse(turn.finalResponse ?? "", request.model, turn.usage ?? undefined);
+      // thread.id is populated after the first turn — capture it so the thread can be resumed.
+      const sessionId: string | undefined = thread.id ?? undefined;
+      return buildSdkResponse(turn.finalResponse ?? "", request.model, turn.usage ?? undefined, sessionId);
     } catch (error) {
       throw toSdkError(error, "codex");
     }

@@ -47,6 +47,10 @@ export class GrokCliProvider implements LLMProvider {
     const modelId = toGrokCliModelId(request.model);
     const prompt = flattenConversation(request.messages);
 
+    // Resume the recorded session (interrogate) or name a fresh one with a UUID we control, so the
+    // session is addressable later. Returned in the response → recorded for resume.
+    const sessionId = request.resumeSessionId ?? crypto.randomUUID();
+
     const args = [
       "-p", prompt,
       "--model", modelId,
@@ -54,6 +58,7 @@ export class GrokCliProvider implements LLMProvider {
       "--no-subagents",
       // send the worker prompt unmodified — no agent reframing
       "--verbatim",
+      ...(request.resumeSessionId ? ["--resume", sessionId] : ["--session-id", sessionId]),
     ];
 
     // Permission mode controls file mutation. Verified live: `plan` is read-only (edit attempts make
@@ -99,7 +104,7 @@ export class GrokCliProvider implements LLMProvider {
         );
       }
 
-      return this.buildResponse(stdout.trim(), request.model);
+      return this.buildResponse(stdout.trim(), request.model, sessionId);
     } catch (error) {
       if (error instanceof LLMClientError) throw error;
       if (error instanceof IdleTimeoutError) {
@@ -116,6 +121,7 @@ export class GrokCliProvider implements LLMProvider {
   private buildResponse(
     text: string,
     originalModel: string,
+    sessionId?: string,
   ): ChatCompletionResponse {
     return {
       id: `cli-${Date.now()}`,
@@ -129,6 +135,7 @@ export class GrokCliProvider implements LLMProvider {
           finish_reason: "stop",
         },
       ],
+      ...(sessionId ? { sessionId } : {}),
     };
   }
 }

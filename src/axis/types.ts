@@ -14,6 +14,8 @@ export interface ChatResult {
   readonly outputTokens: number;
   /** True when the response was cut off (finish_reason === "length"). */
   readonly truncated?: boolean;
+  /** Provider session id for this call (when exposed), recorded so the session can be resumed. */
+  readonly sessionId?: string;
 }
 
 /**

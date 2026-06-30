@@ -45,6 +45,9 @@ export class GeminiCliProvider implements LLMProvider {
       "-o", "json",
     ];
 
+    // Resume the recorded session (interrogate) instead of starting fresh; settings are re-passed.
+    if (request.resumeSessionId) args.push("--resume", request.resumeSessionId);
+
     // --sandbox intentionally omitted: launches Docker on Linux, causing EACCES
     // on ~/.gemini/projects.json.tmp (volume mount permission bug).
     //
@@ -136,6 +139,7 @@ export class GeminiCliProvider implements LLMProvider {
       inputTokens,
       outputTokens,
       sawCached ? cachedTokens : undefined,
+      parsed.session_id,
     );
   }
 
@@ -145,6 +149,7 @@ export class GeminiCliProvider implements LLMProvider {
     inputTokens = 0,
     outputTokens = 0,
     cachedTokens?: number,
+    sessionId?: string,
   ): ChatCompletionResponse {
     return {
       id: `gemini-cli-${Date.now()}`,
@@ -158,6 +163,7 @@ export class GeminiCliProvider implements LLMProvider {
           finish_reason: "stop",
         },
       ],
+      ...(sessionId ? { sessionId } : {}),
       ...(inputTokens || outputTokens ? {
         usage: {
           prompt_tokens: inputTokens,

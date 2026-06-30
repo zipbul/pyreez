@@ -78,6 +78,7 @@ type RawChatFn = (
     fileAccess?: FileAccess;
     webAccess?: boolean;
     reasoning_effort?: number;
+    resumeSessionId?: string;
   },
 ) => Promise<ChatCompletionResponse>;
 
@@ -90,8 +91,8 @@ type RawChatFn = (
  */
 export function createChatAdapter(
   chatFn: RawChatFn,
-): (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<ChatResult> {
-  return async (model, messages, params) => {
+): (model: string, messages: ChatMessage[], params?: GenerationParams, opts?: { resumeSessionId?: string }) => Promise<ChatResult> {
+  return async (model, messages, params, opts) => {
     // Hoist the system block out of the message list once, here — providers receive it as a
     // first-class field and inject it their own way (native param vs framed into the prompt).
     const { system, conversation } = splitSystemMessages(messages);
@@ -102,6 +103,7 @@ export function createChatAdapter(
       ...(params?.fileAccess ? { fileAccess: params.fileAccess } : {}),
       ...(params?.webAccess ? { webAccess: true } : {}),
       ...(params?.reasoning_effort != null ? { reasoning_effort: params.reasoning_effort } : {}),
+      ...(opts?.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
     });
     const choice = response.choices[0];
     const raw = choice?.message?.content ?? "";
@@ -111,6 +113,7 @@ export function createChatAdapter(
       inputTokens: response.usage?.prompt_tokens ?? 0,
       outputTokens: response.usage?.completion_tokens ?? 0,
       ...(truncated ? { truncated } : {}),
+      ...(response.sessionId ? { sessionId: response.sessionId } : {}),
     };
   };
 }

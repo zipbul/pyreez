@@ -86,6 +86,29 @@ describe("GrokCliProvider", () => {
     expect(a).not.toContain("--no-plan");
   });
 
+  // -- session id capture / resume --
+
+  it("names a fresh session with a generated UUID and returns it", async () => {
+    const res = await provider().chat(baseReq());
+    const a = argv();
+    const i = a.indexOf("--session-id");
+    expect(i).toBeGreaterThan(-1);
+    expect(a).not.toContain("--resume");
+    // the id passed to the CLI is the id returned for later resume
+    expect(res.sessionId).toBe(a[i + 1]);
+    expect(res.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("resumes the given session id via --resume (not --session-id) and echoes it back", async () => {
+    const res = await provider().chat(baseReq({ resumeSessionId: "fixed-session-123" }));
+    const a = argv();
+    const r = a.indexOf("--resume");
+    expect(r).toBeGreaterThan(-1);
+    expect(a[r + 1]).toBe("fixed-session-123");
+    expect(a).not.toContain("--session-id");
+    expect(res.sessionId).toBe("fixed-session-123");
+  });
+
   // -- web / effort / system --
 
   it("disables web search when webAccess is falsy", async () => {
