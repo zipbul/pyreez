@@ -42,6 +42,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .pyreez/skillcells.json
 .pyreez/reports/
 .pyreez/deliberations/
+.pyreez/debug/
 .pyreez/runs/
 .pyreez/benchmarks/
 .pyreez/learning/
