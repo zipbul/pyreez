@@ -3,7 +3,9 @@
  * Replaces the hand-rolled `codex exec` spawn. Auth is the installed Codex CLI's ChatGPT
  * subscription (`~/.codex/auth.json` via `codex login`) — NO OPENAI_API_KEY. The vendored
  * `@openai/codex` binary is spawned by the SDK. Web search (server-side, live) is enabled
- * under --web-access so workers verify before asserting; sandbox is read-only (no file edits).
+ * under --web-access so workers verify before asserting. Sandbox is read-only by default; the host
+ * opts into workspace access per request via fileAccess (read → read-only, write → workspace-write),
+ * which also points workingDirectory at the host cwd.
  */
 
 import { Codex } from "@openai/codex-sdk";
@@ -25,7 +27,7 @@ export function toCodexModelId(pyreezId: string): string {
 
 export class CodexSdkProvider implements LLMProvider {
   readonly name = "openai" as const;
-  readonly capabilities = { web: true, effort: true, fileAccess: false } as const;
+  readonly capabilities = { web: true, effort: true, fileAccess: true } as const;
   private readonly codex: Codex;
 
   constructor() {
@@ -41,9 +43,11 @@ export class CodexSdkProvider implements LLMProvider {
     try {
       const thread = this.codex.startThread({
         model,
-        sandboxMode: "read-only",
+        sandboxMode: request.fileAccess === "write" ? "workspace-write" : "read-only",
         webSearchEnabled: request.webAccess ?? false,
         skipGitRepoCheck: true,
+        // Anchor at the host workspace only when file access is granted; otherwise leave the SDK default.
+        ...(request.fileAccess ? { workingDirectory: process.cwd() } : {}),
         ...(request.reasoning_effort ? { modelReasoningEffort: bucketEffort(request.reasoning_effort, CODEX_EFFORT) } : {}),
       } as any);
       const turn: any = await thread.run(input);

@@ -2,7 +2,8 @@
  * Anthropic provider using the official `@anthropic-ai/claude-agent-sdk` (`query()`).
  * Replaces the hand-rolled `claude -p` spawn. Auth is the installed Claude Code login
  * (subscription) — no ANTHROPIC_API_KEY needed when `claude` is logged in. File/bash tools are
- * disallowed (pure inference); WebSearch/WebFetch are allowed under --web-access so workers verify.
+ * disallowed by default (pure inference); the host opts in per request via fileAccess (read|write),
+ * which also points cwd at the workspace. WebSearch/WebFetch are allowed under --web-access.
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -17,23 +18,42 @@ import type {
   ChatCompletionResponse,
 } from "../types";
 
-// Block all codebase/command tools — pyreez workers do pure inference (+ optional web verification).
-const FILE_TOOLS = ["Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Glob", "Grep"];
+// Tool groups for fileAccess gating. Workers do pure inference by default; the host opts into
+// codebase access per request. Read = inspect-only; Write = mutate (Bash counts as write/exec).
+const READ_FILE_TOOLS = ["Read", "Glob", "Grep"];
+const WRITE_FILE_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"];
 
 export class ClaudeAgentProvider implements LLMProvider {
   readonly name = "anthropic" as const;
-  readonly capabilities = { web: true, effort: true, fileAccess: false } as const;
+  readonly capabilities = { web: true, effort: true, fileAccess: true } as const;
 
   async chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const model = toCliModelId(request.model);
     const prompt = flattenConversation(request.messages);
 
+    const web = request.webAccess ? ["WebSearch", "WebFetch"] : [];
+    let allowedTools: string[];
+    let disallowedTools: string[];
+    if (request.fileAccess === "write") {
+      allowedTools = [...READ_FILE_TOOLS, ...WRITE_FILE_TOOLS, ...web];
+      disallowedTools = [];
+    } else if (request.fileAccess === "read") {
+      allowedTools = [...READ_FILE_TOOLS, ...web];
+      disallowedTools = WRITE_FILE_TOOLS;
+    } else {
+      // No file access: pure inference (+ optional web). Block every codebase/command tool.
+      allowedTools = web;
+      disallowedTools = [...READ_FILE_TOOLS, ...WRITE_FILE_TOOLS];
+    }
+
     const options: Record<string, unknown> = {
       model,
       permissionMode: "bypassPermissions",
-      disallowedTools: FILE_TOOLS,
-      allowedTools: request.webAccess ? ["WebSearch", "WebFetch"] : [],
+      allowedTools,
+      disallowedTools,
     };
+    // Point the session at the host workspace only when file access is granted.
+    if (request.fileAccess) options.cwd = process.cwd();
     if (request.system) options.systemPrompt = request.system;
     if (request.reasoning_effort) options.effort = bucketEffort(request.reasoning_effort, CLAUDE_EFFORT);
 

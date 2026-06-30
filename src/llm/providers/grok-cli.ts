@@ -39,7 +39,7 @@ const GROK_EFFORT = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export class GrokCliProvider implements LLMProvider {
   readonly name = "xai" as const;
-  readonly capabilities = { web: true, effort: true, fileAccess: false } as const;
+  readonly capabilities = { web: true, effort: true, fileAccess: true } as const;
 
   constructor(private readonly config: GrokCliProviderConfig) {}
 
@@ -51,13 +51,21 @@ export class GrokCliProvider implements LLMProvider {
       "-p", prompt,
       "--model", modelId,
       "--output-format", "plain",
-      // headless: auto-approve tool calls (web_search/web_fetch) and skip the agentic plan/subagent loop
-      "--permission-mode", "bypassPermissions",
       "--no-subagents",
-      "--no-plan",
       // send the worker prompt unmodified — no agent reframing
       "--verbatim",
     ];
+
+    // Permission mode controls file mutation. Verified live: `plan` is read-only (edit attempts make
+    // no change), `bypassPermissions` writes. No file access → throwaway /tmp cwd, auto-approve web
+    // tools, and skip the agentic plan loop (the original pure-inference path).
+    if (request.fileAccess === "write") {
+      args.push("--permission-mode", "bypassPermissions");
+    } else if (request.fileAccess === "read") {
+      args.push("--permission-mode", "plan");
+    } else {
+      args.push("--permission-mode", "bypassPermissions", "--no-plan");
+    }
 
     // Replace the CLI's default coding-agent system prompt with the worker's system block.
     if (request.system) args.push("--system-prompt-override", request.system);
@@ -77,8 +85,9 @@ export class GrokCliProvider implements LLMProvider {
 
       const { stdout, stderr, exitCode } = await spawnWithIdleTimeout(
         ["grok", ...args],
-        // Run from /tmp: avoids the CLI loading repo AGENTS.md/CLAUDE.md context for raw inference.
-        { env, cwd: "/tmp" },
+        // File access points cwd at the host workspace (the files the host wants reviewed). Without it,
+        // run from /tmp: avoids the CLI loading repo AGENTS.md/CLAUDE.md context for raw inference.
+        { env, cwd: request.fileAccess ? process.cwd() : "/tmp" },
         { idleMs: IDLE_TIMEOUT_MS },
       );
 
