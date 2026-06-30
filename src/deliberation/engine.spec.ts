@@ -2858,3 +2858,59 @@ describe("minority_dissent warning in deliberate output", () => {
     expect(warns.some((w) => w.includes("minority_dissent"))).toBe(false);
   });
 });
+
+// =============================================================================
+// transcript recording (config.recordTranscript)
+// =============================================================================
+
+describe("recordTranscript", () => {
+  it("records one entry per successful worker with round/workerIndex/model/messages/output", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const entries: any[] = [];
+    const config = makeConfig({ recordTranscript: (e: any) => entries.push(e) });
+
+    let i = 0;
+    const deps = makeDeps({
+      chat: mock(async (_model: string) => chatResult(validWorkerContent(`out-${++i}`), 10, 20)),
+      buildR1Messages: mock(() => [
+        { role: "system" as const, content: "SYS" },
+        { role: "user" as const, content: "U" },
+      ]),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+    await executeRound(ctx, 1, deps, config, input);
+
+    expect(entries).toHaveLength(2);
+    const e0 = entries.find((e) => e.workerIndex === 0)!;
+    expect(e0.round).toBe(1);
+    expect(e0.model).toBe("worker/model-0");
+    expect(e0.output).toBe("out-1");
+    // messages include the system block (pre-adapter), so interrogate can replay + re-split it.
+    expect(e0.messages[0]).toEqual({ role: "system", content: "SYS" });
+  });
+
+  it("does not record an entry for a failed worker", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const entries: any[] = [];
+    const config = makeConfig({ recordTranscript: (e: any) => entries.push(e) });
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") throw new Error("provider down");
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+    await executeRound(ctx, 1, deps, config, input);
+
+    // Only the surviving worker is recorded (no fallback pool → model-0 just fails).
+    expect(entries).toHaveLength(1);
+    expect(entries[0].model).toBe("worker/model-1");
+  });
+});

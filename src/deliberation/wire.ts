@@ -21,6 +21,7 @@ import { composeTeam, scoreModel } from "./team-composer";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
 import type { CooldownManager } from "./cooldown";
+import type { TranscriptRecorder } from "./transcript";
 import {
   buildSharedConvergenceR1,
   buildSharedConvergenceR2,
@@ -45,6 +46,8 @@ export interface WireDeps {
   readonly store?: DeliberationStore;
   /** Shared CooldownManager (process-scoped). When omitted, a per-call instance is created. */
   readonly cooldown?: CooldownManager;
+  /** Optional transcript sink, forwarded to the engine to capture per-worker prompt+output. */
+  readonly recordTranscript?: TranscriptRecorder;
 }
 
 // -- Think Tag Stripping --
@@ -250,6 +253,7 @@ export function createDeliberateFn(
       maxRounds: effectiveMaxRounds,
       protocol,
       workerGenParams,
+      ...(deps.recordTranscript ? { recordTranscript: deps.recordTranscript } : {}),
     };
 
     // 7. Build fallback pool + replenishment

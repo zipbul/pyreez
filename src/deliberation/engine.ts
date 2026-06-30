@@ -12,6 +12,7 @@
 
 import type { ChatMessage } from "../llm/types";
 import type { ModelInfo } from "../model/types";
+import type { TranscriptRecorder } from "./transcript";
 import type {
   Degradation,
   DeliberateInput,
@@ -176,6 +177,8 @@ export interface EngineConfig {
   readonly protocol: Protocol;
   /** Generation params for worker LLM calls. */
   readonly workerGenParams?: GenerationParams;
+  /** Optional sink: invoked with the exact prompt+output after each successful worker call. */
+  readonly recordTranscript?: TranscriptRecorder;
 }
 
 /** Default convergence threshold for early termination. */
@@ -585,6 +588,16 @@ async function callWithFallback(
       if (!result.content.trim()) {
         throw new Error(`empty response from ${currentModel}`);
       }
+
+      // Capture the exact prompt+output (the data already exists here) for transcript/interrogate.
+      config.recordTranscript?.({
+        round: roundNumber,
+        workerIndex,
+        model: currentModel,
+        messages,
+        output: result.content,
+        ...(result.truncated ? { truncated: true } : {}),
+      });
 
       // Build conversation history for session continuation in next round
       const fullHistory = [...messages, { role: "assistant" as const, content: result.content }];

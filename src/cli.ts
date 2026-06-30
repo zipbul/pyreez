@@ -13,6 +13,13 @@ import { handleDeliberate, handleAcceptance } from "./handlers";
 import { CooldownStateSchema, AcceptanceWorkersArraySchema, parseWithSchema } from "./validation/schemas";
 import { loadConfigFromEnv, loadRoutingConfig } from "./config";
 import { createChatAdapter, createDeliberateFn } from "./deliberation/wire";
+import {
+  writeTranscript,
+  loadTranscriptEntry,
+  buildInterrogationMessages,
+  type TranscriptEntry,
+  type TranscriptRecorder,
+} from "./deliberation/transcript";
 import { FileDeliberationStore } from "./deliberation/file-store";
 import { ProviderRegistry } from "./llm/registry";
 import { buildProviders } from "./llm/providers";
@@ -70,7 +77,7 @@ async function readStdin(): Promise<string> {
 /** Flag names whose values are user content and may be piped from stdin via "-". */
 const STDIN_FLAGS = [
   "task", "worker-instructions", "criteria", "subject", "questions",
-  "synthesis", "candidates", "responses", "deliberate",
+  "synthesis", "candidates", "responses", "deliberate", "question",
 ] as const;
 
 /**
@@ -110,6 +117,10 @@ Commands:
   convergence-check  LLM-judge semantic convergence across responses (HIGH/MODERATE/DIVERSE)
   inspect       Integrated post-deliberate inspection: convergence + (rank if N≥4) + quality (opt-in)
   fuse          Fuse ranked candidates into a single synthesis draft (LLM-Blender GenFuser)
+  interrogate   Re-question a captured worker (--transcript <dir> --round N --worker I --question "...")
+
+Deliberate capture: add --transcript <dir> to "deliberate" to save each worker's exact
+prompt+output and the result, for prompt debugging/optimization and interrogate.
 
 Run "bun run src/cli.ts <command> --help" for command-specific help.`);
   process.exit(1);
@@ -117,7 +128,7 @@ Run "bun run src/cli.ts <command> --help" for command-specific help.`);
 
 // -- Wiring (same as index.ts) --
 
-async function buildConfig(): Promise<HandlersConfig> {
+async function buildConfig(recordTranscript?: TranscriptRecorder): Promise<HandlersConfig> {
 
   const routing = await loadRoutingConfig();
   const config = loadConfigFromEnv(routing);
@@ -170,6 +181,7 @@ async function buildConfig(): Promise<HandlersConfig> {
     chat: (model, messages, params) => chatAdapter(model, messages, params),
     store: deliberationStore,
     cooldown: sharedCooldown,
+    ...(recordTranscript ? { recordTranscript } : {}),
   });
 
   return {
@@ -193,7 +205,13 @@ async function main(): Promise<void> {
   // more than one "-" flag. After this, flags hold literal content and no command re-reads stdin.
   await resolveStdinFlags(flags);
 
-  const config = await buildConfig();
+  // Optional transcript capture (deliberate only): accumulate per-worker prompt+output during the
+  // run, then write the entries + the deliberate result to --transcript <dir> afterwards.
+  const transcriptDir = command === "deliberate" ? flags["transcript"] : undefined;
+  const transcriptEntries: TranscriptEntry[] = [];
+  const config = await buildConfig(
+    transcriptDir ? (e) => { transcriptEntries.push(e); } : undefined,
+  );
 
   let result: HandlerResult;
 
@@ -455,8 +473,31 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "interrogate": {
+      const dir = flags["transcript"];
+      if (!dir) die("--transcript <dir> is required for interrogate");
+      const round = flags["round"] !== undefined ? Number(flags["round"]) : NaN;
+      const worker = flags["worker"] !== undefined ? Number(flags["worker"]) : NaN;
+      if (!Number.isInteger(round) || round < 1) die("--round must be an integer >= 1");
+      if (!Number.isInteger(worker) || worker < 0) die("--worker must be an integer >= 0 (workerIndex)");
+      const question = flags["question"];
+      if (!question) die("--question is required for interrogate");
+      if (!config.chatFn) die("chat function not available");
+
+      const entry = await loadTranscriptEntry(dir!, round, worker, new BunFileIO());
+      const messages = buildInterrogationMessages(entry, question!);
+      const r = await config.chatFn(entry.model, messages);
+      result = { data: { model: entry.model, round: entry.round, workerIndex: entry.workerIndex, answer: r.content } };
+      break;
+    }
+
     default:
       die(`Unknown command: ${command}. Run without arguments for usage.`);
+  }
+
+  if (transcriptDir && result!.data) {
+    await writeTranscript(transcriptDir, transcriptEntries, result!.data, new BunFileIO());
+    console.error(`[pyreez] transcript: ${transcriptEntries.length} entries → ${transcriptDir}`);
   }
 
   if (result!.error) {

@@ -343,6 +343,31 @@ describe("createDeliberateFn", () => {
     expect(config).toMatchObject({ maxRounds: 2 });
   });
 
+  it("should forward a recordTranscript sink into the engine config", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
+    const recordTranscript = mock(() => {});
+    const deps = { ...makeWireDeps(), recordTranscript };
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({ task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "shared_convergence" });
+
+    const [, , , config] = mockDeliberate.mock.calls[0]!;
+    expect(config.recordTranscript).toBe(recordTranscript);
+  });
+
+  it("omits recordTranscript from config when no sink is provided", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
+    const deps = makeWireDeps();
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({ task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "shared_convergence" });
+
+    const [, , , config] = mockDeliberate.mock.calls[0]!;
+    expect("recordTranscript" in config).toBe(false);
+  });
+
   it("should return deliberation output", async () => {
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
