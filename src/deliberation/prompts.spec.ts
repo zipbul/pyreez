@@ -478,8 +478,10 @@ describe("buildAdversarialDebateR2", () => {
   it("system carries the output-format with severity tiers + confidence + steelman field", () => {
     const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
     expect(sys).toContain("<output-format>");
-    // severity + confidence merged onto one verdict line
-    expect(sys).toContain("severity (critical | high | medium | low) and confidence (HIGH | MEDIUM | LOW)");
+    // verdict rendered as a literal, parseable template (lowercase severity, uppercase confidence)
+    expect(sys).toContain("(critical | high | medium | low)");
+    expect(sys).toContain("(HIGH | MEDIUM | LOW)");
+    expect(sys).toContain("verdict: critical, HIGH");
     expect(sys).toContain("steelman:");
     expect(sys).toMatch(/Order findings by severity, most critical first/);
     // reason-before-verdict (de-commit-first) is enforced by FIELD ORDER, not a redundant prose clause:

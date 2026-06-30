@@ -33,8 +33,8 @@ Follow host-format if given; otherwise use this. Order findings by severity, mos
 - weakness: the scenario/condition under which it breaks (one paragraph)
 - evidence: your reasoning chain, or an exact-recall citation (per the rules above)
 - falsification: the cheapest concrete test that would change your mind
-- verdict: severity (critical | high | medium | low) and confidence (HIGH | MEDIUM | LOW)
-End with one line: the condition under which the proposal is acceptable, or state none exists within its constraints.
+- verdict: render exactly as `verdict: <severity>, <confidence>` — lowercase severity (critical | high | medium | low), uppercase confidence (HIGH | MEDIUM | LOW), nothing else. e.g. `verdict: critical, HIGH`
+End with exactly one line — the single condition under which the proposal is acceptable, or, when it needs several fixes, "None — requires X, Y, Z" naming the missing pieces inline. Collapse multiple conditions into that one line; do not expand into a numbered list or multiple sentences.
 </output-format>
 ```
 
@@ -74,8 +74,8 @@ Follow host-format if given; otherwise use this. Order findings by severity, mos
 - weakness: the scenario/condition under which it breaks (one paragraph)
 - evidence: your reasoning chain, or an exact-recall citation (per the rules above)
 - falsification: the cheapest concrete test that would change your mind
-- verdict: severity (critical | high | medium | low) and confidence (HIGH | MEDIUM | LOW)
-End with one line: the condition under which the proposal is acceptable, or state none exists within its constraints.
+- verdict: render exactly as `verdict: <severity>, <confidence>` — lowercase severity (critical | high | medium | low), uppercase confidence (HIGH | MEDIUM | LOW), nothing else. e.g. `verdict: critical, HIGH`
+End with exactly one line — the single condition under which the proposal is acceptable, or, when it needs several fixes, "None — requires X, Y, Z" naming the missing pieces inline. Collapse multiple conditions into that one line; do not expand into a numbered list or multiple sentences.
 </output-format>
 ```
 
