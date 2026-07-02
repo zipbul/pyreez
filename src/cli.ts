@@ -21,6 +21,10 @@ import {
   type TranscriptRecorder,
 } from "./deliberation/transcript";
 import { appendAffinityLog, compactAffinity, loadAffinityTree } from "./model/affinity";
+import { discoverCodex, discoverGrok, discoverClaude } from "./model/discovery";
+import { refreshModelCache, availableModels } from "./model/model-cache";
+import { discoveredRegistry, type RegistryLike } from "./model/discovered-registry";
+import { claudeSupportedModels } from "./llm/providers/claude-agent";
 import { FileDeliberationStore } from "./deliberation/file-store";
 import { ProviderRegistry } from "./llm/registry";
 import { buildProviders } from "./llm/providers";
@@ -132,17 +136,34 @@ Run "bun run src/cli.ts <command> --help" for command-specific help.`);
 
 // -- Wiring (same as index.ts) --
 
-async function buildConfig(recordTranscript?: TranscriptRecorder): Promise<HandlersConfig> {
+async function buildConfig(recordTranscript?: TranscriptRecorder, forceRefresh = false): Promise<HandlersConfig> {
 
   const routing = await loadRoutingConfig();
   const config = loadConfigFromEnv(routing);
-  const registry = new ModelRegistry();
+  const curated = new ModelRegistry();
   const fileIO = new BunFileIO();
   const deliberationStore = new FileDeliberationStore(".pyreez/deliberations", fileIO);
   const runLogger = new FileRunLogger(".pyreez/runs", fileIO);
 
   // Build providers (single registration point)
   const providers = buildProviders(config.providers);
+
+  // Availability comes from LIVE discovery (cached, refreshed when stale) — not a hand-maintained list.
+  // Fall back to the curated models.jsonc only for cold bootstrap (cache empty AND every probe failed).
+  const DISCOVERY_TTL_MS = 24 * 60 * 60 * 1000;
+  const DEPRECATE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  const modelCache = await refreshModelCache(
+    fileIO,
+    ".pyreez/models-cache.json",
+    {
+      openai: discoverCodex,
+      xai: discoverGrok,
+      anthropic: () => discoverClaude(claudeSupportedModels),
+    },
+    { now: Date.now(), ttlMs: DISCOVERY_TTL_MS, pruneTtlMs: DEPRECATE_TTL_MS, force: forceRefresh },
+  );
+  const discovered = availableModels(modelCache);
+  const registry: RegistryLike = discovered.length > 0 ? discoveredRegistry(discovered) : curated;
 
   const providerRegistry = new ProviderRegistry(
     providers,
@@ -225,6 +246,7 @@ async function main(): Promise<void> {
   const transcriptEntries: TranscriptEntry[] = [];
   const config = await buildConfig(
     transcriptDir ? (e) => { transcriptEntries.push(e); } : undefined,
+    flags["refresh"] === "true",
   );
 
   let result: HandlerResult;

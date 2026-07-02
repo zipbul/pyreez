@@ -78,3 +78,22 @@ export class ClaudeAgentProvider implements LLMProvider {
     }
   }
 }
+
+/**
+ * List the models the logged-in Claude account supports, via the agent SDK's `supportedModels()`
+ * control request. Verified to return the catalog from the session init handshake WITHOUT running an
+ * inference turn (no token cost); ~sub-second. Streaming-input mode is required, so we pass an empty
+ * async-iterable prompt and never consume the message stream. Returns [] on any failure.
+ */
+export async function claudeSupportedModels(): Promise<{ value: string; displayName?: string; description?: string }[]> {
+  async function* noInput(): AsyncGenerator<never> { /* yields nothing */ }
+  const q = query({ prompt: noInput(), options: {} } as any) as any;
+  try {
+    const models = await q.supportedModels();
+    return Array.isArray(models) ? models : [];
+  } catch {
+    return [];
+  } finally {
+    try { await q.return?.(undefined); } catch { /* close the generator quietly */ }
+  }
+}

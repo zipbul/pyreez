@@ -3,15 +3,16 @@
  * Re-exports shared utilities and delegates to CLI.
  */
 
-import { ModelRegistry } from "./model/registry";
+import type { RegistryLike } from "./model/discovered-registry";
 import type { LLMProvider } from "./llm/types";
 
 /**
  * Filter registry models to only those from configured providers.
+ * Accepts any registry-shaped source (curated ModelRegistry or the discovery-backed adapter).
  * Exported for use by CLI and tests.
  */
 export function filterModelsByProviders(
-  registry: ModelRegistry,
+  registry: RegistryLike,
   providers: readonly LLMProvider[],
 ): { modelIds: string[]; warnings: string[] } {
   const configuredProviders = new Set(providers.map((p) => p.name));

@@ -120,8 +120,8 @@ export function discoverClaude(
   return runGuarded(async () => {
     const models = (await supportedModels())
       .filter((m) => typeof m.value === "string" && m.value.length > 0)
-      // skip aliases like "default"/"opus"/"sonnet" — keep only concrete versioned ids
-      .filter((m) => m.value.includes("-"))
+      // keep real model values (opus/sonnet/haiku and versioned ids); drop only the "default" meta-alias
+      .filter((m) => m.value !== "default")
       .map((m) => ({
         id: `anthropic/${m.value}`,
         provider: "anthropic" as const,
