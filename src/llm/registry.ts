@@ -29,7 +29,14 @@ export class ProviderRegistry {
   }
 
   async chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
-    const providerName = this.modelProviderMap.get(request.model);
+    // Prefer the explicit map; fall back to the id's provider prefix (e.g. "openai/gpt-5.5") when it
+    // names a CONFIGURED provider. This lets live-discovered ids (absent from any curated map) route,
+    // while a truly unknown id — or one whose prefix isn't a configured provider — still hard-errors.
+    let providerName = this.modelProviderMap.get(request.model);
+    if (!providerName) {
+      const prefix = request.model.split("/")[0] as ProviderName;
+      if (this.providers.has(prefix)) providerName = prefix;
+    }
     if (!providerName) {
       throw new LLMClientError(
         400,
