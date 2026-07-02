@@ -336,7 +336,7 @@ const ADVERSARIAL_APPROACH_PEER = `<approach>
 // of critique instead of five copies of the same critique.
 const ATTACK_ANGLES = [
   "Focus on hidden assumptions — what implicit premises must hold for this to work?",
-  "Focus on evidence gaps — what is asserted without measurable support?",
+  "Focus on evidence gaps — if an asserted premise is false, what concrete failure path follows?",
   "Focus on operational failure — under what conditions does this break in production?",
   "Focus on edge cases and adversarial input — what scenarios make this fall apart?",
   "Focus on incentive misalignment — whose interests does this serve vs whose does it harm?",
