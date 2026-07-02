@@ -235,3 +235,25 @@ debate (subagent + codex + me, NOT pyreez) → re-measure. Models: claude-haiku,
   example; confabulates compliance). NOT prompt-fixable. Reverted the example (bulky, no measured effect;
   claude-haiku/gpt-5.4-mini comply without it). Downstream stance: treat grok output as prose (the affinity
   rubric judge scores axes from content regardless), or deprioritize grok for field-parsing consumers.
+
+- **it4**: measured — spec-gap/ambiguity findings rated critical/HIGH, violating the HIGH-rule (worker
+  mis-reads "cheap deterministic check" as "I can confirm the spec is silent"). Fix (3-way debate): add
+  to both NOLOOKUP+WEB confidence defs — "a missing/ambiguous spec is not HIGH unless the failure it
+  implies is itself deterministically checkable." Convergence debated → NO CHANGE (corroboration in a
+  stress-test, not a defect; it's a symptom of the confidence inflation). (Reverted an unauthorized
+  attack-angle edit a reviewer slipped in — subagent-verification.)
+- **it5**: measured — HIGH ratio unchanged (it3 7/24 → it5 9/23). Not a regression: most spec-gaps on
+  this task DO imply deterministically-checkable failures (windowing→boundary burst, missing atomicity
+  →TOCTOU race), so HIGH is CORRECT per the new clause. The pure-ambiguity class (shared-vs-per-endpoint,
+  needs code-read) rarely recurred, so the clause's effect is within noise at n=1 — principled but
+  statistically invisible per-run (same lesson as the earlier campaigns). Clause kept (1 line, correct).
+
+## Robust conclusions from the 2026-07 loop (n-independent)
+1. grok-build is INTRINSICALLY format-noncompliant for this protocol (n=3; ignores bare-fields → MUST →
+   filled example; confabulates compliance). Not prompt-fixable → treat grok as prose downstream.
+2. attack-angle made self-contained (drop the unactionable "peers cover those") — unambiguous improvement.
+3. format-MUST line: helps the explicit contract; compliant models (haiku, gpt-5.4-mini) already complied.
+4. spec-gap confidence clause: principled correctness refinement; measured effect within per-run noise.
+5. convergence of heterogeneous workers on the top flaw = corroboration, NOT a defect (no change).
+Method worked: every fix was decided by 3-way debate (subagent+codex+me, not pyreez) and measured live;
+grok's intrinsic limit was found by re-questioning the worker in its own resumed session.
