@@ -370,7 +370,7 @@ export function buildAdversarialDebateR1(
     const angle = ATTACK_ANGLES[workerIndex % ATTACK_ANGLES.length]!;
     // Bind the lead finding to this angle: "most critical first" otherwise pulls every worker to the
     // same obvious top weakness, collapsing the per-worker diversity this angle exists to create.
-    userParts.push(`<attack-angle>Stay within this assigned lens: lead with the strongest weakness it reveals, and avoid obvious/standard critiques any model would reach without this lens. (Severity ordering of the rest is governed by <output-format>.) ${angle}</attack-angle>`);
+    userParts.push(`<attack-angle>Stay within this assigned lens: lead with the strongest weakness it reveals, and avoid obvious/standard critiques any model would reach without this lens. ${angle}</attack-angle>`);
   }
 
   userParts.push(`<task>${escapeXmlContent(ctx.task)}</task>`);

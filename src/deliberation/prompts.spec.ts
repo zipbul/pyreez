@@ -506,10 +506,10 @@ describe("buildAdversarialDebateR2", () => {
     const r1sys = r1[0]!.content!;
     const r1user = r1[1]!.content!;
     expect(r1sys).toMatch(/when an <attack-angle> assigns your lead finding, lead with that/);
-    // ordering of the rest is owned by <output-format>; the attack-angle wrapper must NOT restate it
-    // (worker interrogation flagged the duplicate "Then order the rest by severity")
+    // ordering is owned entirely by <output-format>; the attack-angle wrapper must not mention it at all
+    // (interrogation flagged both the duplicate "Then order the rest by severity" AND a dead cross-reference)
     expect(r1user).not.toMatch(/order the rest by severity/i);
-    expect(r1user).toMatch(/Severity ordering of the rest is governed by <output-format>/);
+    expect(r1user).not.toMatch(/ordering of the rest/i);
   });
 
   it("R2/FollowUp rotated attack-angle announces it SUPERSEDES the prior round's lens", () => {
