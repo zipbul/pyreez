@@ -96,6 +96,8 @@ export async function handleDeliberate(
     file_access?: FileAccess;
     web_access?: boolean;
     reasoning_effort?: DeliberateInput["reasoning_effort"];
+    topic_path?: readonly string[];
+    axes?: readonly string[];
   },
 ): Promise<HandlerResult> {
   return logRun(config, "deliberate", async () => {
@@ -138,6 +140,8 @@ export async function handleDeliberate(
         ...(args.file_access ? { fileAccess: args.file_access } : {}),
         ...(args.web_access ? { webAccess: true } : {}),
         ...(args.reasoning_effort ? { reasoning_effort: args.reasoning_effort } : {}),
+        ...(args.topic_path?.length ? { topicPath: args.topic_path } : {}),
+        ...(args.axes?.length ? { axes: args.axes } : {}),
       };
 
       const result = await config.deliberateFn(input);

@@ -20,6 +20,7 @@ import {
   type TranscriptEntry,
   type TranscriptRecorder,
 } from "./deliberation/transcript";
+import { appendAffinityLog, compactAffinity, loadAffinityTree } from "./model/affinity";
 import { FileDeliberationStore } from "./deliberation/file-store";
 import { ProviderRegistry } from "./llm/registry";
 import { buildProviders } from "./llm/providers";
@@ -118,6 +119,8 @@ Commands:
   inspect       Integrated post-deliberate inspection: convergence + (rank if N≥4) + quality (opt-in)
   fuse          Fuse ranked candidates into a single synthesis draft (LLM-Blender GenFuser)
   interrogate   Re-question a captured worker (--run <id> | --transcript <dir>) --round N --worker I --question "..."
+  affinity      Print the learned per-topic model-affinity tree (readonly, for host model selection)
+  affinity-compact  Fold the affinity log into the tree (offline maintenance)
 
 Debug capture: "deliberate" ALWAYS records each worker's prompt+output+sessionId+settings to
 .pyreez/debug/<id> (printed at the end) so any run is debuggable. interrogate re-enters the worker's
@@ -177,12 +180,19 @@ async function buildConfig(recordTranscript?: TranscriptRecorder): Promise<Handl
     getById: (id: string) => configuredModelIds.has(id) ? registry.getById(id) : undefined,
   };
 
+  // Affinity: accumulate learned per-topic/axis scores. Judge = a fixed neutral model (env override,
+  // else the first configured model). Scoring only fires when a run supplies topicPath + axes.
+  const judgeModel = process.env.PYREEZ_JUDGE_MODEL || modelIds[0];
+  const affinityLogPath = ".pyreez/affinity-log.jsonl";
+
   const deliberateFn = createDeliberateFn({
     registry: filteredRegistry,
     chat: (model, messages, params) => chatAdapter(model, messages, params),
     store: deliberationStore,
     cooldown: sharedCooldown,
     ...(recordTranscript ? { recordTranscript } : {}),
+    ...(judgeModel ? { judge: { model: judgeModel, chat: (m, msgs) => chatAdapter(m, msgs).then((r) => ({ content: r.content })) } } : {}),
+    recordAffinity: (rec) => appendAffinityLog(fileIO, affinityLogPath, rec),
   });
 
   return {
@@ -260,6 +270,10 @@ async function main(): Promise<void> {
         die(`--file-access must be "read" or "write"`);
       }
 
+      // Affinity (learned routing): host-authored topic path ("a/b/c") + axes ("x,y"). Both → run scored.
+      const topicPath = flags["topic"]?.split("/").map((s) => s.trim()).filter(Boolean);
+      const axes = flags["axes"]?.split(",").map((s) => s.trim()).filter(Boolean);
+
       result = await handleDeliberate(config, {
         task: task!,
         models,
@@ -274,6 +288,8 @@ async function main(): Promise<void> {
         file_access: fileAccess as FileAccess | undefined,
         web_access: flags["web-access"] === "true" ? true : undefined,
         reasoning_effort: reasoningEffort,
+        topic_path: topicPath,
+        axes,
         onRound: (round) => {
           const models = round.responses.map((r) => r.model).join(", ");
           const failed = round.failedWorkers?.length ?? 0;
@@ -521,6 +537,21 @@ async function main(): Promise<void> {
         answer = r.content;
       }
       result = { data: { mode, model: entry.model, round: entry.round, workerIndex: entry.workerIndex, ...(mode === "resumed" ? { sessionId: entry.sessionId } : {}), answer } };
+      break;
+    }
+
+    case "affinity": {
+      // Read-only: print the compacted affinity tree so a host agent can see per-topic model strengths.
+      const tree = await loadAffinityTree(new BunFileIO(), ".pyreez/affinity.json");
+      result = { data: tree };
+      break;
+    }
+
+    case "affinity-compact": {
+      // Fold the append-only log into the tree (atomic swap). Offline maintenance.
+      const tree = await compactAffinity(new BunFileIO(), ".pyreez/affinity-log.jsonl", ".pyreez/affinity.json");
+      const protocols = Object.keys(tree);
+      result = { data: { compacted: true, protocols } };
       break;
     }
 

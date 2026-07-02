@@ -22,6 +22,8 @@ import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
 import type { CooldownManager } from "./cooldown";
 import type { TranscriptRecorder } from "./transcript";
+import { scoreResponse, type RubricChatFn } from "../quality/rubric-judge";
+import type { AffinityLogRecord } from "../model/affinity";
 import {
   buildSharedConvergenceR1,
   buildSharedConvergenceR2,
@@ -48,6 +50,10 @@ export interface WireDeps {
   readonly cooldown?: CooldownManager;
   /** Optional transcript sink, forwarded to the engine to capture per-worker prompt+output. */
   readonly recordTranscript?: TranscriptRecorder;
+  /** Optional affinity scorer: a fixed neutral judge used post-run to rate workers on the topic axes. */
+  readonly judge?: { readonly model: string; readonly chat: RubricChatFn };
+  /** Optional sink for a scored affinity record (one per worker). Best-effort, off the hot path. */
+  readonly recordAffinity?: (record: AffinityLogRecord) => Promise<void> | void;
 }
 
 // -- Think Tag Stripping --
@@ -304,6 +310,31 @@ export function createDeliberateFn(
         });
       } catch {
         // best-effort save — do not fail the deliberation
+      }
+    }
+
+    // 10. Affinity scoring (best-effort, off the hot path): when the host authored a topic + axes,
+    // score each final-round worker with the neutral judge and append one record per worker.
+    if (deps.judge && deps.recordAffinity && input.topicPath?.length && input.axes?.length) {
+      try {
+        const finalRound = result.rounds?.[result.rounds.length - 1];
+        const axes = input.axes;
+        const topicPath = input.topicPath;
+        for (const resp of finalRound?.responses ?? []) {
+          const scores = await scoreResponse(deps.judge.chat, deps.judge.model, input.task, axes, resp.content);
+          if (Object.keys(scores).length > 0) {
+            await deps.recordAffinity({
+              v: 1,
+              ts: Date.now(),
+              protocol,
+              path: [...topicPath],
+              model: resp.model,
+              axes: scores,
+            });
+          }
+        }
+      } catch {
+        // best-effort — affinity scoring must never fail the deliberation
       }
     }
 

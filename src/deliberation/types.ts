@@ -186,6 +186,12 @@ export interface DeliberateInput {
   /** Task nature for prompt selection. Artifact = deliverable output, Critique = analysis. */
   readonly taskNature?: TaskNature;
 
+  // -- Affinity (learned routing) — host-authored; when both present, the run is scored + logged --
+  /** Topic path (arbitrary depth) this task belongs to, e.g. ["인증-보안","토큰-캐싱"]. */
+  readonly topicPath?: readonly string[];
+  /** Capability axes to score workers on for this topic (topic-specific, host-authored). */
+  readonly axes?: readonly string[];
+
   // -- Protocol-specific fields --
 
   /** Host interrogation: questions to ask each worker. */

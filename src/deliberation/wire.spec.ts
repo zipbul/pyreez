@@ -394,6 +394,78 @@ describe("createDeliberateFn", () => {
     expect("recordTranscript" in config).toBe(false);
   });
 
+  // -- affinity scoring hook --
+
+  const OUTPUT_WITH_ROUNDS = {
+    ...STUB_DELIBERATE_OUTPUT,
+    rounds: [{
+      number: 1,
+      protocol: "adversarial_debate" as const,
+      responses: [
+        { model: "anthropic/claude-opus", content: "answer A" },
+        { model: "xai/grok-build", content: "answer B" },
+      ],
+    }],
+  };
+
+  function affinityDeps(recordAffinity: (r: any) => void, chatContent = '{"정확성": 80, "창의력": 60}') {
+    return {
+      ...makeWireDeps(),
+      judge: { model: "judge/model", chat: mock(async () => ({ content: chatContent })) },
+      recordAffinity,
+    };
+  }
+
+  it("scores each final-round worker and records an affinity entry when topicPath+axes are given", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => OUTPUT_WITH_ROUNDS);
+    const records: any[] = [];
+    const deliberateFn = createDeliberateFn(affinityDeps((r) => records.push(r)));
+
+    await deliberateFn({
+      task: "eval JWT caching", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
+      protocol: "adversarial_debate", topicPath: ["인증-보안", "토큰-캐싱"], axes: ["정확성", "창의력"],
+    });
+
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      protocol: "adversarial_debate", path: ["인증-보안", "토큰-캐싱"],
+      model: "anthropic/claude-opus", axes: { "정확성": 80, "창의력": 60 },
+    });
+    expect(records[1]!.model).toBe("xai/grok-build");
+  });
+
+  it("does NOT score when axes are absent (zero cost)", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => OUTPUT_WITH_ROUNDS);
+    const records: any[] = [];
+    const deps = affinityDeps((r) => records.push(r));
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({
+      task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
+      protocol: "adversarial_debate", topicPath: ["인증-보안"],
+    }); // no axes
+
+    expect(records).toHaveLength(0);
+    expect(deps.judge.chat).not.toHaveBeenCalled();
+  });
+
+  it("skips a worker whose judge output has no parseable scores; never throws", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => OUTPUT_WITH_ROUNDS);
+    const records: any[] = [];
+    const deliberateFn = createDeliberateFn(affinityDeps((r) => records.push(r), "no json here"));
+
+    const result = await deliberateFn({
+      task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
+      protocol: "adversarial_debate", topicPath: ["보안"], axes: ["정확성"],
+    });
+
+    expect(records).toHaveLength(0);
+    expect(result).toEqual(OUTPUT_WITH_ROUNDS); // deliberation result unaffected
+  });
+
   it("should return deliberation output", async () => {
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
