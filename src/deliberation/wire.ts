@@ -133,7 +133,6 @@ export function createChatAdapter(
 function createEngineDepsForProtocol(
   protocol: Protocol,
   chatFn: (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<ChatResult>,
-  webAccess = false,
 ): EngineDeps {
   switch (protocol) {
     case "shared_convergence":
@@ -149,12 +148,12 @@ function createEngineDepsForProtocol(
     case "adversarial_debate":
       return {
         chat: chatFn,
-        // perWorkerWeb is gated by the engine on provider capability; fall back to the global flag
-        // only when the engine doesn't supply it (e.g. a direct deps unit test).
-        buildR1Messages: (ctx, instructions, roundInfo, workerIndex, perWorkerWeb) =>
-          buildAdversarialDebateR1(ctx, instructions, roundInfo, workerIndex, perWorkerWeb ?? webAccess),
-        buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex, perWorkerWeb) =>
-          buildAdversarialDebateR2(ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex, perWorkerWeb ?? webAccess),
+        // The adversarial prompt is tool-agnostic: it does not depend on web access (the worker's tool
+        // set is wired separately by request.webAccess). So no web flag is threaded into the builders.
+        buildR1Messages: (ctx, instructions, roundInfo, workerIndex) =>
+          buildAdversarialDebateR1(ctx, instructions, roundInfo, workerIndex),
+        buildR2Messages: (ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex) =>
+          buildAdversarialDebateR2(ctx, otherResponses, ownPrevious, instructions, roundInfo, workerIndex),
         buildFollowUp: (ctx, otherResponses, instructions, roundInfo, workerIndex) =>
           buildAdversarialDebateFollowUp(ctx, otherResponses, instructions, roundInfo, workerIndex),
       };
@@ -249,7 +248,7 @@ export function createDeliberateFn(
 
     // 5. Assemble engine deps (protocol-specific prompt builders)
     const protocol = input.protocol;
-    const engineDeps = createEngineDepsForProtocol(protocol, deps.chat, input.webAccess ?? false);
+    const engineDeps = createEngineDepsForProtocol(protocol, deps.chat);
 
     // 6. Build engine config
     const effectiveMaxRounds = input.maxRounds ?? defaultMaxRounds(protocol);

@@ -337,3 +337,34 @@ Rejected (measured design / no manifest defect):
 
 Verification: 742 tests pass, typecheck clean, format 0-markdown / 0-backtick / calibrated verdicts on live
 re-measure. Fixes decided by cross-checking 5 auditors (pyreez + subagent + codex), not one voice.
+
+## Evidence block: 2 variants → 1 tool-agnostic block (remove prompt/wiring desync)
+Question raised: why does the prompt have a separate web vs no-lookup evidence block, and why mention web
+tools at all? Answer: it shouldn't. Whether a worker holds web tools is decided by the harness WIRING
+(request.webAccess → grok --disable-web-search / claude WebSearch tools / codex webSearchEnabled) — the
+single source of truth. The model learns its tools from the tool schema, not prose. A prompt that ALSO
+announces "you have web search tools" (or forbids URLs in no-lookup) creates a second, desyncable source:
+if it claims a tool the wiring didn't grant, the worker acts on a false self-model (tries to fetch, then
+confabulates); if it suppresses a granted tool, the capability is wasted. Same category error as baking a
+reasoning-effort instruction into a prompt when the vendor exposes an effort parameter.
+
+The two disciplines were never actually opposite — both reduce to ONE invariant: "assert a specific only
+when you can confirm it." A web worker confirms by running a check; a no-tool worker confirms by exact
+recall, else abstains ([unverified]). "Never emit a URL" (no-lookup) and "cite the URL" (web) are the same
+rule — emit only confirmable specifics — over an empty vs non-empty confirmable set.
+
+Change: merged ADVERSARIAL_EVIDENCE_WEB + ADVERSARIAL_EVIDENCE_NOLOOKUP into one tool-agnostic
+ADVERSARIAL_EVIDENCE; removed the `webAccess` parameter from adversarialSystem + the R1/R2 builders + the
+EngineDeps buildR1/R2Messages signatures + the engine's workerWebAccess + wire's threading. The wiring
+(request.webAccess → workerGenParams → provider) is untouched — web search is NOT killed.
+
+Measured both modes (live):
+- **no-lookup** (caching task, 3 workers): no regression — format 0-markdown, 0 fabricated URLs, 0 stray
+  backticks, calibrated verdicts, meta count identical to prior clean runs.
+- **web** (libuv thread-pool task, --web-access, grok+gpt): active verification PRESERVED — gpt fetched
+  Node/libuv docs and cited 7 URLs + a Sources section + used [unverified]; grok quoted libuv verbatim
+  with the correct fact ("default size is 4") and reasoned from it. The tool-agnostic "confirm by a check
+  you actually ran" still drives real verification.
+Honest caveat: the merge softened the old web block's explicit "cite every URL" MANDATE to a guard against
+FALSE citation. grok verified-without-citing. This is intentional and aligned with the anti-confabulation
+design — the citation-first mandate is exactly what drove the earlier confabulation floor. 742 tests pass.

@@ -137,19 +137,14 @@ export interface EngineDeps {
     messages: ChatMessage[],
     params?: GenerationParams,
   ) => Promise<ChatResult>;
-  /**
-   * Build R1 messages for a protocol. `webAccess` is per-worker (the engine gates the global
-   * flag by provider capability), so a tool-less provider gets the no-lookup prompt even in a
-   * --web-access run. Protocols other than adversarial_debate ignore it.
-   */
+  /** Build R1 messages for a protocol. Prompts are tool-agnostic — web access is not a prompt input. */
   readonly buildR1Messages: (
     ctx: SharedContext,
     instructions?: string,
     roundInfo?: RoundInfo,
     workerIndex?: number,
-    webAccess?: boolean,
   ) => ChatMessage[];
-  /** Build R2+ messages with other workers' responses (full rebuild). `webAccess` is per-worker. */
+  /** Build R2+ messages with other workers' responses (full rebuild). */
   readonly buildR2Messages?: (
     ctx: SharedContext,
     otherResponses: readonly WorkerResponse[],
@@ -157,7 +152,6 @@ export interface EngineDeps {
     instructions?: string,
     roundInfo?: RoundInfo,
     workerIndex?: number,
-    webAccess?: boolean,
   ) => ChatMessage[];
   /** Build follow-up message for session continuation in R2+. */
   readonly buildFollowUp?: (
@@ -522,10 +516,8 @@ async function callWithFallback(
 
   // Build messages — session continuation if history exists and model unchanged, full rebuild otherwise
   const buildMessages = (): ChatMessage[] => {
-    // Web access is a run-level choice: --web-access opens web tools for every worker. All providers
-    // support web search, so there's no per-provider gate here; if a future provider can't, the
-    // registry's capability gate hard-errors rather than silently downgrading.
-    const workerWebAccess = input.webAccess ?? false;
+    // Prompts are tool-agnostic: web access (input.webAccess) wires the worker's tool set via
+    // config.workerGenParams, but is NOT a prompt input — the evidence discipline reads the same either way.
     // Session continuation: append follow-up to existing history (only if same model)
     if (isR2Plus && activeHistory && deps.buildFollowUp) {
       const lastRound = ctx.rounds[ctx.rounds.length - 1];
@@ -542,9 +534,9 @@ async function callWithFallback(
       const ownPrevious = lastRound
         ? lastRound.responses.find((r) => r.workerIndex === workerIndex)
         : undefined;
-      return deps.buildR2Messages(ctx, otherResponses, ownPrevious, input.workerInstructions, roundInfo, workerIndex, workerWebAccess);
+      return deps.buildR2Messages(ctx, otherResponses, ownPrevious, input.workerInstructions, roundInfo, workerIndex);
     }
-    return deps.buildR1Messages(ctx, input.workerInstructions, roundInfo, workerIndex, workerWebAccess);
+    return deps.buildR1Messages(ctx, input.workerInstructions, roundInfo, workerIndex);
   };
 
   // Try original model

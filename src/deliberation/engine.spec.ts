@@ -209,24 +209,24 @@ describe("executeRound", () => {
     expect(workerIndices).toEqual([0, 1, 2]);
   });
 
-  it("passes run-level webAccess to every worker (no per-provider gate; all providers grant web)", async () => {
-    // Web access is a run-level choice: --web-access opens web tools for every worker, since all
-    // providers grant server-side web search. There is no per-provider prompt gate; if a future
-    // provider can't do web, the registry's capability gate hard-errors instead of silently downgrading.
+  it("does NOT pass webAccess to the prompt builder (prompts are tool-agnostic; web is wired via chat params)", async () => {
+    // Whether a worker holds web tools is decided by the harness wiring and reaches the provider through
+    // config.workerGenParams (asserted in "GenerationParams forwarding"). The prompt builder is tool-agnostic
+    // and must NOT receive a webAccess argument — a prompt that restated capability could desync from the wiring.
     const team: TeamComposition = {
       workers: [
-        { model: "anthropic/claude-sonnet-4.6", role: "worker" }, // gets web tools
-        { model: "openai/gpt-5.4", role: "worker" }, // codex-sdk → gets web tools
+        { model: "anthropic/claude-sonnet-4.6", role: "worker" },
+        { model: "openai/gpt-5.4", role: "worker" },
       ],
     };
     const input = makeInput({ webAccess: true });
-    const config = makeConfig();
+    const config = makeConfig({ workerGenParams: { webAccess: true } });
 
-    const seen: Array<{ workerIndex: number; webAccess: boolean | undefined }> = [];
+    const builderArgCounts: number[] = [];
     const deps = makeDeps({
       chat: mock(async () => chatResult(validWorkerContent("response"))),
-      buildR1Messages: mock((_ctx: any, _inst?: any, _ri?: any, workerIndex?: any, webAccess?: any) => {
-        seen.push({ workerIndex, webAccess });
+      buildR1Messages: mock((...args: unknown[]) => {
+        builderArgCounts.push(args.length);
         return [{ role: "user" as const, content: "work" }];
       }),
     });
@@ -235,8 +235,9 @@ describe("executeRound", () => {
     const ctx = createSharedContext(input.task, team);
     await executeRound(ctx, 1, deps, config, input);
 
-    expect(seen.find((s) => s.workerIndex === 0)?.webAccess).toBe(true); // anthropic → verify-with-tools
-    expect(seen.find((s) => s.workerIndex === 1)?.webAccess).toBe(true); // openai (codex-sdk) → verify-with-tools
+    // ctx, instructions, roundInfo, workerIndex — and no 5th webAccess arg
+    expect(builderArgCounts.length).toBeGreaterThan(0);
+    expect(Math.max(...builderArgCounts)).toBeLessThanOrEqual(4);
   });
 });
 

@@ -267,33 +267,29 @@ export function buildSharedConvergenceFollowUp(
 
 // Standing reference (static). NOT built via buildSystemPrompt: adversarial does not use
 // GLOBAL_DEPTH/DEPTH_EXPLORE — its evidence/confidence/output rules live here, once.
-// Role + output-format are shared; the evidence block swaps on webAccess (no-lookup discipline
-// vs verify-with-tools).
+// Role, evidence-and-confidence, and output-format are all tool-agnostic and static. The prompt
+// deliberately does NOT mention or branch on web access: whether a worker holds web tools is set by
+// the harness wiring (request.webAccess → provider tool set), the single source of truth. The prompt
+// states one discipline that is TRUE either way — "assert a specific only when you can confirm it" —
+// so it can never desync from the wiring (claim a tool the worker lacks, or suppress one it has).
 const ADVERSARIAL_ROLE = `<role>
 You are one of several independent analysts stress-testing a proposal. Surface its strongest, evidence-backed weaknesses. Enumerate candidate failure modes and attack each. Drop a finding when any of these hold: (a) your own counter-attack defeats it; (b) it fires only under conditions the proposal rules out; (c) you cannot ground it in the proposal's content or a concrete failure mechanism. No preamble before the first finding.
 </role>`;
 
-// No-lookup: the worker cannot verify, so the discipline is recall-honesty + abstention.
+// Tool-agnostic evidence-and-confidence discipline. ONE block for all workers, web-wired or not: the
+// invariant "assert a specific only when you can confirm it" holds either way (a web worker confirms by
+// running a check; a no-tool worker confirms by exact recall, else abstains). No tool is named, so the
+// prompt never claims a capability the wiring didn't grant.
 // NOTE: adversarial confidence uses a falsifier-decisiveness scale (HIGH = a cheap deterministic check
 // settles it) INTENTIONALLY distinct from the shared CONFIDENCE_AND_UNCERTAINTY (evidence-strength) used by
 // the other protocols. The labels (HIGH/MEDIUM/LOW) collide but the semantics differ — do not "dedupe" the
 // two definitions. (Measured: the falsifier rubric is reliably judgeable, kappa 0.60.)
-const ADVERSARIAL_EVIDENCE_NOLOOKUP = `<evidence-and-confidence>
-- No lookups: reasoning chains (mechanism → break → consequence) or exact recall only. Never invent sources, identifiers, quotes, or numbers, and never emit a URL, "Sources" list, or line/section number — without a lookup you cannot confirm those.
-- When a specific is uncertain — existence, attribution, identifier, venue/year, wording, or figure — don't assert it: describe the capability without naming it, drop quotes, give a direction or order-of-magnitude range for numbers, and mark [unverified]. An operational number you estimated rather than recall (hours, %, throughput, counts) must carry [unverified] — never state it as a measured fact.
-- Confidence: HIGH = one cheap deterministic check decides it; a missing/ambiguous spec is not HIGH unless the failure it implies is itself deterministically checkable. MEDIUM = needs a benchmark/load test/other contingent evidence, or the reasoning has a gap, or it only bites under particular load/timing/config; LOW = speculative or [unverified]. Never inflate.
-- A flawed premise is itself a weakness — surface it; never build on it or refuse.
+const ADVERSARIAL_EVIDENCE = `<evidence-and-confidence>
+- Reason from the proposal's content or a concrete failure mechanism (mechanism → break → consequence). Assert a specific — a source, quoted string, number, or named identifier (command/flag/function/API/config-key and its default) — only when you can confirm it: by exact recall you are certain of, or by a check you actually ran. When you cannot confirm a specific, do not assert it: describe it without naming, drop the quote, give an order-of-magnitude range instead of a figure, and mark it [unverified]. An operational number you estimated rather than confirmed (hours, %, throughput, counts) must carry [unverified] — never state it as measured fact.
+- Put quotation marks only around text you can reproduce verbatim from a confirmed source; if you are giving the gist, paraphrase without quotes. A citation, URL, or "(verified)" beside a claim you did not actually confirm manufactures false authority — worse than none.
+- Confidence: HIGH = a confirmed source or one cheap deterministic check decides it; a missing/ambiguous spec is not HIGH unless the failure it implies is itself deterministically checkable. MEDIUM = needs a benchmark/load test/other contingent evidence, or the reasoning has a gap, or it only bites under particular load/timing/config; LOW = speculative or [unverified]. Your reasoning chain is valid evidence but does not by itself earn HIGH. Never inflate.
+- A flawed premise is itself a weakness — surface it with reasoning; never build on it or refuse.
 - Before submitting, fix any finding whose own text undercuts its label, severity, or confidence.
-</evidence-and-confidence>`;
-
-// Web-enabled: the worker CAN verify, so the discipline is verify-before-asserting.
-const ADVERSARIAL_EVIDENCE_WEB = `<evidence-and-confidence>
-- You have web search and fetch tools. Before asserting any source, exact number, quoted string, or named identifier (command/flag/function/API/config-key and its default value), VERIFY it: search for it, fetch the page, and confirm the source exists and actually states that claim/value/identifier. Cite what you verified, with the URL.
-- A quoted string must be the verbatim text you fetched; a number or default must be the value the source states; a named identifier must be one you confirmed exists. If a lookup cannot confirm it, write [unverified] and give your reasoning instead — never assert an unverified specific.
-- ANTI-FABRICATION (most common failure with tools): put quotation marks ONLY around words you copied from a page you actually fetched THIS session and can see contain that exact string. If you are reconstructing the gist, do NOT use quotation marks — paraphrase. Never write "(verified)" next to a claim unless the page you fetched literally states it, and list every URL you cite in a Sources section. A real URL beside an invented quote is worse than no citation — it manufactures false authority.
-- Your reasoning chain (mechanism → why it breaks → consequence) is valid evidence, but it does not by itself earn HIGH. Confidence per finding: HIGH = a fetched source you verified confirms it, or one cheap deterministic check decides it; a missing/ambiguous spec is not HIGH unless the failure it implies is itself deterministically checkable. MEDIUM = needs a benchmark/load test, or the reasoning has a gap, or it only bites under particular load/timing/config; LOW = speculative or [unverified]. Never inflate.
-- If a premise is flawed, surface it as a weakness with reasoning — do not silently build on it, and do not refuse the task.
-- Before submitting, re-read each finding for an internal contradiction (a label/severity its own text undercuts) and resolve it.
 </evidence-and-confidence>`;
 
 const ADVERSARIAL_OUTPUT_FORMAT = `<output-format>
@@ -307,11 +303,14 @@ Follow host-format if given; otherwise use this. Order findings by severity, mos
 End with exactly one line — the single condition under which the proposal is acceptable, or, when it needs several fixes, "None — requires X, Y, Z" naming the missing pieces inline. Collapse multiple conditions into that one line; do not expand into a numbered list or multiple sentences.
 </output-format>`;
 
-/** Adversarial system message. webAccess swaps the no-lookup discipline for verify-with-tools. */
-function adversarialSystem(webAccess = false): string {
+/**
+ * Adversarial system message. Tool-agnostic and static: it does not depend on web access — the worker's
+ * tool set is wired by the harness, and the evidence discipline here is true with or without tools.
+ */
+function adversarialSystem(): string {
   return [
     ADVERSARIAL_ROLE,
-    webAccess ? ADVERSARIAL_EVIDENCE_WEB : ADVERSARIAL_EVIDENCE_NOLOOKUP,
+    ADVERSARIAL_EVIDENCE,
     ADVERSARIAL_OUTPUT_FORMAT,
   ].join("\n\n");
 }
@@ -352,9 +351,8 @@ export function buildAdversarialDebateR1(
   instructions?: string,
   _roundInfo?: RoundInfo,
   workerIndex?: number,
-  webAccess = false,
 ): ChatMessage[] {
-  const system = adversarialSystem(webAccess);
+  const system = adversarialSystem();
 
   const userParts: string[] = [];
   if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
@@ -386,9 +384,8 @@ export function buildAdversarialDebateR2(
   instructions?: string,
   roundInfo?: RoundInfo,
   workerIndex?: number,
-  webAccess = false,
 ): ChatMessage[] {
-  const system = adversarialSystem(webAccess);
+  const system = adversarialSystem();
 
   const userParts: string[] = [];
 

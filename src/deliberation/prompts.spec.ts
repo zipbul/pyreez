@@ -565,7 +565,7 @@ describe("buildAdversarialDebateR2", () => {
     const user = msgs[1]!.content!;
     // confidence is tied to the decisiveness of the finding's own falsification test (calibration,
     // not tier-amputation): cheap deterministic check → HIGH, load/probabilistic test → MEDIUM
-    expect(sys).toMatch(/HIGH = one cheap deterministic check decides it/);
+    expect(sys).toMatch(/HIGH = a confirmed source or one cheap deterministic check decides it/);
     expect(sys).toMatch(/needs a benchmark\/load test\/other contingent evidence/);
     // de-duplicated: the confidence-label reminder is no longer repeated in the user/approach block
     expect(user).not.toContain("Label each finding's confidence");
@@ -627,27 +627,28 @@ describe("buildAdversarialDebateR2", () => {
     expect(sys).not.toContain("<completion-check>");
   });
 
-  it("evidence-discipline contract: no-lookup reframe + per-mode anti-fabrication self-checks", () => {
+  it("evidence-discipline contract: tool-agnostic confirm-or-abstain + anti-fabrication + [unverified]", () => {
     const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
-    // reasoning is the default (removes the citation-first incentive that drove confabulation)
-    expect(sys).toContain("No lookups");
-    expect(sys).toMatch(/reasoning chains/i);
-    // fabricated-incident guard — sources AND identifiers/quotes/numbers
-    expect(sys).toMatch(/Never invent sources, identifiers, quotes, or numbers/i);
-    // citation discipline: exact recall only
-    expect(sys).toMatch(/exact recall only/i);
-    // named uncertainty channels (existence/attribution/identifier/venue-year/wording/figure) force [unverified]
-    expect(sys).toMatch(/attribution/i);
-    expect(sys).toMatch(/venue\/year/i);
-    // named-identifier (model slips a fake API mid-generation) → describe instead of name
-    expect(sys).toMatch(/describe the capability without naming it/i);
-    // paraphrase-as-quote guard
-    expect(sys).toMatch(/drop quotes/i);
-    // number-laundering guard: numbers get a direction/order-of-magnitude range, not a fabricated figure
-    expect(sys).toMatch(/order-of-magnitude range for numbers/i);
+    // reasoning chain is the default evidence (removes the citation-first incentive that drove confabulation)
+    expect(sys).toMatch(/mechanism → break → consequence/);
+    // confirm-or-abstain: assert a specific ONLY when confirmable (recall OR a check you ran) — the one
+    // invariant that holds with or without web tools, so the prompt needs no tool-mode branch
+    expect(sys).toMatch(/only when you can confirm it/i);
+    expect(sys).toMatch(/by exact recall you are certain of, or by a check you actually ran/i);
+    // fabricated-incident guard names the specific categories (source/quote/number/identifier)
+    expect(sys).toMatch(/a source, quoted string, number, or named identifier/i);
+    // abstention behavior when a specific can't be confirmed → describe-without-naming + [unverified]
+    expect(sys).toMatch(/describe it without naming/i);
+    // number-laundering guard: order-of-magnitude range, not a fabricated figure
+    expect(sys).toMatch(/order-of-magnitude range/i);
+    // estimated operational number must carry [unverified]
+    expect(sys).toMatch(/estimated rather than confirmed/i);
     // single [unverified] convention, no competing tag
     expect(sys).toContain("[unverified]");
     expect(sys).not.toContain("[from-memory]");
+    // anti-citation-theater: quotes only around reproducible text; false-authority warning
+    expect(sys).toMatch(/quotation marks only around text you can reproduce verbatim/i);
+    expect(sys).toMatch(/manufactures false authority/i);
     // pre-submit re-read audit
     expect(sys).toMatch(/Before submitting/i);
     // output-format evidence field allows reasoning chain as evidence (not citation-only)
@@ -683,24 +684,24 @@ describe("buildAdversarialDebateR2", () => {
     expect(user).toMatch(/engage the weakest peer finding head-on within a finding/i);
   });
 
-  it("webAccess swaps the no-lookup contract for a verify-with-tools contract", () => {
-    const noLookup = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious, undefined, undefined, 0, false)[0]!.content!;
-    const web = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious, undefined, undefined, 0, true)[0]!.content!;
-    // no-lookup variant tells the worker it cannot look anything up
-    expect(noLookup).toContain("No lookups");
-    // web variant tells the worker to VERIFY with tools before asserting
-    expect(web).toContain("You have web search and fetch tools");
-    expect(web).toMatch(/VERIFY it/);
-    expect(web).not.toContain("No lookups:");
-    // anti-citation-theater: quotes only from fetched text, no fake "(verified)"
-    expect(web).toContain("ANTI-FABRICATION");
-    expect(web).toMatch(/quotation marks ONLY around words you copied/i);
-    // role + output-format stay shared across both
-    expect(web).toContain("stress-testing a proposal");
-    expect(web).toContain("<output-format>");
-    // R1 also honours webAccess
-    const webR1 = buildAdversarialDebateR1(makeCtx(), undefined, undefined, 0, true)[0]!.content!;
-    expect(webR1).toContain("You have web search and fetch tools");
+  it("prompt is tool-agnostic: one evidence block, never announces or branches on web tools", () => {
+    // Whether a worker holds web tools is set by the harness wiring (request.webAccess → provider tool
+    // set), the single source of truth. The prompt must NOT restate that capability — announcing a tool
+    // the wiring didn't grant (or suppressing one it did) desyncs the two sources.
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious, undefined, undefined, 0)[0]!.content!;
+    expect(sys).not.toMatch(/web search|web fetch|you have .*? tools|VERIFY it/i);
+    expect(sys).not.toContain("No lookups");
+    // exactly one evidence-and-confidence block (no no-lookup vs web variants)
+    expect((sys.match(/<evidence-and-confidence>/g) ?? []).length).toBe(1);
+    // the invariant discipline that is true with or without tools
+    expect(sys).toMatch(/only when you can confirm it/i);
+    // role + output-format unchanged
+    expect(sys).toContain("stress-testing a proposal");
+    expect(sys).toContain("<output-format>");
+    // R1 carries the same tool-agnostic system block
+    const r1 = buildAdversarialDebateR1(makeCtx(), undefined, undefined, 0)[0]!.content!;
+    expect(r1).not.toMatch(/web search|VERIFY it/i);
+    expect(r1).toMatch(/only when you can confirm it/i);
   });
 
   it("adversarial system is static (cache-stable) regardless of instructions", () => {
@@ -1191,7 +1192,7 @@ describe("cross-protocol design principles", () => {
     // adversarial carries the confidence taxonomy in the SYSTEM block (defined once, not in the user turn).
     expect(buildAdversarialDebateR2(
       makeCtx(), [], undefined,
-    )[0]!.content).toContain("HIGH = one cheap deterministic check decides it");
+    )[0]!.content).toContain("HIGH = a confirmed source or one cheap deterministic check decides it");
     // FollowUp builders MUST omit the anchor — message[1] in the live history
     // already carries it; re-injecting would be a duplicate.
     expect(buildSharedConvergenceFollowUp(makeCtx(), []).content).not.toContain("HIGH:");
