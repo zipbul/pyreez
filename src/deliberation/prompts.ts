@@ -285,7 +285,7 @@ You are one of several independent analysts stress-testing a proposal. Surface i
 // the other protocols. The labels (HIGH/MEDIUM/LOW) collide but the semantics differ — do not "dedupe" the
 // two definitions. (Measured: the falsifier rubric is reliably judgeable, kappa 0.60.)
 const ADVERSARIAL_EVIDENCE = `<evidence-and-confidence>
-- Reason from the proposal's content or a concrete failure mechanism (mechanism → break → consequence). Assert a specific — a source, quoted string, number, or named identifier (command/flag/function/API/config-key and its default) — only when you can confirm it: by exact recall you are certain of, or by a check you actually ran. When you cannot confirm a specific, do not assert it: describe it without naming, drop the quote, give an order-of-magnitude range instead of a figure, and mark it [unverified]. An operational number you estimated rather than confirmed (hours, %, throughput, counts) must carry [unverified] — never state it as measured fact.
+- Reason from the proposal's content or a concrete failure mechanism (mechanism → break → consequence). Assert a specific — a source, quoted string, number, or named identifier (command/flag/function/API/config-key and its default) — only when you can confirm it with the means available to you (certain recall, or verification if you have tools). If you cannot confirm it, do not assert it: describe it without naming, drop the quote, give an order-of-magnitude range instead of a figure, and mark it [unverified]. An operational number you estimated rather than confirmed (hours, %, throughput, counts) must carry [unverified] — never state it as measured fact.
 - Put quotation marks only around text you can reproduce verbatim from a confirmed source; if you are giving the gist, paraphrase without quotes. A citation, URL, or "(verified)" beside a claim you did not actually confirm manufactures false authority — worse than none.
 - Confidence: HIGH = a confirmed source or one cheap deterministic check decides it; a missing/ambiguous spec is not HIGH unless the failure it implies is itself deterministically checkable. MEDIUM = needs a benchmark/load test/other contingent evidence, or the reasoning has a gap, or it only bites under particular load/timing/config; LOW = speculative or [unverified]. Your reasoning chain is valid evidence but does not by itself earn HIGH. Never inflate.
 - A flawed premise is itself a weakness — surface it with reasoning; never build on it or refuse.
@@ -293,7 +293,7 @@ const ADVERSARIAL_EVIDENCE = `<evidence-and-confidence>
 </evidence-and-confidence>`;
 
 const ADVERSARIAL_OUTPUT_FORMAT = `<output-format>
-Follow host-format if given; otherwise use this. Order findings by severity, most critical first; when an <attack-angle> assigns your lead finding, lead with that and order the rest by severity. Every finding MUST use the exact field labels below — no markdown headings, no free-form prose, no renamed, added, or omitted fields (target is the sole exception: include it only when challenging a peer). Per finding, in this field order:
+If <host-instructions> specifies an output format, follow it; otherwise use this. Order findings by severity, most critical first; when an <attack-angle> assigns your lead finding, lead with that and order the rest by severity. Every finding MUST use the exact field labels below — no markdown headings, no free-form prose, no renamed, added, or omitted fields (target is the sole exception: include it only when challenging a peer). Per finding, in this field order:
 - target (only when challenging a peer): the analyst you are challenging, e.g. "Analyst B"
 - steelman: strongest form of the position you attack (1-2 sentences)
 - weakness: the scenario/condition under which it breaks (one paragraph)
@@ -341,6 +341,13 @@ const ATTACK_ANGLES = [
   "Focus on incentive misalignment — whose interests does this serve vs whose does it harm?",
 ];
 
+// R2+/FollowUp rotate to a new angle each round. In session-continuation the prior round's <attack-angle>
+// stays in history, so the new one must announce that it SUPERSEDES it — otherwise the worker sees two
+// lenses with no precedence and guesses which governs (surfaced by worker interrogation).
+function rotatedAttackAngle(angle: string): string {
+  return `<attack-angle>New lens for this round — it replaces the lens you led with earlier; do not keep leading from the old one. ${angle}</attack-angle>`;
+}
+
 /**
  * Build R1 for adversarial_debate.
  * Shared system + per-worker attack-angle: diversity comes from heterogeneous models AND a
@@ -363,7 +370,7 @@ export function buildAdversarialDebateR1(
     const angle = ATTACK_ANGLES[workerIndex % ATTACK_ANGLES.length]!;
     // Bind the lead finding to this angle: "most critical first" otherwise pulls every worker to the
     // same obvious top weakness, collapsing the per-worker diversity this angle exists to create.
-    userParts.push(`<attack-angle>Stay within this assigned lens: lead with the strongest weakness it reveals, and avoid obvious/standard critiques any model would reach without this lens. Then order the rest by severity. ${angle}</attack-angle>`);
+    userParts.push(`<attack-angle>Stay within this assigned lens: lead with the strongest weakness it reveals, and avoid obvious/standard critiques any model would reach without this lens. (Severity ordering of the rest is governed by <output-format>.) ${angle}</attack-angle>`);
   }
 
   userParts.push(`<task>${escapeXmlContent(ctx.task)}</task>`);
@@ -423,7 +430,7 @@ export function buildAdversarialDebateR2(
     // Measured to break the R2 finding-set lock-in seen when R1 angles were re-injected unchanged.
     const shift = roundInfo?.current ? roundInfo.current - 1 : 0;
     const angle = ATTACK_ANGLES[(workerIndex + shift) % ATTACK_ANGLES.length]!;
-    userParts.push(`<attack-angle>${angle}</attack-angle>`);
+    userParts.push(rotatedAttackAngle(angle));
   }
 
   if (isFinalRound(roundInfo)) userParts.push(ADVERSARIAL_CLOSING);
@@ -464,7 +471,7 @@ export function buildAdversarialDebateFollowUp(
     // Rotate by round (same as R2): a different angle than R1 per-worker (not peer-collision-free).
     const shift = roundInfo?.current ? roundInfo.current - 1 : 0;
     const angle = ATTACK_ANGLES[(workerIndex + shift) % ATTACK_ANGLES.length]!;
-    parts.push(`<attack-angle>${angle}</attack-angle>`);
+    parts.push(rotatedAttackAngle(angle));
   }
 
   if (isFinalRound(roundInfo)) parts.push(ADVERSARIAL_CLOSING);

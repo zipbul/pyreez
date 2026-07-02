@@ -368,3 +368,32 @@ Measured both modes (live):
 Honest caveat: the merge softened the old web block's explicit "cite every URL" MANDATE to a guard against
 FALSE citation. grok verified-without-citing. This is intentional and aligned with the anti-confabulation
 design — the citation-first mandate is exactly what drove the earlier confabulation floor. 742 tests pass.
+
+## Worker-interrogation loop (R2 live-captured) → 4 fixes + 1 tool bug
+Ran a 2-round debate, captured the R1+R2 prompts LIVE, then interrogated all 3 workers in their resumed
+sessions ("reflect only on the prompt you were given — redundant / ambiguous / conflicting / dead-weight /
+missing?"). This surfaced defects that R1-only measurement never could.
+
+First it exposed a TOOL bug: `interrogate --worker N --round M` always returned worker 0 / round 1 —
+BunFileIO.glob filtered on the suffix after '*' alone, so "r2_w1_*.json" matched every "*.json". Fixed
+(prefix+suffix match, RED test); only then could I target grok/gpt individually.
+
+Cross-model-confirmed prompt fixes (quotes from the workers' own audits):
+- **A. ordering stated twice** (haiku+grok): the R1 <attack-angle> wrapper's "Then order the rest by
+  severity" duplicated <output-format>'s severity rule (a redundancy my earlier ordering-conflict fix
+  introduced). Removed it from the wrapper; ordering now lives once in <output-format>.
+- **B. two <attack-angle> blocks in R2, no precedence** (gpt+grok+haiku — 3/3): in session-continuation the
+  R1 lens stays in history while R2 injects a rotated lens, so the worker saw two lenses and guessed which
+  governs. The rotated R2/FollowUp angle now announces "New lens for this round — it replaces the lens you
+  led with earlier." Only catchable by interrogating a real R2 session.
+- **C. "a check you actually ran" was ambiguous** (haiku+grok): a no-tool worker on a one-sentence
+  hypothetical couldn't tell if it should use tools. Reworded to "confirm it with the means available to
+  you (certain recall, or verification if you have tools)". Measured: gpt then verified TCP keepalive
+  defaults by running sysctl + reading tcp(7) on the host (its available means) — verification preserved,
+  arguably stronger than URL-citation, still zero confabulation.
+- **E. host-format dangling reference** (gpt+codex): "Follow host-format if given" named an undefined
+  input. Tied it to the visible block: "If <host-instructions> specifies an output format, follow it."
+
+Measured after fixes: no-lookup 2-round + web 1-round — format 0-markdown / 0-backtick, verdicts
+calibrated, supersede signal renders for all 3 workers, R1 ordering stated once, web verification intact.
+744 tests. NOT declaring dry — re-interrogating the new prompt for the next round.

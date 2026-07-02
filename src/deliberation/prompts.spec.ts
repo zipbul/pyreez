@@ -499,11 +499,27 @@ describe("buildAdversarialDebateR2", () => {
     expect(sys).toMatch(/no backticks or quotes around it/);
   });
 
-  it("R1 resolves the severity-vs-attack-angle lead-ordering conflict; R2 has no lens-lead wrapper", () => {
+  it("R1 resolves the severity-vs-attack-angle lead-ordering conflict; ordering stated once", () => {
     // R1: the system severity rule must explicitly yield finding[0] to the attack-angle lens,
     // so a worker obeying "most critical first" literally does not undo per-worker diversity.
-    const r1sys = buildAdversarialDebateR1(makeCtx(), undefined, { current: 1, max: 3 }, 0)[0]!.content!;
+    const r1 = buildAdversarialDebateR1(makeCtx(), undefined, { current: 1, max: 3 }, 0);
+    const r1sys = r1[0]!.content!;
+    const r1user = r1[1]!.content!;
     expect(r1sys).toMatch(/when an <attack-angle> assigns your lead finding, lead with that/);
+    // ordering of the rest is owned by <output-format>; the attack-angle wrapper must NOT restate it
+    // (worker interrogation flagged the duplicate "Then order the rest by severity")
+    expect(r1user).not.toMatch(/order the rest by severity/i);
+    expect(r1user).toMatch(/Severity ordering of the rest is governed by <output-format>/);
+  });
+
+  it("R2/FollowUp rotated attack-angle announces it SUPERSEDES the prior round's lens", () => {
+    // In session-continuation the R1 <attack-angle> stays in history; the R2 lens must say it replaces it,
+    // else the worker sees two lenses with no precedence (surfaced by 3-worker interrogation).
+    const r2 = buildAdversarialDebateR2(makeCtx(), [makeResponse("w/b", "x", 1)], makeResponse("w/a", "y", 0),
+      undefined, { current: 2, max: 3 }, 0)[1]!.content!;
+    expect(r2).toMatch(/New lens for this round — it replaces the lens you led with earlier/);
+    const fu = buildAdversarialDebateFollowUp(makeCtx(), [], undefined, { current: 2, max: 3 }, 0).content;
+    expect(fu).toMatch(/New lens for this round — it replaces the lens you led with earlier/);
   });
 
   it("R2+ <approach> carries the peer-aware directives (no-soften, no-consensus, revise-on-own-evidence)", () => {
@@ -634,7 +650,7 @@ describe("buildAdversarialDebateR2", () => {
     // confirm-or-abstain: assert a specific ONLY when confirmable (recall OR a check you ran) — the one
     // invariant that holds with or without web tools, so the prompt needs no tool-mode branch
     expect(sys).toMatch(/only when you can confirm it/i);
-    expect(sys).toMatch(/by exact recall you are certain of, or by a check you actually ran/i);
+    expect(sys).toMatch(/confirm it with the means available to you \(certain recall, or verification if you have tools\)/i);
     // fabricated-incident guard names the specific categories (source/quote/number/identifier)
     expect(sys).toMatch(/a source, quoted string, number, or named identifier/i);
     // abstention behavior when a specific can't be confirmed → describe-without-naming + [unverified]
