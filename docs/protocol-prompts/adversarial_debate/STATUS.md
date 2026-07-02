@@ -272,3 +272,31 @@ move grok: it wasn't reading them. FIX: grok-cli now folds system into the -p pr
 matching codex/gemini. Verified live via pyreez: grok-build now emits proper fields (steelman/verdict, 0
 markdown headings). grok's "confabulation" was partly this — it did receive the system (via override) but
 underweighted it. The one "hard" finding of the loop was itself a tooling bug, now fixed.
+
+## Loop-2 (2026-07, grok now format-compliant) — re-baseline, 5 rounds over 5 domains
+Fresh loop after the grok-cli fix (all 3 workers now emit fields). Tasks spanned 5 domains:
+sync-writes, sync-writes(re-measure), csv-permission-column, client-only-validation, unbounded-cache.
+- **L2-it1** (sync-writes): the evidence-gaps worker produced 3/3 pure META findings ("no data/no
+  measurement") + near-identical "record a trace and benchmark" falsifications. Root cause (3-way debate,
+  subagent+codex independently reaching the same wording): ATTACK_ANGLES[1] was the only angle naming an
+  ABSENCE as its target. FIX: reworded to "Focus on evidence gaps — if an asserted premise is false, what
+  concrete failure path follows?"
+- **L2-it2** (re-measure): evidence-gaps worker meta 3→0, falsifications went from "benchmark it" to
+  concrete failure-path tests ("commit a unique row after the last …", "simulated complete primary loss").
+  Clean measured win. No new defect.
+- **L2-it3/it4/it5** (csv-perms / client-validation / unbounded-cache): high quality across the board —
+  format compliant (0 markdown), confidence well-calibrated (HIGH for deterministic, MEDIUM for
+  contingent), lens-diverse findings, no fabrication, low convergence. Only residual: the evidence-gaps
+  angle still slips to meta on ~1 finding per run (down from 3/3) — a within-noise residual; chasing it
+  further is over-prompting.
+→ **Loop-2 reached DRY**: 4 consecutive clean probe rounds across 4 distinct domains after the it1 fix.
+
+## Session net (both loops + root-cause)
+1. grok "format non-compliance" was a pyreez grok-cli TOOLING bug (system in --system-prompt-override,
+   which grok underweights), NOT intrinsic — fixed by folding system into -p (composeSystemPrompt). This
+   was the single highest-impact fix; found only by tracing WHY (direct CLI isolation) instead of
+   accepting the it3 "intrinsic" conclusion.
+2. attack-angle self-contained (loop-1) + evidence-gaps→failure-path (loop-2): two measured angle fixes.
+3. format-MUST + spec-gap-confidence clauses: principled, low-cost, effect within per-run noise.
+Every fix decided by 3-way debate (subagent+codex+me, not pyreez) and measured live; defects found by
+re-questioning the worker in its own resumed session.
