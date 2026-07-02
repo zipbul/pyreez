@@ -144,6 +144,11 @@ describe("load/write", () => {
     expect(await loadModelCache(io, "/tmp/mc.json")).toEqual(EMPTY_CACHE);
   });
 
+  it("loads EMPTY_CACHE on a CORRUPT (present but unparseable) cache file", async () => {
+    const io = mockFileIO({ readFile: mock(async () => "not json at all") });
+    expect(await loadModelCache(io, "/tmp/mc.json")).toEqual(EMPTY_CACHE);
+  });
+
   it("writes atomically via temp + rename", async () => {
     const io = mockFileIO();
     await writeModelCache(io, "/tmp/dir/mc.json", EMPTY_CACHE);

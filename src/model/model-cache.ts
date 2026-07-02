@@ -80,11 +80,21 @@ function dirOf(p: string): string {
   return i > 0 ? p.slice(0, i) : ".";
 }
 
-/** Load the cache; EMPTY_CACHE when missing/unreadable. */
+/**
+ * Load the cache. A MISSING file returns EMPTY_CACHE silently (first run). A CORRUPT file returns
+ * EMPTY_CACHE but WARNS — it is treated as stale and rebuilt by the next refresh (self-healing).
+ */
 export async function loadModelCache(fileIO: FileIO, path: string): Promise<ModelCache> {
+  let raw: string;
   try {
-    return JSON.parse(await fileIO.readFile(path)) as ModelCache;
+    raw = await fileIO.readFile(path);
   } catch {
+    return EMPTY_CACHE; // missing — normal
+  }
+  try {
+    return JSON.parse(raw) as ModelCache;
+  } catch {
+    console.error(`[pyreez] model cache at ${path} is corrupt; re-discovering.`);
     return EMPTY_CACHE;
   }
 }

@@ -221,6 +221,11 @@ describe("loadAffinityTree", () => {
     const io = mockFileIO({ readFile: mock(async () => JSON.stringify(tree)) });
     expect(await loadAffinityTree(io, "/tmp/aff/tree.json")).toEqual(tree);
   });
+
+  it("returns {} on a CORRUPT (present but unparseable) tree file", async () => {
+    const io = mockFileIO({ readFile: mock(async () => "{ this is not json") });
+    expect(await loadAffinityTree(io, "/tmp/aff/tree.json")).toEqual({});
+  });
 });
 
 describe("compactAffinity", () => {

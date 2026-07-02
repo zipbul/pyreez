@@ -195,11 +195,21 @@ export function pruneStaleRecords(
   return records.filter((r) => activeModels.has(r.model) || nowTs - r.ts <= ttlMs);
 }
 
-/** Load the compacted tree; returns {} when the file is missing/unreadable. */
+/**
+ * Load the compacted tree. A MISSING file returns {} silently (normal first run). A CORRUPT file returns
+ * {} but WARNS — the tree is derived, so the append-only log is intact; `affinity-compact` rebuilds it.
+ */
 export async function loadAffinityTree(fileIO: FileIO, treePath: string): Promise<AffinityTree> {
+  let raw: string;
   try {
-    return JSON.parse(await fileIO.readFile(treePath)) as AffinityTree;
+    raw = await fileIO.readFile(treePath);
   } catch {
+    return {}; // missing — normal
+  }
+  try {
+    return JSON.parse(raw) as AffinityTree;
+  } catch {
+    console.error(`[pyreez] affinity tree at ${treePath} is corrupt; ignoring. Run 'affinity-compact' to rebuild it from the log.`);
     return {};
   }
 }
