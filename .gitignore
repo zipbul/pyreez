@@ -48,6 +48,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .pyreez/learning/
 .pyreez/feedback/
 .pyreez/*.json
+.pyreez/affinity-log.jsonl
+
+# Playwright MCP scratch
+.playwright-mcp/
 
 # pyreez tracked files (DO NOT ignore):
 # .pyreez/models.jsonc — model definitions + benchmark data
