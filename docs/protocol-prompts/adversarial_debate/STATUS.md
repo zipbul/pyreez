@@ -397,3 +397,26 @@ Cross-model-confirmed prompt fixes (quotes from the workers' own audits):
 Measured after fixes: no-lookup 2-round + web 1-round — format 0-markdown / 0-backtick, verdicts
 calibrated, supersede signal renders for all 3 workers, R1 ordering stated once, web verification intact.
 744 tests. NOT declaring dry — re-interrogating the new prompt for the next round.
+
+## Re-interrogation of the fixed prompt → convergence (marginal tail)
+Re-interrogated 2 workers on the post-fix prompt (same "audit the prompt, none if no real issue" question):
+- **gpt**: conflicts / dead-weight / missing → ALL "none" (was multiple each before). Only residual: a
+  marginal "Do not soften ≈ surface strongest weaknesses" and a reading-order note on the two lenses.
+- **grok**: the "ordering stated twice" complaint is gone; it now flags only a precedence *nuance* (the
+  inherent lens-vs-severity tension), plus single-model nitpicks (verdict template shown in backticks while
+  forbidding them; whitespace/delimiter spec absent; "means available to you" not operationalized).
+One clean shave taken from this round: removed the dead "(Severity ordering … governed by <output-format>)"
+cross-reference the prior fix introduced.
+
+Remaining items are the marginal tail, deliberately NOT cut:
+- "Do not soften your criticism" (2 models call it redundant) is a documented anti-sycophancy anchor
+  re-injected in the user turn for CROSS-ROUND drift resistance — a value a single-turn reflection can't
+  see. Cutting it correctly needs a multi-round with/without A/B on verdict-severity drift; not worth a
+  noisy multi-run experiment for a ~6-token gain on a load-bearing anchor. Kept.
+- verdict-template-in-backticks, host-instructions reference, whitespace spec: single-model subjective
+  nitpicks; models disagree; chasing them is over-prompting.
+
+Assessment: the prompt-text layer has CONVERGED for adversarial_debate — two substantive fix-rounds
+(char-audit + tool-agnostic merge + interrogation fixes) drove the cross-model issue count to a marginal,
+model-inconsistent tail. Further text edits would cut deliberate anchors or chase subjective single-model
+reads. This is evidence-backed convergence (re-interrogation deltas), not a fiat "done".
