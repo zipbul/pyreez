@@ -489,6 +489,23 @@ describe("buildAdversarialDebateR2", () => {
     expect(sys.indexOf("evidence:")).toBeLessThan(sys.indexOf("verdict:"));
   });
 
+  it("output-format hardens field compliance: rename/add guard, target exception, no-backtick verdict", () => {
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    // template drift (rename/add), not just omission, is the dominant format failure — forbid all three
+    expect(sys).toMatch(/no renamed, added, or omitted fields/);
+    // the conditional `target` field must not read as an "omitted field" violation
+    expect(sys).toMatch(/target is the sole exception/);
+    // models sometimes copy the backticks that delimit the verdict template into their output
+    expect(sys).toMatch(/no backticks or quotes around it/);
+  });
+
+  it("R1 resolves the severity-vs-attack-angle lead-ordering conflict; R2 has no lens-lead wrapper", () => {
+    // R1: the system severity rule must explicitly yield finding[0] to the attack-angle lens,
+    // so a worker obeying "most critical first" literally does not undo per-worker diversity.
+    const r1sys = buildAdversarialDebateR1(makeCtx(), undefined, { current: 1, max: 3 }, 0)[0]!.content!;
+    expect(r1sys).toMatch(/when an <attack-angle> assigns your lead finding, lead with that/);
+  });
+
   it("R2+ <approach> carries the peer-aware directives (no-soften, no-consensus, revise-on-own-evidence)", () => {
     const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
     expect(user).toContain("<approach>");

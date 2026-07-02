@@ -300,3 +300,40 @@ sync-writes, sync-writes(re-measure), csv-permission-column, client-only-validat
 3. format-MUST + spec-gap-confidence clauses: principled, low-cost, effect within per-run noise.
 Every fix decided by 3-way debate (subagent+codex+me, not pyreez) and measured live; defects found by
 re-questioning the worker in its own resumed session.
+
+## Full-prompt char-level audit (5 independent auditors) → 4 deterministic fixes
+Ran the audit the RIGHT way this time: rendered the real delivered prompt via `deliberate --transcript`
+(not a hand-render), then audited it with FIVE independent auditors — pyreez dogfooded as a 3-worker
+adversarial_debate (opus[1m] + gpt-5.4 + grok-build, file captured) PLUS a general-purpose subagent PLUS
+codex. Cross-checked every finding against the real prompts.ts before applying anything.
+
+Filtered out a false-positive: gpt-5.4 flagged a stray `</task>` "critical" — that was an artifact of the
+audit-SUBJECT extraction file, not ADVERSARIAL_CLOSING. Not applied.
+
+Applied (consensus + text-deterministic + verified no behavioral loss):
+- **A. role drop-rule grammar** (4/5 auditors): the comma-splice "drop any your own counter-attack defeats,
+  that only fire…" → a clean 3-condition list (a)/(b)/(c). It was the only outright ungrammatical sentence;
+  ambiguous parse of the sole finding-drop rule risked over/under-pruning.
+- **B. R1 severity-vs-lens ordering conflict** (4/5, highest consensus): system said "most critical first"
+  while the R1 <attack-angle> said "lead with the strongest weakness the lens reveals" — position-1 was
+  non-deterministic. System rule now explicitly yields finding[0] to the attack-angle in R1.
+- **C. format-compliance lever** (3/5): "no omitted fields" → "no renamed, added, or omitted fields" (rename/
+  add is the dominant drift, not omission); verdict line now says "no backticks or quotes around it" (models
+  copied the template's delimiter backticks).
+- **D. optional `target` vs "no omitted fields"** (codex): the conditional peer field read as an omission
+  violation; marked it the sole exception inline.
+
+Rejected (measured design / no manifest defect):
+- gpt-5.4's confidence-rubric rewrite (anchor to textual determinacy) — would collapse the intentional
+  falsifier-decisiveness scale (measured kappa 0.60). Kept as-is.
+- gpt/grok's "emit ONLY lens-diagnostic findings" — opus Finding-1 correctly warned this suppresses the
+  dominant obvious flaw across all workers. Post-fix measurement (caching task) CONFIRMED the opposite of
+  the worry: all 3 workers covered unbounded-memory/OOM while their LEADS stayed diverse (assumption /
+  premise / operational) — so "avoid obvious" already applies to emphasis, not omission. No coverage rule
+  added (would be over-prompting).
+- angle-1 reframe (opus Finding-3, angle0/angle1 premise overlap) — the "meta"-looking grok lead is the
+  evidence-gaps lens working legitimately (questioning an unmeasured premise); the measured L2it1 win holds.
+  Re-tuning risks thrashing a measured-good angle. Not applied.
+
+Verification: 742 tests pass, typecheck clean, format 0-markdown / 0-backtick / calibrated verdicts on live
+re-measure. Fixes decided by cross-checking 5 auditors (pyreez + subagent + codex), not one voice.

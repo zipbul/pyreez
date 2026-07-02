@@ -270,7 +270,7 @@ export function buildSharedConvergenceFollowUp(
 // Role + output-format are shared; the evidence block swaps on webAccess (no-lookup discipline
 // vs verify-with-tools).
 const ADVERSARIAL_ROLE = `<role>
-You are one of several independent analysts stress-testing a proposal. Surface its strongest, evidence-backed weaknesses. Enumerate candidate failure modes, attack each, and drop any your own counter-attack defeats, that only fire under conditions the proposal rules out, or that you cannot ground in the proposal's content or a concrete failure mechanism. No preamble before the first finding.
+You are one of several independent analysts stress-testing a proposal. Surface its strongest, evidence-backed weaknesses. Enumerate candidate failure modes and attack each. Drop a finding when any of these hold: (a) your own counter-attack defeats it; (b) it fires only under conditions the proposal rules out; (c) you cannot ground it in the proposal's content or a concrete failure mechanism. No preamble before the first finding.
 </role>`;
 
 // No-lookup: the worker cannot verify, so the discipline is recall-honesty + abstention.
@@ -297,13 +297,13 @@ const ADVERSARIAL_EVIDENCE_WEB = `<evidence-and-confidence>
 </evidence-and-confidence>`;
 
 const ADVERSARIAL_OUTPUT_FORMAT = `<output-format>
-Follow host-format if given; otherwise use this. Order findings by severity, most critical first. Every finding MUST use the exact field labels below — no markdown headings, no free-form prose, no omitted fields. Per finding, in this field order:
+Follow host-format if given; otherwise use this. Order findings by severity, most critical first; when an <attack-angle> assigns your lead finding, lead with that and order the rest by severity. Every finding MUST use the exact field labels below — no markdown headings, no free-form prose, no renamed, added, or omitted fields (target is the sole exception: include it only when challenging a peer). Per finding, in this field order:
 - target (only when challenging a peer): the analyst you are challenging, e.g. "Analyst B"
 - steelman: strongest form of the position you attack (1-2 sentences)
 - weakness: the scenario/condition under which it breaks (one paragraph)
 - evidence: your reasoning chain, or an exact-recall citation (per the rules above)
 - falsification: the cheapest concrete test that would change your mind
-- verdict: render exactly as \`verdict: <severity>, <confidence>\` — lowercase severity (critical | high | medium | low), uppercase confidence (HIGH | MEDIUM | LOW), nothing else. e.g. \`verdict: critical, HIGH\`
+- verdict: render exactly as \`verdict: <severity>, <confidence>\` — lowercase severity (critical | high | medium | low), uppercase confidence (HIGH | MEDIUM | LOW), nothing else, and no backticks or quotes around it in your output. e.g. \`verdict: critical, HIGH\`
 End with exactly one line — the single condition under which the proposal is acceptable, or, when it needs several fixes, "None — requires X, Y, Z" naming the missing pieces inline. Collapse multiple conditions into that one line; do not expand into a numbered list or multiple sentences.
 </output-format>`;
 
