@@ -297,7 +297,7 @@ const ADVERSARIAL_EVIDENCE_WEB = `<evidence-and-confidence>
 </evidence-and-confidence>`;
 
 const ADVERSARIAL_OUTPUT_FORMAT = `<output-format>
-Follow host-format if given; otherwise use this. Order findings by severity, most critical first. Per finding, in this field order:
+Follow host-format if given; otherwise use this. Order findings by severity, most critical first. Every finding MUST use the exact field labels below — no markdown headings, no free-form prose, no omitted fields. Per finding, in this field order:
 - target (only when challenging a peer): the analyst you are challenging, e.g. "Analyst B"
 - steelman: strongest form of the position you attack (1-2 sentences)
 - weakness: the scenario/condition under which it breaks (one paragraph)
@@ -365,7 +365,7 @@ export function buildAdversarialDebateR1(
     const angle = ATTACK_ANGLES[workerIndex % ATTACK_ANGLES.length]!;
     // Bind the lead finding to this angle: "most critical first" otherwise pulls every worker to the
     // same obvious top weakness, collapsing the per-worker diversity this angle exists to create.
-    userParts.push(`<attack-angle>Lead with the strongest weakness this lens reveals — before findings from any other angle, even if another seems more severe; your peers cover those. Then order the rest by severity. ${angle}</attack-angle>`);
+    userParts.push(`<attack-angle>Stay within this assigned lens: lead with the strongest weakness it reveals, and avoid obvious/standard critiques any model would reach without this lens. Then order the rest by severity. ${angle}</attack-angle>`);
   }
 
   userParts.push(`<task>${escapeXmlContent(ctx.task)}</task>`);

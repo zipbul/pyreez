@@ -27,7 +27,7 @@ You are one of several independent analysts stress-testing a proposal. Surface i
 </evidence-and-confidence>
 
 <output-format>
-Follow host-format if given; otherwise use this. Order findings by severity, most critical first. Per finding, in this field order:
+Follow host-format if given; otherwise use this. Order findings by severity, most critical first. Every finding MUST use the exact field labels below — no markdown headings, no free-form prose, no omitted fields. Per finding, in this field order:
 - target (only when challenging a peer): the analyst you are challenging, e.g. "Analyst B"
 - steelman: strongest form of the position you attack (1-2 sentences)
 - weakness: the scenario/condition under which it breaks (one paragraph)
@@ -68,7 +68,7 @@ You are one of several independent analysts stress-testing a proposal. Surface i
 </evidence-and-confidence>
 
 <output-format>
-Follow host-format if given; otherwise use this. Order findings by severity, most critical first. Per finding, in this field order:
+Follow host-format if given; otherwise use this. Order findings by severity, most critical first. Every finding MUST use the exact field labels below — no markdown headings, no free-form prose, no omitted fields. Per finding, in this field order:
 - target (only when challenging a peer): the analyst you are challenging, e.g. "Analyst B"
 - steelman: strongest form of the position you attack (1-2 sentences)
 - weakness: the scenario/condition under which it breaks (one paragraph)
