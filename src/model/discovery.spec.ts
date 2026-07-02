@@ -27,6 +27,16 @@ describe("parseCodexModels", () => {
     ] satisfies DiscoveredModel[]);
   });
 
+  it("drops hidden/internal entries (visibility 'hide')", () => {
+    const json = JSON.stringify({
+      models: [
+        { slug: "gpt-5.5", visibility: "list" },
+        { slug: "codex-auto-review", visibility: "hide" },
+      ],
+    });
+    expect(parseCodexModels(json).map((m) => m.id)).toEqual(["openai/gpt-5.5"]);
+  });
+
   it("returns [] on malformed JSON", () => {
     expect(parseCodexModels("not json")).toEqual([]);
     expect(parseCodexModels("{}")).toEqual([]);

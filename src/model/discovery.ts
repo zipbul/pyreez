@@ -41,7 +41,7 @@ export async function runGuarded<T>(fn: () => Promise<T>, timeoutMs: number, fal
 
 /** Parse `codex debug models` JSON into discovered models (provider = openai). */
 export function parseCodexModels(jsonText: string): DiscoveredModel[] {
-  let parsed: { models?: { slug?: string; display_name?: string; description?: string }[] };
+  let parsed: { models?: { slug?: string; display_name?: string; description?: string; visibility?: string }[] };
   try {
     parsed = JSON.parse(jsonText);
   } catch {
@@ -50,7 +50,9 @@ export function parseCodexModels(jsonText: string): DiscoveredModel[] {
   const models = parsed.models;
   if (!Array.isArray(models)) return [];
   return models
-    .filter((m): m is { slug: string; display_name?: string; description?: string } => typeof m?.slug === "string")
+    .filter((m): m is { slug: string; display_name?: string; description?: string; visibility?: string } => typeof m?.slug === "string")
+    // drop internal/hidden entries (e.g. codex-auto-review has visibility "hide")
+    .filter((m) => m.visibility !== "hide")
     .map((m) => ({
       id: `openai/${m.slug}`,
       provider: "openai" as const,
