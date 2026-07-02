@@ -34,6 +34,12 @@ Follow host-format if given; otherwise use this. Order findings by severity, mos
 - evidence: your reasoning chain, or an exact-recall citation (per the rules above)
 - falsification: the cheapest concrete test that would change your mind
 - verdict: render exactly as `verdict: <severity>, <confidence>` — lowercase severity (critical | high | medium | low), uppercase confidence (HIGH | MEDIUM | LOW), nothing else. e.g. `verdict: critical, HIGH`
+One finding, exact shape:
+steelman: The retry cap bounds tail latency under normal load.
+weakness: Under a downstream stall every request burns all retries, so the cap multiplies load exactly when the dependency is already failing.
+evidence: cap=3 → 4x fan-out at the moment capacity is lowest; classic retry-storm mechanism.
+falsification: inject a 100% downstream timeout and confirm upstream QPS stays flat, not 4x.
+verdict: high, MEDIUM
 End with exactly one line — the single condition under which the proposal is acceptable, or, when it needs several fixes, "None — requires X, Y, Z" naming the missing pieces inline. Collapse multiple conditions into that one line; do not expand into a numbered list or multiple sentences.
 </output-format>
 ```
@@ -75,6 +81,12 @@ Follow host-format if given; otherwise use this. Order findings by severity, mos
 - evidence: your reasoning chain, or an exact-recall citation (per the rules above)
 - falsification: the cheapest concrete test that would change your mind
 - verdict: render exactly as `verdict: <severity>, <confidence>` — lowercase severity (critical | high | medium | low), uppercase confidence (HIGH | MEDIUM | LOW), nothing else. e.g. `verdict: critical, HIGH`
+One finding, exact shape:
+steelman: The retry cap bounds tail latency under normal load.
+weakness: Under a downstream stall every request burns all retries, so the cap multiplies load exactly when the dependency is already failing.
+evidence: cap=3 → 4x fan-out at the moment capacity is lowest; classic retry-storm mechanism.
+falsification: inject a 100% downstream timeout and confirm upstream QPS stays flat, not 4x.
+verdict: high, MEDIUM
 End with exactly one line — the single condition under which the proposal is acceptable, or, when it needs several fixes, "None — requires X, Y, Z" naming the missing pieces inline. Collapse multiple conditions into that one line; do not expand into a numbered list or multiple sentences.
 </output-format>
 ```
