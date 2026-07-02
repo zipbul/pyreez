@@ -92,7 +92,8 @@ export async function loadModelCache(fileIO: FileIO, path: string): Promise<Mode
 /** Write the cache atomically (temp + rename); single-writer. */
 export async function writeModelCache(fileIO: FileIO, path: string, cache: ModelCache): Promise<void> {
   await fileIO.mkdir(dirOf(path));
-  const tmp = `${path}.tmp`;
+  // Unique temp name so concurrent writers never clobber each other's temp before rename.
+  const tmp = `${path}.${crypto.randomUUID()}.tmp`;
   await fileIO.writeFile(tmp, JSON.stringify(cache, null, 2));
   await fileIO.rename(tmp, path);
 }

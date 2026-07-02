@@ -3,8 +3,9 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { discoveredRegistry, toModelInfo } from "./discovered-registry";
+import { discoveredRegistry, toModelInfo, mergeDiscoveredWithCurated } from "./discovered-registry";
 import type { DiscoveredModel } from "./discovery";
+import type { ModelInfo } from "./types";
 
 const MODELS: DiscoveredModel[] = [
   { id: "openai/gpt-5.5", provider: "openai", displayName: "GPT-5.5" },
@@ -53,5 +54,24 @@ describe("discoveredRegistry", () => {
     const reg = discoveredRegistry([]);
     expect(reg.getAll()).toEqual([]);
     expect(reg.buildProviderMap().size).toBe(0);
+  });
+});
+
+describe("mergeDiscoveredWithCurated", () => {
+  const curated: ModelInfo[] = [
+    { id: "openai/gpt-old", name: "old", provider: "openai", contextWindow: 1, cost: { inputPer1M: 1, outputPer1M: 1 }, supportsToolCalling: true },
+    { id: "google/gemini-3.1-pro", name: "Gemini", provider: "google", contextWindow: 1, cost: { inputPer1M: 1, outputPer1M: 1 }, supportsToolCalling: true },
+  ];
+
+  it("keeps curated models only for providers discovery did NOT cover (e.g. gemini)", () => {
+    const merged = mergeDiscoveredWithCurated(MODELS, curated); // MODELS covers openai + xai
+    const ids = merged.map((m) => m.id);
+    expect(ids).toContain("openai/gpt-5.5");        // discovered openai
+    expect(ids).toContain("google/gemini-3.1-pro"); // curated google kept (not probed)
+    expect(ids).not.toContain("openai/gpt-old");    // curated openai dropped (discovery covers openai)
+  });
+
+  it("with no discovery, returns all curated (cold bootstrap)", () => {
+    expect(mergeDiscoveredWithCurated([], curated).map((m) => m.id)).toEqual(["openai/gpt-old", "google/gemini-3.1-pro"]);
   });
 });

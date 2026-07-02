@@ -321,6 +321,8 @@ export function createDeliberateFn(
         const axes = input.axes;
         const topicPath = input.topicPath;
         for (const resp of finalRound?.responses ?? []) {
+          // Don't let the judge score its own output — self-evaluation would bias the learned signal.
+          if (resp.model === deps.judge.model) continue;
           const scores = await scoreResponse(deps.judge.chat, deps.judge.model, input.task, axes, resp.content);
           if (Object.keys(scores).length > 0) {
             await deps.recordAffinity({

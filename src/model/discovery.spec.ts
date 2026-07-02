@@ -62,6 +62,11 @@ describe("parseGrokModels", () => {
   it("returns [] when there is no model list", () => {
     expect(parseGrokModels("error: something")).toEqual([]);
   });
+
+  it("stops at a non-bullet line after the list (ignores trailing footer prose)", () => {
+    const text = ["Available models:", "  - grok-build", "", "Note: run `grok login` for more."].join("\n");
+    expect(parseGrokModels(text).map((m) => m.id)).toEqual(["xai/grok-build"]);
+  });
 });
 
 describe("runGuarded", () => {

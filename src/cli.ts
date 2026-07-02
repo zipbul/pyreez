@@ -21,9 +21,9 @@ import {
   type TranscriptRecorder,
 } from "./deliberation/transcript";
 import { appendAffinityLog, compactAffinity, loadAffinityTree } from "./model/affinity";
-import { discoverCodex, discoverGrok, discoverClaude } from "./model/discovery";
+import { discoverCodex, discoverGrok, discoverClaude, type DiscoveredModel } from "./model/discovery";
 import { refreshModelCache, availableModels } from "./model/model-cache";
-import { discoveredRegistry, type RegistryLike } from "./model/discovered-registry";
+import { registryFromModels, mergeDiscoveredWithCurated, type RegistryLike } from "./model/discovered-registry";
 import { claudeSupportedModels } from "./llm/providers/claude-agent";
 import { FileDeliberationStore } from "./deliberation/file-store";
 import { ProviderRegistry } from "./llm/registry";
@@ -136,7 +136,11 @@ Run "bun run src/cli.ts <command> --help" for command-specific help.`);
 
 // -- Wiring (same as index.ts) --
 
-async function buildConfig(recordTranscript?: TranscriptRecorder, forceRefresh = false): Promise<HandlersConfig> {
+async function buildConfig(
+  recordTranscript?: TranscriptRecorder,
+  forceRefresh = false,
+  needsDiscovery = true,
+): Promise<HandlersConfig> {
 
   const routing = await loadRoutingConfig();
   const config = loadConfigFromEnv(routing);
@@ -149,21 +153,25 @@ async function buildConfig(recordTranscript?: TranscriptRecorder, forceRefresh =
   const providers = buildProviders(config.providers);
 
   // Availability comes from LIVE discovery (cached, refreshed when stale) — not a hand-maintained list.
-  // Fall back to the curated models.jsonc only for cold bootstrap (cache empty AND every probe failed).
+  // Discovery only runs for commands that select models; other commands route by prefix. Curated
+  // models.jsonc fills in providers discovery does NOT cover (e.g. gemini has no probe) and cold bootstrap.
   const DISCOVERY_TTL_MS = 24 * 60 * 60 * 1000;
   const DEPRECATE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-  const modelCache = await refreshModelCache(
-    fileIO,
-    ".pyreez/models-cache.json",
-    {
-      openai: discoverCodex,
-      xai: discoverGrok,
-      anthropic: () => discoverClaude(claudeSupportedModels),
-    },
-    { now: Date.now(), ttlMs: DISCOVERY_TTL_MS, pruneTtlMs: DEPRECATE_TTL_MS, force: forceRefresh },
-  );
-  const discovered = availableModels(modelCache);
-  const registry: RegistryLike = discovered.length > 0 ? discoveredRegistry(discovered) : curated;
+  let discovered: DiscoveredModel[] = [];
+  if (needsDiscovery) {
+    const modelCache = await refreshModelCache(
+      fileIO,
+      ".pyreez/models-cache.json",
+      {
+        openai: discoverCodex,
+        xai: discoverGrok,
+        anthropic: () => discoverClaude(claudeSupportedModels),
+      },
+      { now: Date.now(), ttlMs: DISCOVERY_TTL_MS, pruneTtlMs: DEPRECATE_TTL_MS, force: forceRefresh },
+    );
+    discovered = availableModels(modelCache);
+  }
+  const registry: RegistryLike = registryFromModels(mergeDiscoveredWithCurated(discovered, curated.getAll()));
 
   const providerRegistry = new ProviderRegistry(
     providers,
@@ -244,9 +252,12 @@ async function main(): Promise<void> {
     ? (flags["transcript"] ?? `.pyreez/debug/${crypto.randomUUID()}`)
     : undefined;
   const transcriptEntries: TranscriptEntry[] = [];
+  // Discovery (live probes) is only needed by commands that select/list models; others route by prefix.
+  const needsDiscovery = command === "deliberate" || command === "models";
   const config = await buildConfig(
     transcriptDir ? (e) => { transcriptEntries.push(e); } : undefined,
     flags["refresh"] === "true",
+    needsDiscovery,
   );
 
   let result: HandlerResult;

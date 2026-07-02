@@ -148,9 +148,9 @@ describe("load/write", () => {
     const io = mockFileIO();
     await writeModelCache(io, "/tmp/dir/mc.json", EMPTY_CACHE);
     const [tmp] = (io.writeFile as ReturnType<typeof mock>).mock.calls[0]!;
-    expect(tmp).toBe("/tmp/dir/mc.json.tmp");
+    expect(tmp).toMatch(/^\/tmp\/dir\/mc\.json\..+\.tmp$/); // unique temp suffix
     const [from, to] = (io.rename as ReturnType<typeof mock>).mock.calls[0]!;
-    expect(from).toBe("/tmp/dir/mc.json.tmp");
+    expect(from).toBe(tmp);
     expect(to).toBe("/tmp/dir/mc.json");
   });
 });

@@ -69,8 +69,10 @@ export function parseGrokModels(text: string): DiscoveredModel[] {
     if (/available models:/i.test(line)) { inList = true; continue; }
     if (!inList) continue;
     const m = line.match(/^\s*[-*]\s+(\S+)/);
-    if (!m) continue;
-    out.push({ id: `xai/${m[1]}`, provider: "xai" });
+    if (m) { out.push({ id: `xai/${m[1]}`, provider: "xai" }); continue; }
+    // End the list at the first non-bullet line after it starts (blank line or a footer/notes section),
+    // so trailing prose is never mistaken for model ids.
+    if (line.trim().length > 0) break;
   }
   return out;
 }

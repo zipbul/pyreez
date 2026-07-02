@@ -33,14 +33,33 @@ export function toModelInfo(m: DiscoveredModel): ModelInfo {
   };
 }
 
+/** Build a registry-shaped adapter over a ModelInfo list. */
+export function registryFromModels(infos: readonly ModelInfo[]): RegistryLike {
+  const all = [...infos];
+  const byId = new Map(all.map((m) => [m.id, m]));
+  return {
+    getAll: () => [...all],
+    getAvailable: () => all.filter((m) => m.available !== false),
+    getById: (id) => byId.get(id),
+    buildProviderMap: () => new Map(all.map((m) => [m.id, m.provider])),
+  };
+}
+
 /** Build a registry-shaped adapter over a discovered model list. */
 export function discoveredRegistry(models: readonly DiscoveredModel[]): RegistryLike {
-  const infos = models.map(toModelInfo);
-  const byId = new Map(infos.map((m) => [m.id, m]));
-  return {
-    getAll: () => [...infos],
-    getAvailable: () => infos.filter((m) => m.available !== false),
-    getById: (id) => byId.get(id),
-    buildProviderMap: () => new Map(infos.map((m) => [m.id, m.provider])),
-  };
+  return registryFromModels(models.map(toModelInfo));
+}
+
+/**
+ * Merge live discovery with curated models: discovered models win, and curated models are kept ONLY for
+ * providers that discovery did not cover (not probed, or probe empty/failed) — e.g. gemini, which has no
+ * probe. This prevents a discovery swap from silently dropping a configured provider's models.
+ */
+export function mergeDiscoveredWithCurated(
+  discovered: readonly DiscoveredModel[],
+  curated: readonly ModelInfo[],
+): ModelInfo[] {
+  const coveredProviders = new Set(discovered.map((m) => m.provider));
+  const fill = curated.filter((m) => !coveredProviders.has(m.provider));
+  return [...discovered.map(toModelInfo), ...fill];
 }

@@ -435,6 +435,22 @@ describe("createDeliberateFn", () => {
     expect(records[1]!.model).toBe("xai/grok-build");
   });
 
+  it("does NOT let the judge score its own worker output (self-scoring skip)", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => OUTPUT_WITH_ROUNDS);
+    const records: any[] = [];
+    const deps = { ...affinityDeps((r) => records.push(r)), judge: { model: "anthropic/claude-opus", chat: mock(async () => ({ content: '{"정확성": 70}' })) } };
+    const deliberateFn = createDeliberateFn(deps);
+
+    await deliberateFn({
+      task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
+      protocol: "adversarial_debate", topicPath: ["보안"], axes: ["정확성"],
+    });
+
+    // anthropic/claude-opus is the judge AND a worker → skipped; only xai/grok-build scored.
+    expect(records.map((r) => r.model)).toEqual(["xai/grok-build"]);
+  });
+
   it("does NOT score when axes are absent (zero cost)", async () => {
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => OUTPUT_WITH_ROUNDS);

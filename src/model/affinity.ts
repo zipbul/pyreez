@@ -218,7 +218,8 @@ export async function compactAffinity(
   if (opts) records = pruneStaleRecords(records, opts.activeModels, opts.nowTs, opts.ttlMs);
   const tree = compactAffinityLog(records);
   await fileIO.mkdir(dirOf(treePath));
-  const tmp = `${treePath}.tmp`;
+  // Unique temp name so concurrent compactions never clobber each other's temp before rename.
+  const tmp = `${treePath}.${crypto.randomUUID()}.tmp`;
   await fileIO.writeFile(tmp, JSON.stringify(tree, null, 2));
   await fileIO.rename(tmp, treePath);
   return tree;
