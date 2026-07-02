@@ -257,3 +257,18 @@ debate (subagent + codex + me, NOT pyreez) → re-measure. Models: claude-haiku,
 5. convergence of heterogeneous workers on the top flaw = corroboration, NOT a defect (no change).
 Method worked: every fix was decided by 3-way debate (subagent+codex+me, not pyreez) and measured live;
 grok's intrinsic limit was found by re-questioning the worker in its own resumed session.
+
+## CORRECTION (supersedes the it3 "grok-intrinsic" conclusion)
+Root-caused by direct CLI isolation (outside pyreez): grok-build IS NOT intrinsically format-noncompliant.
+- Experiment B (format in `--system-prompt-override`, no --verbatim): grok emits markdown → FAILS.
+- Experiment C (same format placed in the `-p` prompt instead): grok follows it exactly (steelman:/weakness:/
+  verdict:, zero markdown) → WORKS.
+- Experiment D (`grok --json-schema`): hard-constrained structured output, also works.
+Cause: grok UNDERWEIGHTS `--system-prompt-override` content for format-critical instructions but obeys the
+same instructions in the `-p` user prompt. pyreez's grok-cli passed the system block ONLY via
+--system-prompt-override, while codex/gemini fold it into the prompt via composeSystemPrompt — so grok
+alone never effectively received the output-format. This is why the it1 MUST line and it2 example didn't
+move grok: it wasn't reading them. FIX: grok-cli now folds system into the -p prompt (composeSystemPrompt),
+matching codex/gemini. Verified live via pyreez: grok-build now emits proper fields (steelman/verdict, 0
+markdown headings). grok's "confabulation" was partly this — it did receive the system (via override) but
+underweighted it. The one "hard" finding of the loop was itself a tooling bug, now fixed.

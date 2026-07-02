@@ -12,7 +12,7 @@
 
 import { LLMClientError } from "../errors";
 import { spawnWithIdleTimeout, IdleTimeoutError } from "./spawn-with-idle";
-import { flattenConversation, bucketEffort } from "./message-util";
+import { composeSystemPrompt, flattenConversation, bucketEffort } from "./message-util";
 import type {
   LLMProvider,
   ChatCompletionRequest,
@@ -45,7 +45,11 @@ export class GrokCliProvider implements LLMProvider {
 
   async chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const modelId = toGrokCliModelId(request.model);
-    const prompt = flattenConversation(request.messages);
+    // Fold the system block INTO the prompt (as codex/gemini do). Verified: grok underweights
+    // --system-prompt-override for format-critical instructions but obeys the same instructions when
+    // they appear in the -p prompt. (--system-prompt-override is still passed below to replace grok's
+    // default coding-agent persona.)
+    const prompt = composeSystemPrompt(request.system, flattenConversation(request.messages));
 
     // Resume the recorded session (interrogate) or name a fresh one with a UUID we control, so the
     // session is addressable later. Returned in the response → recorded for resume.
