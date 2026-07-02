@@ -9,7 +9,7 @@
  * models.
  */
 
-import type { DiscoveredModel, DiscoveryResult } from "./discovery";
+import { discoverAll, type DiscoveredModel, type DiscoveryResult, type ProbeResult } from "./discovery";
 import type { ProviderName } from "../llm/types";
 import type { FileIO } from "../report/types";
 
@@ -95,4 +95,33 @@ export async function writeModelCache(fileIO: FileIO, path: string, cache: Model
   const tmp = `${path}.tmp`;
   await fileIO.writeFile(tmp, JSON.stringify(cache, null, 2));
   await fileIO.rename(tmp, path);
+}
+
+export interface RefreshOptions {
+  readonly now: number;
+  /** Refresh when the cache is older than this. */
+  readonly ttlMs: number;
+  /** Deprecated entries older than this are pruned on refresh. */
+  readonly pruneTtlMs: number;
+  /** Force a refresh even if the cache is fresh. */
+  readonly force?: boolean;
+}
+
+/**
+ * Return the cache, refreshing from live probes when stale (or forced). A fresh cache is returned as-is
+ * (no probing). On refresh, merge + prune + atomic-write. Single-writer: only call this where one writer
+ * is guaranteed (buildConfig / an explicit `--refresh`).
+ */
+export async function refreshModelCache(
+  fileIO: FileIO,
+  path: string,
+  probes: Partial<Record<ProviderName, () => Promise<ProbeResult>>>,
+  opts: RefreshOptions,
+): Promise<ModelCache> {
+  const prev = await loadModelCache(fileIO, path);
+  if (!opts.force && !isStale(prev, opts.now, opts.ttlMs)) return prev;
+  const discovery = await discoverAll(probes);
+  const merged = pruneDeprecated(mergeCache(prev, discovery, opts.now), opts.now, opts.pruneTtlMs);
+  await writeModelCache(fileIO, path, merged);
+  return merged;
 }

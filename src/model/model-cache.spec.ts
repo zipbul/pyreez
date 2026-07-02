@@ -10,9 +10,11 @@ import {
   isStale,
   loadModelCache,
   writeModelCache,
+  refreshModelCache,
   EMPTY_CACHE,
   type ModelCache,
 } from "./model-cache";
+import type { ProbeResult } from "./discovery";
 import type { DiscoveryResult } from "./discovery";
 import type { FileIO } from "../report/types";
 
@@ -101,6 +103,38 @@ describe("isStale", () => {
     expect(isStale(EMPTY_CACHE, 1000, 100)).toBe(true);
     expect(isStale({ refreshedAt: 950, models: [] }, 1000, 100)).toBe(false);
     expect(isStale({ refreshedAt: 800, models: [] }, 1000, 100)).toBe(true);
+  });
+});
+
+describe("refreshModelCache", () => {
+  const okProbe = (): Promise<ProbeResult> => Promise.resolve({ models: [{ id: "openai/gpt-5.5", provider: "openai" }], status: "ok" });
+
+  it("returns the cached value without probing when fresh", async () => {
+    const fresh: ModelCache = { refreshedAt: 990, models: [] };
+    const probe = mock(okProbe);
+    const io = mockFileIO({ readFile: mock(async () => JSON.stringify(fresh)) });
+    const out = await refreshModelCache(io, "/tmp/mc.json", { openai: probe }, { now: 1000, ttlMs: 100, pruneTtlMs: 999 });
+    expect(out).toEqual(fresh);
+    expect(probe).not.toHaveBeenCalled();
+    expect(io.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("probes, merges, and writes when stale", async () => {
+    const stale: ModelCache = { refreshedAt: 0, models: [] };
+    const probe = mock(okProbe);
+    const io = mockFileIO({ readFile: mock(async () => JSON.stringify(stale)) });
+    const out = await refreshModelCache(io, "/tmp/mc.json", { openai: probe }, { now: 1000, ttlMs: 100, pruneTtlMs: 999 });
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(out.models.map((m) => m.id)).toEqual(["openai/gpt-5.5"]);
+    expect(io.rename).toHaveBeenCalled();
+  });
+
+  it("force refreshes even when fresh", async () => {
+    const fresh: ModelCache = { refreshedAt: 999, models: [] };
+    const probe = mock(okProbe);
+    const io = mockFileIO({ readFile: mock(async () => JSON.stringify(fresh)) });
+    await refreshModelCache(io, "/tmp/mc.json", { openai: probe }, { now: 1000, ttlMs: 100, pruneTtlMs: 999, force: true });
+    expect(probe).toHaveBeenCalledTimes(1);
   });
 });
 
