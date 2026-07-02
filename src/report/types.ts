@@ -36,4 +36,6 @@ export interface FileIO {
   glob(pattern: string): Promise<string[]>;
   /** Remove all files matching a glob pattern. */
   removeGlob(pattern: string): Promise<void>;
+  /** Rename/move a file (used for atomic write-then-swap). */
+  rename(from: string, to: string): Promise<void>;
 }

@@ -13,6 +13,7 @@ function stubFileIO(overrides: Partial<FileIO> = {}): FileIO {
     mkdir: mock(() => Promise.resolve()),
     glob: mock(() => Promise.resolve([])),
     removeGlob: mock(() => Promise.resolve()),
+    rename: mock(() => Promise.resolve()),
     ...overrides,
   };
 }

@@ -9,11 +9,28 @@ import {
   rollupAxisScore,
   readAffinityView,
   appendAffinityLog,
+  parseAffinityLog,
+  pruneStaleRecords,
+  loadAffinityTree,
+  compactAffinity,
   THIN_N,
   type AffinityLogRecord,
   type AffinityTree,
 } from "./affinity";
 import type { FileIO } from "../report/types";
+
+function mockFileIO(over: Partial<FileIO> = {}): FileIO {
+  return {
+    appendFile: mock(async () => {}),
+    readFile: mock(async () => ""),
+    writeFile: mock(async () => {}),
+    mkdir: mock(async () => {}),
+    glob: mock(async () => []),
+    removeGlob: mock(async () => {}),
+    rename: mock(async () => {}),
+    ...over,
+  };
+}
 
 function rec(over: Partial<AffinityLogRecord> = {}): AffinityLogRecord {
   return {
@@ -130,20 +147,97 @@ describe("readAffinityView", () => {
 
 describe("appendAffinityLog", () => {
   it("appends one JSONL line via FileIO.appendFile", async () => {
-    const io: FileIO = {
-      appendFile: mock(async () => {}),
-      readFile: mock(async () => ""),
-      writeFile: mock(async () => {}),
-      mkdir: mock(async () => {}),
-      glob: mock(async () => []),
-      removeGlob: mock(async () => {}),
-    };
+    const io = mockFileIO();
     await appendAffinityLog(io, "/tmp/aff/log.jsonl", rec());
     expect(io.mkdir).toHaveBeenCalled();
     const [path, data] = (io.appendFile as ReturnType<typeof mock>).mock.calls[0]!;
     expect(path).toBe("/tmp/aff/log.jsonl");
     expect(JSON.parse((data as string).trim())).toMatchObject({ protocol: "adversarial_debate" });
     expect((data as string).endsWith("\n")).toBe(true);
+  });
+});
+
+describe("parseAffinityLog", () => {
+  it("parses valid JSONL and skips malformed lines", () => {
+    const text = [
+      JSON.stringify(rec({ ts: 1 })),
+      "{ not json",
+      "",
+      JSON.stringify(rec({ ts: 2 })),
+    ].join("\n");
+    const records = parseAffinityLog(text);
+    expect(records).toHaveLength(2);
+    expect(records[0]!.ts).toBe(1);
+    expect(records[1]!.ts).toBe(2);
+  });
+
+  it("returns [] for empty input", () => {
+    expect(parseAffinityLog("")).toEqual([]);
+  });
+});
+
+describe("pruneStaleRecords", () => {
+  const now = 1_000_000;
+  const ttl = 100;
+  it("drops records for a model absent from active set AND older than ttl", () => {
+    const kept = pruneStaleRecords(
+      [rec({ model: "xai/dead", ts: now - 200 })],
+      new Set(["anthropic/claude-opus"]),
+      now,
+      ttl,
+    );
+    expect(kept).toHaveLength(0);
+  });
+
+  it("keeps an inactive model's record if it is still recent", () => {
+    const kept = pruneStaleRecords(
+      [rec({ model: "xai/dead", ts: now - 50 })],
+      new Set(["anthropic/claude-opus"]),
+      now,
+      ttl,
+    );
+    expect(kept).toHaveLength(1);
+  });
+
+  it("keeps an old record if the model is still active", () => {
+    const kept = pruneStaleRecords(
+      [rec({ model: "anthropic/claude-opus", ts: now - 999 })],
+      new Set(["anthropic/claude-opus"]),
+      now,
+      ttl,
+    );
+    expect(kept).toHaveLength(1);
+  });
+});
+
+describe("loadAffinityTree", () => {
+  it("returns {} when the tree file is missing", async () => {
+    const io = mockFileIO({ readFile: mock(async () => { throw new Error("ENOENT"); }) });
+    expect(await loadAffinityTree(io, "/tmp/aff/tree.json")).toEqual({});
+  });
+
+  it("parses an existing tree file", async () => {
+    const tree = compactAffinityLog([rec()]);
+    const io = mockFileIO({ readFile: mock(async () => JSON.stringify(tree)) });
+    expect(await loadAffinityTree(io, "/tmp/aff/tree.json")).toEqual(tree);
+  });
+});
+
+describe("compactAffinity", () => {
+  it("reads the log, writes the tree via temp+rename (atomic), and returns it", async () => {
+    const logText = [JSON.stringify(rec({ axes: { "정확성": 60 } })), JSON.stringify(rec({ axes: { "정확성": 90 } }))].join("\n");
+    const io = mockFileIO({ readFile: mock(async () => logText) });
+    const tree = await compactAffinity(io, "/tmp/aff/log.jsonl", "/tmp/aff/tree.json");
+
+    const node = tree["adversarial_debate"]!.children["인증-보안"]!.children["토큰-캐싱"]!;
+    expect(node.scores["anthropic/claude-opus"]!["정확성"]).toEqual({ mean: 75, n: 2 });
+
+    // atomic swap: wrote a temp file then renamed onto the target
+    const [tmpPath] = (io.writeFile as ReturnType<typeof mock>).mock.calls[0]!;
+    expect(tmpPath).not.toBe("/tmp/aff/tree.json");
+    const [from, to] = (io.rename as ReturnType<typeof mock>).mock.calls[0]!;
+    expect(from).toBe(tmpPath);
+    expect(to).toBe("/tmp/aff/tree.json");
   });
 });
 

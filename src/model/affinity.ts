@@ -166,3 +166,60 @@ export async function appendAffinityLog(
   await fileIO.mkdir(dirOf(logPath));
   await fileIO.appendFile(logPath, JSON.stringify(record) + "\n");
 }
+
+/** Parse a JSONL affinity log, skipping blank/malformed lines. */
+export function parseAffinityLog(text: string): AffinityLogRecord[] {
+  const out: AffinityLogRecord[] = [];
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    try {
+      out.push(JSON.parse(t) as AffinityLogRecord);
+    } catch {
+      // skip malformed line — compaction is best-effort
+    }
+  }
+  return out;
+}
+
+/**
+ * Drop records whose model is no longer available AND whose observation is stale (older than ttlMs).
+ * Keeps a record if the model is still active OR it is recent — so a briefly-unlisted model isn't lost.
+ */
+export function pruneStaleRecords(
+  records: readonly AffinityLogRecord[],
+  activeModels: ReadonlySet<string>,
+  nowTs: number,
+  ttlMs: number,
+): AffinityLogRecord[] {
+  return records.filter((r) => activeModels.has(r.model) || nowTs - r.ts <= ttlMs);
+}
+
+/** Load the compacted tree; returns {} when the file is missing/unreadable. */
+export async function loadAffinityTree(fileIO: FileIO, treePath: string): Promise<AffinityTree> {
+  try {
+    return JSON.parse(await fileIO.readFile(treePath)) as AffinityTree;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Compact the append-only log into the tree and swap it in atomically (temp file + rename), so a host
+ * reader never observes a half-written tree. Optionally prunes stale models first. Returns the new tree.
+ */
+export async function compactAffinity(
+  fileIO: FileIO,
+  logPath: string,
+  treePath: string,
+  opts?: { activeModels: ReadonlySet<string>; nowTs: number; ttlMs: number },
+): Promise<AffinityTree> {
+  let records = parseAffinityLog(await fileIO.readFile(logPath).catch(() => ""));
+  if (opts) records = pruneStaleRecords(records, opts.activeModels, opts.nowTs, opts.ttlMs);
+  const tree = compactAffinityLog(records);
+  await fileIO.mkdir(dirOf(treePath));
+  const tmp = `${treePath}.tmp`;
+  await fileIO.writeFile(tmp, JSON.stringify(tree, null, 2));
+  await fileIO.rename(tmp, treePath);
+  return tree;
+}

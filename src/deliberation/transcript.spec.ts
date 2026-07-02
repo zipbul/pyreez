@@ -35,6 +35,7 @@ function mockFileIO(over: Partial<FileIO> = {}): FileIO {
     mkdir: mock(async () => {}),
     glob: mock(async () => []),
     removeGlob: mock(async () => {}),
+    rename: mock(async () => {}),
     ...over,
   };
 }
