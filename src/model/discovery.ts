@@ -73,26 +73,41 @@ export function parseGrokModels(text: string): DiscoveredModel[] {
   return out;
 }
 
-// -- Provider probes (guarded; each yields [] on any failure) --
+export type ProviderStatus = "ok" | "empty" | "failed";
+
+/**
+ * A probe result that PRESERVES the failure mode. Probes must not collapse a failure into an empty list
+ * (that would let a transient outage masquerade as "provider has no models" and wrongly deprecate cached
+ * models). "ok" = ran + non-empty; "empty" = ran + genuinely no models; "failed" = timeout/throw/nonzero.
+ */
+export interface ProbeResult {
+  readonly models: DiscoveredModel[];
+  readonly status: ProviderStatus;
+}
+
+const PROBE_FAILED: ProbeResult = { models: [], status: "failed" };
+const ok = (models: DiscoveredModel[]): ProbeResult => ({ models, status: models.length ? "ok" : "empty" });
+
+// -- Provider probes (guarded; failure preserved as status "failed", never a silent empty) --
 
 /** codex: `codex debug models --bundled` → JSON catalog (bundled = no network). */
-export function discoverCodex(): Promise<DiscoveredModel[]> {
+export function discoverCodex(): Promise<ProbeResult> {
   return runGuarded(async () => {
     const { stdout, exitCode } = await spawnWithIdleTimeout(
       ["codex", "debug", "models", "--bundled"], {}, { idleMs: PROBE_MS },
     );
-    return exitCode === 0 ? parseCodexModels(stdout) : [];
-  }, PROBE_MS, []);
+    return exitCode === 0 ? ok(parseCodexModels(stdout)) : PROBE_FAILED;
+  }, PROBE_MS, PROBE_FAILED);
 }
 
 /** grok: `grok models` → text list. */
-export function discoverGrok(): Promise<DiscoveredModel[]> {
+export function discoverGrok(): Promise<ProbeResult> {
   return runGuarded(async () => {
     const { stdout, exitCode } = await spawnWithIdleTimeout(
       ["grok", "models"], {}, { idleMs: PROBE_MS },
     );
-    return exitCode === 0 ? parseGrokModels(stdout) : [];
-  }, PROBE_MS, []);
+    return exitCode === 0 ? ok(parseGrokModels(stdout)) : PROBE_FAILED;
+  }, PROBE_MS, PROBE_FAILED);
 }
 
 /**
@@ -101,10 +116,9 @@ export function discoverGrok(): Promise<DiscoveredModel[]> {
  */
 export function discoverClaude(
   supportedModels: () => Promise<{ value: string; displayName?: string; description?: string }[]>,
-): Promise<DiscoveredModel[]> {
+): Promise<ProbeResult> {
   return runGuarded(async () => {
-    const models = await supportedModels();
-    return models
+    const models = (await supportedModels())
       .filter((m) => typeof m.value === "string" && m.value.length > 0)
       // skip aliases like "default"/"opus"/"sonnet" — keep only concrete versioned ids
       .filter((m) => m.value.includes("-"))
@@ -114,10 +128,9 @@ export function discoverClaude(
         ...(m.displayName ? { displayName: m.displayName } : {}),
         ...(m.description ? { description: m.description } : {}),
       }));
-  }, PROBE_MS, []);
+    return ok(models);
+  }, PROBE_MS, PROBE_FAILED);
 }
-
-export type ProviderStatus = "ok" | "empty" | "failed";
 
 export interface DiscoveryResult {
   readonly models: DiscoveredModel[];
@@ -125,20 +138,19 @@ export interface DiscoveryResult {
 }
 
 /**
- * Run the given provider probes concurrently and aggregate. `status` distinguishes a provider that
- * genuinely returned nothing (empty) from one whose probe failed (failed) — so the host can tell
- * "provider has no models" from "provider unavailable".
+ * Run the given provider probes concurrently and aggregate, preserving each probe's real status so a
+ * transient failure is never mistaken for "empty".
  */
 export async function discoverAll(
-  probes: Partial<Record<ProviderName, () => Promise<DiscoveredModel[]>>>,
+  probes: Partial<Record<ProviderName, () => Promise<ProbeResult>>>,
 ): Promise<DiscoveryResult> {
-  const entries = Object.entries(probes) as [ProviderName, () => Promise<DiscoveredModel[]>][];
+  const entries = Object.entries(probes) as [ProviderName, () => Promise<ProbeResult>][];
   const results = await Promise.all(entries.map(async ([provider, probe]) => {
     try {
-      const models = await probe();
-      return { provider, models, status: (models.length ? "ok" : "empty") as ProviderStatus };
+      const r = await probe();
+      return { provider, ...r };
     } catch {
-      return { provider, models: [] as DiscoveredModel[], status: "failed" as ProviderStatus };
+      return { provider, ...PROBE_FAILED };
     }
   }));
   const models: DiscoveredModel[] = [];

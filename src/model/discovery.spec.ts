@@ -70,13 +70,14 @@ describe("runGuarded", () => {
 });
 
 describe("discoverAll", () => {
-  it("aggregates models and marks status ok/empty/failed per provider", async () => {
+  it("aggregates models and preserves each probe's status (failed is NOT collapsed to empty)", async () => {
     const result = await discoverAll({
-      openai: async () => [{ id: "openai/gpt-5.5", provider: "openai" }],
-      xai: async () => [],
-      anthropic: async () => { throw new Error("probe blew up"); },
+      openai: async () => ({ models: [{ id: "openai/gpt-5.5", provider: "openai" }], status: "ok" }),
+      xai: async () => ({ models: [], status: "empty" }),          // genuinely no models
+      google: async () => ({ models: [], status: "failed" }),      // probe failed (e.g. auth) — must stay "failed"
+      anthropic: async () => { throw new Error("probe blew up"); }, // thrown → failed
     });
     expect(result.models.map((m) => m.id)).toEqual(["openai/gpt-5.5"]);
-    expect(result.status).toEqual({ openai: "ok", xai: "empty", anthropic: "failed" });
+    expect(result.status).toEqual({ openai: "ok", xai: "empty", google: "failed", anthropic: "failed" });
   });
 });
