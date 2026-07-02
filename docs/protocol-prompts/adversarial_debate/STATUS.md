@@ -220,3 +220,18 @@ All rules preserved (unit tests pin each); 701 tests pass. Lesson for this recor
 (κ=0.04) produced three wrong "ceiling" conclusions that survived multiple rounds until an objective,
 rule-matched metric (κ=0.60) was used. Measure the right thing, and check inter-rater reliability BEFORE
 drawing conclusions.
+
+## Introspection loop (2026-07, discovery-era, live 3-worker runs)
+Method: run → collect all problems → batch-interrogate the worker (session resume) → fix via 3-way
+debate (subagent + codex + me, NOT pyreez) → re-measure. Models: claude-haiku, xai/grok-build, gpt-5.4-mini.
+
+- **it1**: 1/3 (grok) ignored output-format (prose+headings); all 3 converged despite distinct angles.
+  Fix: format-MUST line; attack-angle made self-contained ("avoid obvious critiques any model would reach
+  without this lens", dropped the unactionable "your peers cover those").
+- **it2**: measured — format-MUST INEFFECTIVE for grok (still prose, 0 labels); grok CONFABULATED
+  compliance on interrogation. Tried a concrete filled-finding example (different channel).
+- **it3**: measured — filled example ALSO ineffective for grok (3rd consecutive non-compliant run).
+  → **grok-build is intrinsically format-noncompliant for this protocol** (ignores bare-fields → MUST →
+  example; confabulates compliance). NOT prompt-fixable. Reverted the example (bulky, no measured effect;
+  claude-haiku/gpt-5.4-mini comply without it). Downstream stance: treat grok output as prose (the affinity
+  rubric judge scores axes from content regardless), or deprioritize grok for field-parsing consumers.
