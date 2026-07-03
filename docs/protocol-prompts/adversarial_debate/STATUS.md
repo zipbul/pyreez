@@ -457,3 +457,16 @@ per round × worker (9 turns):
   (workerIndex+shift)%5 rotation yields no within-worker repeat for ≤5 rounds (documented collision past 5).
 - verdicts stay calibrated and sharp; no softening/degradation as rounds accumulate.
 The R2 fixes (supersede announcement, angle rotation) hold at R3. No new defect at ≥3 rounds.
+
+## Host-format override verification (Fix E live)
+Fix E ("If <host-instructions> specifies an output format, follow it; otherwise use this") was only a text
+change — verified it live. Ran with --worker-instructions imposing a custom "RISK:/FIX:/BOTTOM LINE:"
+format. All 3 workers followed the host format (RISK/FIX pairs + BOTTOM LINE) with ZERO default-template
+residue (steelman: 0, verdict: 0 across all three). The host-format branch correctly overrides the default
+6-field/verdict template.
+
+## Coverage summary (adversarial_debate)
+Verified this session across: rounds R1/R2/R3; modes no-lookup + web (verification preserved, gpt confirmed
+via sysctl); default format + host-format override; ~9 distinct domains; the anti-softening anchor (A/B,
+load-bearing). One code path still untested live: cold-rebuild (buildAdversarialDebateR2 full <debate-so-far>
+path) fires only on a mid-debate model swap, which needs a forced provider failure to trigger deterministically.
