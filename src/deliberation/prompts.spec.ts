@@ -535,6 +535,22 @@ describe("buildAdversarialDebateR2", () => {
     expect(sys).toMatch(/falsification|change your mind/i);
   });
 
+  it("cold-rebuild (model-swap) path: debate-so-far + re-sent host-instructions + supersede angle + closing", () => {
+    // Fires only when a model is swapped mid-debate (no ownPrevious, ctx has prior rounds). Live runs never
+    // exercised it this session (no forced failure), so pin it deterministically: the swapped worker must
+    // still get the transcript, the re-sent host-instructions, the superseding rotated angle, and — at the
+    // final round — the closing.
+    const ctx = makeCtx([makeRound(1)]);
+    const user = buildAdversarialDebateR2(
+      ctx, otherResponses, undefined /* cold join */, "HOST FORMAT X", { current: 3, max: 3 }, 0,
+    )[1]!.content!;
+    expect(user).toContain("<debate-so-far>");
+    expect(user).not.toContain("<your-previous>");
+    expect(user).toContain("HOST FORMAT X"); // host-instructions re-sent for the swapped model
+    expect(user).toMatch(/New lens for this round — it replaces the lens you led with earlier/);
+    expect(user).toMatch(/This is the final round/);
+  });
+
   it("revise-on-record-evidence rule (anti-herding, but peer evidence counts) is re-injected in <approach>", () => {
     const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
     // revision is allowed on evidence in the record (incl. a peer's concrete evidence), NOT only self-derived
