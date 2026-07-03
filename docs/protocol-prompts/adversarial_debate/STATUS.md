@@ -420,3 +420,28 @@ Assessment: the prompt-text layer has CONVERGED for adversarial_debate — two s
 (char-audit + tool-agnostic merge + interrogation fixes) drove the cross-model issue count to a marginal,
 model-inconsistent tail. Further text edits would cut deliberate anchors or chase subjective single-model
 reads. This is evidence-backed convergence (re-interrogation deltas), not a fiat "done".
+
+## A/B: is "Do not soften your criticism" dead weight? → NO, load-bearing (kept)
+Two workers called the anchor redundant. Rather than declare it kept-by-fiat OR cut it on their nitpick,
+measured it: same task WITH vs WITHOUT the anchor (removed from both R1 <approach> and R2 peer <approach>),
+2-round, 3 workers. Ran on two proposal types:
+- **clear-cut bad** (unencrypted session cookie): no difference — without-anchor was equal/sharper (crit
+  R1→R2 3→5 without vs 3→3 with). The proposal is egregious, so there is no softening temptation to resist;
+  the anchor is inert here. This is the task the 2 workers reflected on → their "redundant" read was correct
+  FOR THIS CASE.
+- **borderline tradeoff** (feature-flags-for-all-config): the anchor bites. WITH: critical verdicts 3→5
+  across rounds, zero softening/concession words. WITHOUT: critical 1→3, and a concession word appears.
+  Removing the anchor measurably softened the critique exactly where softening is tempting.
+Conclusion: the anchor does real work on borderline proposals (its documented purpose — drift/softening
+resistance) and is merely inert on clear-cut ones. KEPT. The workers' redundancy flag was task-specific to
+a clear-cut case and missed the borderline value a single-turn reflection can't see. (n=1 task/arm, 3
+workers — directional but consistent with the rationale; the effect only appears on borderline tasks, which
+is why the clear-cut A/B showed nothing.)
+
+## Status: adversarial_debate prompt-text is evidence-backed converged
+Every shaving candidate this session was resolved by evidence, not fiat: real defects were fixed and
+measured (char-audit fixes, tool-agnostic merge, 4 interrogation fixes, dead cross-reference); the one
+remaining 2-model candidate ("Do not soften") was A/B-measured and found load-bearing. What's left is
+single-model subjective nitpicks that models disagree on. There is nothing left to cut without removing
+something that does measurable work. Remaining UNMEASURED surface (honest): R3+ (≥3 rounds), larger n across
+domains, and the other 5 protocols — none audited this way.
