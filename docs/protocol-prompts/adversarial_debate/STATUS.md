@@ -445,3 +445,15 @@ remaining 2-model candidate ("Do not soften") was A/B-measured and found load-be
 single-model subjective nitpicks that models disagree on. There is nothing left to cut without removing
 something that does measurable work. Remaining UNMEASURED surface (honest): R3+ (≥3 rounds), larger n across
 domains, and the other 5 protocols — none audited this way.
+
+## R3+ verification (all prior measurement was R1/R2 only)
+Ran a 3-round debate (Redis-as-primary-payment-store) — the first ≥3-round test this session. Verified
+per round × worker (9 turns):
+- format: 9/9 zero markdown headings, zero stray backticks — no regression across 3 rounds.
+- supersede signal: absent R1 (no prior lens), present R2 AND R3 — scales correctly.
+- <closing>: absent R1/R2, present ONLY at R3 (final) — isFinalRound placement correct at 3 rounds.
+- angle rotation: each worker gets 3 DISTINCT angles across the rounds (e.g. haiku: hidden-assumptions →
+  evidence-gaps → operational-failure; gpt: operational → edge-cases → incentive-misalignment). The
+  (workerIndex+shift)%5 rotation yields no within-worker repeat for ≤5 rounds (documented collision past 5).
+- verdicts stay calibrated and sharp; no softening/degradation as rounds accumulate.
+The R2 fixes (supersede announcement, angle rotation) hold at R3. No new defect at ≥3 rounds.
