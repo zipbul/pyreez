@@ -106,7 +106,7 @@ function formatChallengePositions(responses: readonly WorkerResponse[]): string 
 }
 
 /** Final-round consolidation signal for adversarial debate (no forced convergence). */
-const ADVERSARIAL_CLOSING = `<closing>This is the final round. Consolidate into one severity-ordered list: keep the weaknesses that survived challenge and fold in any new ones. State each weakness once with its full fields, folding any challenge to a peer into that finding's own target/steelman/evidence — do not add separate per-peer challenge, unresolved-disagreement, or summary sections. Keep an unresolved disagreement inside its finding rather than forcing consensus.</closing>`;
+const ADVERSARIAL_CLOSING = `<closing>This is the final round. Consolidate into one severity-ordered list: keep the weaknesses that survived challenge and fold in any new ones. State each weakness once with its full fields. When a finding challenges or absorbs a peer's position, lead it with the target field naming that analyst and keep the challenge inside that finding's own steelman/weakness/evidence — do not add separate per-peer challenge, unresolved-disagreement, or summary sections. Keep an unresolved disagreement inside its finding rather than forcing consensus.</closing>`;
 
 function isFinalRound(roundInfo?: RoundInfo): boolean {
   return roundInfo != null && roundInfo.current === roundInfo.max && roundInfo.max > 1;
@@ -126,13 +126,13 @@ const SHARED_CONVERGENCE_SYSTEM = buildSystemPrompt(
 // -- R1 Diversity Lenses --
 
 const DIVERSITY_LENSES = [
-  "Prioritize practical constraints: cost, timeline, team capability, migration effort. What looks good on paper but fails in practice?",
-  "Prioritize long-term consequences: maintenance burden, scalability ceiling, ecosystem trajectory, lock-in risk. What decision will you regret in 2 years?",
+  "Prioritize practical constraints: cost, time, the skills and resources required, and the effort to move from the current situation. What looks good in principle but fails in practice?",
+  "Prioritize long-term consequences: ongoing burden, limits that appear as scale or stakes grow, where the field is heading, and how hard the choice is to reverse. What decision will you regret in 2 years?",
   "Prioritize risk and failure modes: what can go wrong, what are the hidden assumptions, what happens under adversarial conditions? Steelman the weakest option.",
   "Prioritize the contrarian view: argue for the less obvious choice. What is everyone else missing? What evidence contradicts the popular opinion?",
   "Prioritize first principles: strip away convention and trend. What does the fundamental problem actually require? Rebuild the analysis from constraints alone.",
-  "Prioritize human factors: developer experience, onboarding, cognitive load, error-proneness. The best architecture that nobody can use correctly is the worst architecture.",
-  "Prioritize empirical evidence: cite specific benchmarks, case studies, production incidents, or measured data. Reject claims without evidence.",
+  "Prioritize human factors: ease of use, learning curve, cognitive load, how easily people make mistakes. The best solution nobody can use correctly is the worst solution.",
+  "Prioritize empirical evidence: cite specific studies, documented cases, measured outcomes, or hard data. Reject claims without evidence.",
 ];
 
 /**
@@ -273,7 +273,7 @@ export function buildSharedConvergenceFollowUp(
 // states one discipline that is TRUE either way — "assert a specific only when you can confirm it" —
 // so it can never desync from the wiring (claim a tool the worker lacks, or suppress one it has).
 const ADVERSARIAL_ROLE = `<role>
-You are one of several independent analysts stress-testing a proposal. Surface its strongest, evidence-backed weaknesses. Enumerate candidate failure modes and attack each. Drop a finding when any of these hold: (a) your own counter-attack defeats it; (b) it fires only under conditions the proposal rules out; (c) you cannot ground it in the proposal's content or a concrete failure mechanism. No preamble before the first finding.
+You are one of several independent analysts stress-testing a proposal. Surface its strongest, evidence-backed weaknesses. Enumerate candidate failure modes and attack each. When a finding rests on a stated cause, check for a distinct mechanism one step beneath it: if that mechanism has a different fix or a different falsification test, surface it as its own finding rather than absorbing it as a subspecies. Drop a finding when any of these hold: (a) your own counter-attack defeats it; (b) it fires only under conditions the proposal rules out; (c) you cannot ground it in the proposal's content or a concrete failure mechanism.
 </role>`;
 
 // Tool-agnostic evidence-and-confidence discipline. ONE block for all workers, web-wired or not: the
@@ -293,13 +293,13 @@ const ADVERSARIAL_EVIDENCE = `<evidence-and-confidence>
 </evidence-and-confidence>`;
 
 const ADVERSARIAL_OUTPUT_FORMAT = `<output-format>
-If <host-instructions> specifies an output format, follow it; otherwise use this. Order findings by severity, most critical first; when an <attack-angle> assigns your lead finding, lead with that and order the rest by severity. Every finding MUST use the exact field labels below — no markdown headings, no free-form prose, no renamed, added, or omitted fields (target is the sole exception: include it only when challenging a peer). Per finding, in this field order:
-- target (only when challenging a peer): the analyst you are challenging, e.g. "Analyst B"
+If <host-instructions> specifies an output format, follow it; otherwise use this. Order findings by severity, most critical first. When an <attack-angle> is present, follow it for which weaknesses to search and lead with, and order by severity within the scope it sets; a finding that challenges a peer (using target) may fall outside your current lens. Every finding MUST use the exact field labels below — no markdown headings, no free-form prose, no renamed, added, or omitted fields (target is the sole exception: include it only when your finding challenges or absorbs a specific peer). Your entire response is the findings then the single final line — no preamble, and never narrate your searching or consolidating (do that in your reasoning) before, between, or after findings. Per finding, in this field order:
+- target (only when your finding challenges or absorbs a specific peer): the analyst, e.g. "Analyst B"
 - steelman: strongest form of the position you attack (1-2 sentences)
 - weakness: the scenario/condition under which it breaks (one paragraph)
 - evidence: your reasoning chain, or an exact-recall citation (per the rules above)
 - falsification: the cheapest concrete test that would change your mind
-- verdict: render exactly as \`verdict: <severity>, <confidence>\` — lowercase severity (critical | high | medium | low), uppercase confidence (HIGH | MEDIUM | LOW), nothing else, and no backticks or quotes around it in your output. e.g. \`verdict: critical, HIGH\`
+- verdict: <severity>, <confidence> — lowercase severity (critical | high | medium | low), uppercase confidence (HIGH | MEDIUM | LOW), nothing else; no backticks, quotes, or a repeated "verdict" label in the value. e.g. critical, HIGH
 End with exactly one line — the single condition under which the proposal is acceptable, or, when it needs several fixes, "None — requires X, Y, Z" naming the missing pieces inline. Collapse multiple conditions into that one line; do not expand into a numbered list or multiple sentences.
 </output-format>`;
 
@@ -336,8 +336,8 @@ const ADVERSARIAL_APPROACH_PEER = `<approach>
 const ATTACK_ANGLES = [
   "Focus on hidden assumptions — what implicit premises must hold for this to work?",
   "Focus on evidence gaps — if an asserted premise is false, what concrete failure path follows?",
-  "Focus on operational failure — under what conditions does this break in production?",
-  "Focus on edge cases and adversarial input — what scenarios make this fall apart?",
+  "Focus on operational failure — under what real-world conditions does this break once deployed?",
+  "Focus on second-order harm — when this works as intended, what new damage does it create (induced behavior, displaced risk, collateral harm to those it acts on)?",
   "Focus on incentive misalignment — whose interests does this serve vs whose does it harm?",
 ];
 
@@ -346,6 +346,15 @@ const ATTACK_ANGLES = [
 // lenses with no precedence and guesses which governs (surfaced by worker interrogation).
 function rotatedAttackAngle(angle: string): string {
   return `<attack-angle>New lens for this round — it replaces the lens you led with earlier; do not keep leading from the old one. ${angle}</attack-angle>`;
+}
+
+// Final-round angle. The closing tells the worker to CONSOLIDATE all surviving findings, so a
+// "re-lead from a new lens" framing (rotatedAttackAngle) would contradict it — the worker then obeys
+// the closing and applies the lens only cosmetically, burying any genuinely new weakness the lens
+// surfaces (observed via worker interrogation). Here the lens is a final search pass whose output is
+// folded into the consolidated list by severity, which the closing governs — no contradiction.
+function finalAttackAngle(angle: string): string {
+  return `<attack-angle>Before consolidating, run one last search pass through this lens; fold anything new it surfaces into the consolidated list by severity. ${angle}</attack-angle>`;
 }
 
 /**
@@ -430,7 +439,8 @@ export function buildAdversarialDebateR2(
     // Measured to break the R2 finding-set lock-in seen when R1 angles were re-injected unchanged.
     const shift = roundInfo?.current ? roundInfo.current - 1 : 0;
     const angle = ATTACK_ANGLES[(workerIndex + shift) % ATTACK_ANGLES.length]!;
-    userParts.push(rotatedAttackAngle(angle));
+    // On the final round the closing governs (consolidate); the lens becomes a search pass, not a re-lead.
+    userParts.push(isFinalRound(roundInfo) ? finalAttackAngle(angle) : rotatedAttackAngle(angle));
   }
 
   if (isFinalRound(roundInfo)) userParts.push(ADVERSARIAL_CLOSING);
@@ -471,7 +481,8 @@ export function buildAdversarialDebateFollowUp(
     // Rotate by round (same as R2): a different angle than R1 per-worker (not peer-collision-free).
     const shift = roundInfo?.current ? roundInfo.current - 1 : 0;
     const angle = ATTACK_ANGLES[(workerIndex + shift) % ATTACK_ANGLES.length]!;
-    parts.push(rotatedAttackAngle(angle));
+    // On the final round the closing governs (consolidate); the lens becomes a search pass, not a re-lead.
+    parts.push(isFinalRound(roundInfo) ? finalAttackAngle(angle) : rotatedAttackAngle(angle));
   }
 
   if (isFinalRound(roundInfo)) parts.push(ADVERSARIAL_CLOSING);
@@ -566,15 +577,16 @@ Do not consider how other evaluators might score. Judge independently.
 
 <output-format>
 1. Analyze each criterion with your reasoning.
-2. For each major claim, indicate your confidence (e.g., **HIGH**, [MEDIUM], confidence: LOW).
-3. Write your verdict (one sentence overall judgment).
-4. Based on your verdict, assign a score.
+2. For each major claim, indicate your confidence as plain text (e.g., confidence: HIGH).
+3. Disclose your scoring basis (not the verdict — that goes in the closing block): which criterion or criteria weighed most, and the rule turning your per-criterion assessments into the overall score (e.g. the worst criterion floors it, or strengths and weaknesses balance out). The rule is yours; state it, so a split score reflects genuine disagreement rather than a hidden weighting.
+4. Close with the three-line block below. State the judgment sentence only in that block's judgment line, not earlier in the body.
 
-End with exactly this format:
-verdict: [one sentence — must be consistent with your analysis above]
-score: [overall 1-10 — must match the severity described in your verdict]
+End with exactly these three lines, as plain text with no markdown emphasis on the labels or values — they are read literally. The verdict is one of the five fixed tier words below so independent evaluations can be compared:
+judgment: [one sentence — must be consistent with your analysis above]
+verdict: [exactly one of: broken, significant-issues, acceptable, good, excellent — matching the score tier]
+score: [overall 1-10 — must match the tier in your verdict]
 
-Score anchors: 1-2 = fundamentally flawed/broken, 3-4 = significant issues, 5-6 = acceptable with notable issues, 7-8 = good with minor issues, 9-10 = excellent/exceptional.
+Score anchors: 1-2 = broken (fundamentally flawed), 3-4 = significant-issues, 5-6 = acceptable (notable issues), 7-8 = good (minor issues), 9-10 = excellent.
 </output-format>`;
 
 /**

@@ -475,13 +475,35 @@ describe("buildAdversarialDebateR2", () => {
     expect(sys).toContain("evidence-backed weaknesses");
   });
 
+  it("role bounds the whole response to findings + final line and bans narrating search/consolidation", () => {
+    // A fast model (grok-composer) leaked chain-of-thought into the final-round response
+    // ("Wait - let me reorder...", "Actually consolidate...", "Searching for ... to strengthen the
+    // consolidation pass."). Positional preamble bans just relocated the leak, so the boundary is
+    // stated once at response level: response = findings + final line, reasoning stays in reasoning.
+    // Measured effect: cut grok's leak from 3 interstitial/inline lines to a single harmless L0
+    // preamble ("Running a final ... search, then consolidating"); verdicts/confidence still parse.
+    // The other 4 models (haiku/sonnet/gpt-5.4-mini/gpt-5.5) never leak. The residual one-line
+    // preamble is grok-specific floor behavior, not remediable by more prompt text.
+    const r1 = buildAdversarialDebateR1(makeCtx(), undefined, undefined, 0)[0]!.content!;
+    const r2 = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    for (const sys of [r1, r2]) {
+      expect(sys).toContain("Your entire response is the findings");
+      expect(sys).toContain("never narrate your searching or consolidating");
+    }
+  });
+
   it("system carries the output-format with severity tiers + confidence + steelman field", () => {
     const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
     expect(sys).toContain("<output-format>");
-    // verdict rendered as a literal, parseable template (lowercase severity, uppercase confidence)
+    // verdict rendered as a parseable value (lowercase severity, uppercase confidence).
+    // The bullet is `- verdict: <value-desc>` like every sibling field; the value-desc must NOT
+    // re-embed a `verdict:` label — doing so made grok emit a doubled "verdict: verdict:" prefix
+    // (100% of findings) while anthropic/openai emitted it once (interpretation split, confirmed by
+    // worker interrogation). Example is the bare value "critical, HIGH", no label.
     expect(sys).toContain("(critical | high | medium | low)");
     expect(sys).toContain("(HIGH | MEDIUM | LOW)");
-    expect(sys).toContain("verdict: critical, HIGH");
+    expect(sys).toContain("e.g. critical, HIGH");
+    expect(sys).not.toContain("verdict: critical, HIGH");
     expect(sys).toContain("steelman:");
     expect(sys).toMatch(/Order findings by severity, most critical first/);
     // reason-before-verdict (de-commit-first) is enforced by FIELD ORDER, not a redundant prose clause:
@@ -495,17 +517,43 @@ describe("buildAdversarialDebateR2", () => {
     expect(sys).toMatch(/no renamed, added, or omitted fields/);
     // the conditional `target` field must not read as an "omitted field" violation
     expect(sys).toMatch(/target is the sole exception/);
-    // models sometimes copy the backticks that delimit the verdict template into their output
-    expect(sys).toMatch(/no backticks or quotes around it/);
+    // the output-format field-condition must match the closing's rule: target is required when a
+    // finding challenges OR absorbs a peer. When these two sites disagreed (output-format said "only
+    // when challenging", closing said "challenges or absorbs"), workers split — one dropped target on
+    // absorbed peers per output-format, another added it per closing. Both must say "challenges or absorbs".
+    expect(sys).toMatch(/include it only when your finding challenges or absorbs a specific peer/);
+    expect(sys).toMatch(/- target \(only when your finding challenges or absorbs a specific peer\)/);
+    // models sometimes copy the backticks that delimited the verdict template, or re-emit the label,
+    // into their output — the value-desc forbids both
+    expect(sys).toMatch(/no backticks, quotes, or a repeated "verdict" label/);
+  });
+
+  it("target requirement is consistent across output-format and closing (no sibling mismatch)", () => {
+    // Regression guard for the fixed contradiction: both the field-condition (system output-format)
+    // and the final-round closing must gate `target` on the SAME predicate — "challenges or absorbs".
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    const userFinal = buildAdversarialDebateR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 3, max: 3 },
+    )[1]!.content!;
+    expect(sys).toMatch(/challenges or absorbs a specific peer/);
+    expect(userFinal).toMatch(/When a finding challenges or absorbs a peer's position, lead it with the target field/);
+    // output-format must NOT restrict target to "only when challenging a peer" anymore
+    expect(sys).not.toMatch(/include it only when challenging a peer/);
+    expect(sys).not.toMatch(/- target \(only when challenging a peer\)/);
   });
 
   it("R1 resolves the severity-vs-attack-angle lead-ordering conflict; ordering stated once", () => {
-    // R1: the system severity rule must explicitly yield finding[0] to the attack-angle lens,
-    // so a worker obeying "most critical first" literally does not undo per-worker diversity.
+    // R1: the system severity rule must defer lens SCOPE to the <attack-angle> (whole-response in R1,
+    // lead-only in R2) instead of releasing non-lead findings to lens-free severity ordering — otherwise
+    // "order the rest by severity" undoes the per-worker diversity the lens exists to create. The clause
+    // must also preserve the cross-lens peer-challenge exception so R2 target findings are not forbidden.
     const r1 = buildAdversarialDebateR1(makeCtx(), undefined, { current: 1, max: 3 }, 0);
     const r1sys = r1[0]!.content!;
     const r1user = r1[1]!.content!;
-    expect(r1sys).toMatch(/when an <attack-angle> assigns your lead finding, lead with that/);
+    expect(r1sys).toMatch(/When an <attack-angle> is present, follow it for which weaknesses to search and lead with, and order by severity within the scope it sets/);
+    expect(r1sys).toMatch(/a finding that challenges a peer \(using target\) may fall outside your current lens/);
+    // the old lens-free release must be gone from the system clause
+    expect(r1sys).not.toMatch(/assigns your lead finding, lead with that and order the rest by severity/);
     // ordering is owned entirely by <output-format>; the attack-angle wrapper must not mention it at all
     // (interrogation flagged both the duplicate "Then order the rest by severity" AND a dead cross-reference)
     expect(r1user).not.toMatch(/order the rest by severity/i);
@@ -520,6 +568,17 @@ describe("buildAdversarialDebateR2", () => {
     expect(r2).toMatch(/New lens for this round — it replaces the lens you led with earlier/);
     const fu = buildAdversarialDebateFollowUp(makeCtx(), [], undefined, { current: 2, max: 3 }, 0).content;
     expect(fu).toMatch(/New lens for this round — it replaces the lens you led with earlier/);
+  });
+
+  it("final-round attack-angle is a search pass (folds by severity), NOT a re-lead — no conflict with closing", () => {
+    // The closing consolidates all surviving findings; a "re-lead / do not keep leading from the old one"
+    // lens contradicts that, so the worker obeys the closing and applies the lens cosmetically, burying any
+    // genuinely new weakness the lens surfaces (surfaced by worker interrogation). Final round reframes the
+    // lens as a search pass whose output the closing folds in by severity.
+    const fin = buildAdversarialDebateFollowUp(makeCtx(), [], undefined, { current: 3, max: 3 }, 0).content;
+    expect(fin).toMatch(/run one last search pass through this lens; fold anything new it surfaces/);
+    expect(fin).not.toMatch(/do not keep leading from the old one/);
+    expect(fin).toMatch(/This is the final round/); // closing still present
   });
 
   it("R2+ <approach> carries the peer-aware directives (no-soften, no-consensus, revise-on-own-evidence)", () => {
@@ -547,7 +606,10 @@ describe("buildAdversarialDebateR2", () => {
     expect(user).toContain("<debate-so-far>");
     expect(user).not.toContain("<your-previous>");
     expect(user).toContain("HOST FORMAT X"); // host-instructions re-sent for the swapped model
-    expect(user).toMatch(/New lens for this round — it replaces the lens you led with earlier/);
+    // Final round: the closing governs (consolidate), so the lens is a search pass folded by severity —
+    // NOT a "re-lead from a new lens", which would contradict the closing.
+    expect(user).toMatch(/run one last search pass through this lens; fold anything new it surfaces/);
+    expect(user).not.toMatch(/do not keep leading from the old one/);
     expect(user).toMatch(/This is the final round/);
   });
 
@@ -616,6 +678,12 @@ describe("buildAdversarialDebateR2", () => {
     expect(userFinal).toContain("This is the final round");
     // closing precedes the task (task stays last)
     expect(userFinal.indexOf("<closing>")).toBeLessThan(userFinal.indexOf("<task>"));
+    // final-round peer challenges must carry the machine-readable target field. Without a positive
+    // instruction, workers (measured across 4 provider models) folded challenges into prose and dropped
+    // target; the closing must require leading a peer-challenging finding with target.
+    expect(userFinal).toMatch(/lead it with the target field naming that analyst/);
+    // load-bearing: still forbid separate per-peer sections (prevents the prior standalone-block bloat)
+    expect(userFinal).toMatch(/do not add separate per-peer challenge/);
 
     const userMid = buildAdversarialDebateR2(
       makeCtx(), otherResponses, ownPrevious, undefined, { current: 2, max: 3 },
@@ -691,6 +759,10 @@ describe("buildAdversarialDebateR2", () => {
     const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
     // D3 staged framing (depth without banned CoT)
     expect(sys).toMatch(/enumerate candidate failure modes/i);
+    // depth-split: a distinct sub-mechanism (different fix/falsification) is its own finding, not absorbed
+    // as a subspecies — moves the deeper one-step-beneath weakness from dropped/absorbed to surfaced.
+    expect(sys).toMatch(/distinct mechanism one step beneath it/i);
+    expect(sys).toMatch(/its own finding rather than absorbing it as a subspecies/i);
     expect(sys).toMatch(/your own counter-attack defeats/i);
     // D2 de-commit-first: the merged verdict line comes AFTER the reasoning fields (weakness/evidence)
     expect(sys.indexOf("weakness:")).toBeLessThan(sys.indexOf("verdict:"));
@@ -1009,6 +1081,19 @@ describe("buildEvaluationScoringMessages", () => {
     const sys = buildEvaluationScoringMessages("t", "c", "s")[0]!.content!;
     expect(sys).toContain("confidence");
     expect(sys).toContain("HIGH");
+  });
+
+  // The verdict must be one of five fixed tier words, not free prose. Aggregation
+  // (voting/consensus) groups workers by the verbatim lowercased verdict string
+  // (engine.ts aggregateEvaluationResults) — free-form sentences make every worker
+  // a unique singleton, so voting always reports voteCount=1 and consensus can
+  // never reach even when workers agree. Fixed tiers restore meaningful grouping.
+  it("should require the verdict to be one of five fixed categorical tiers", () => {
+    const sys = buildEvaluationScoringMessages("t", "c", "s")[0]!.content!;
+    expect(sys).toContain("exactly one of: broken, significant-issues, acceptable, good, excellent");
+    // Prose lives on a separate judgment line so the verdict stays groupable.
+    expect(sys).toContain("judgment:");
+    expect(sys.indexOf("judgment:")).toBeLessThan(sys.indexOf("verdict:"));
   });
 });
 

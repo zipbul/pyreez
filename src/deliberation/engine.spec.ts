@@ -2229,6 +2229,24 @@ describe("parseConfidence", () => {
     expect(parseConfidence("**신뢰도**: HIGH")).toBe("high");
   });
 
+  // adversarial_debate verdict line "verdict: <severity>, <confidence>" — confidence lives ONLY here.
+  // Must read the confidence token and NOT double-count the severity word.
+  it("should parse adversarial verdict line 'verdict: critical, HIGH'", () => {
+    expect(parseConfidence("verdict: critical, HIGH")).toBe("high");
+  });
+
+  it("should read confidence (not severity) from 'verdict: high, MEDIUM'", () => {
+    expect(parseConfidence("verdict: high, MEDIUM")).toBe("medium");
+  });
+
+  it("should parse 'verdict: medium, LOW'", () => {
+    expect(parseConfidence("verdict: medium, LOW")).toBe("low");
+  });
+
+  it("should aggregate verdict confidences across findings (most frequent)", () => {
+    expect(parseConfidence("steelman: a\nverdict: critical, HIGH\n\nsteelman: b\nverdict: high, MEDIUM\n\nverdict: high, MEDIUM")).toBe("medium");
+  });
+
   // False-positive guards — must NOT match.
   it("should NOT match 'overconfidence:' / 'nonconfidence:' (word-boundary guard)", () => {
     expect(parseConfidence("overconfidence: HIGH")).toBeUndefined();
@@ -2366,6 +2384,22 @@ describe("aggregateEvaluationResults via deliberate", () => {
     expect(output.aggregation!.method).toBe("voting");
     expect(output.aggregation!.majorityVerdict).toBe("pass");
     expect(output.aggregation!.voteCount).toBe(2);
+  });
+
+  it("should parse bolded final labels and skip a '**Verdict**' section header", async () => {
+    // Regression: markdown-bolded final labels ("**score:** 9", "**verdict:** ...") previously dropped
+    // the score and captured "**" as the verdict; a "**Verdict**" body header hijacked the first match.
+    const worker = "**Verdict**\nmid-analysis summary line\n\n**verdict:** The subject is fundamentally sound.\n**score:** 8";
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(worker)),
+    });
+    const team = makeTeam(1);
+    const input = makeInput({ protocol: "evaluation_scoring" });
+    const config = makeConfig({ protocol: "evaluation_scoring" });
+    const output = await deliberate(team, input, deps, config);
+    const result = output.aggregation!.results[0]!;
+    expect(result.score).toBe(8);
+    expect(result.verdict).toBe("The subject is fundamentally sound.");
   });
 
   it("should aggregate with consensus method", async () => {

@@ -198,11 +198,15 @@ export function parseConfidence(text: string): "high" | "medium" | "low" | undef
   // "overconfidence:" or value "lower"/"mediumship".
   // The two lookbehinds block a letter before the label even across markdown emphasis, so
   // "overconfidence:" AND "over**confidence**:" are both rejected, while "**confidence**:" passes.
-  const pattern = /\b(high|medium|low)\s*(?:confidence|:)|(?<![a-z])(?<![a-z][*_]{1,2})[*_]{0,2}confidence[*_]{0,2}\s*:\s*\[?[*_]{0,2}(high|medium|low)\b|\[(high|medium|low)\]|\*\*(high|medium|low)\*\*|[*_]{0,2}신뢰도[*_]{0,2}\s*:\s*\[?[*_]{0,2}(high|medium|low)\b/gi;
+  // The final alternative reads adversarial_debate's mandated verdict line "verdict: <severity>, <confidence>"
+  // (e.g. "verdict: critical, HIGH"): that format carries confidence ONLY inside the verdict field, so the
+  // other alternatives miss it. Anchored to the literal "verdict:" label + severity + comma, it captures only
+  // the confidence token (not the severity), and cannot fire on other protocols' prose.
+  const pattern = /\b(high|medium|low)\s*(?:confidence|:)|(?<![a-z])(?<![a-z][*_]{1,2})[*_]{0,2}confidence[*_]{0,2}\s*:\s*\[?[*_]{0,2}(high|medium|low)\b|\[(high|medium|low)\]|\*\*(high|medium|low)\*\*|[*_]{0,2}신뢰도[*_]{0,2}\s*:\s*\[?[*_]{0,2}(high|medium|low)\b|verdict\s*:\s*(?:critical|high|medium|low)\s*,\s*(high|medium|low)\b/gi;
   const counts = { high: 0, medium: 0, low: 0 };
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(normalized)) !== null) {
-    const level = (match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5])!.toLowerCase() as "high" | "medium" | "low";
+    const level = (match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? match[6])!.toLowerCase() as "high" | "medium" | "low";
     counts[level]++;
   }
   const total = counts.high + counts.medium + counts.low;
@@ -907,16 +911,22 @@ function aggregateEvaluationResults(
   method: AggregationMethod,
 ) {
   const parsed = responses.map((r) => {
-    const scoreMatch = r.content.match(/(?:score|rating|점수|overall)\s*[:=]?\s*(\d+(?:\.\d+)?)/i)
+    const scoreMatch = r.content.match(/[*_]{0,2}(?:score|rating|점수|overall)[*_]{0,2}\s*[:=]?\s*[*_]{0,2}\s*(\d+(?:\.\d+)?)/i)
       ?? r.content.match(/(\d+(?:\.\d+)?)\s*(?:\/\s*10|out of 10)/i)
       ?? r.content.match(/\*\*(\d+(?:\.\d+)?)\*\*\s*\/\s*10/i);
+    // Require a ":"/"=" separator so a bolded section header like "**Verdict**" is skipped, and take
+    // the LAST match so the mandated final "verdict:" line wins over any earlier inline mention.
     // Skip table rows (starting with |) — models sometimes emit tables after "verdict:"
-    const verdictMatch = r.content.match(/(?:verdict|결론|판정)\s*[:=]?\s*([^|\n].+?)(?:\n|$)/i);
+    const verdictRe = /[*_]{0,2}(?:verdict|결론|판정)[*_]{0,2}\s*[:=]\s*[*_]{0,2}([^|\n].+?)(?:\n|$)/gi;
+    let verdictText: string | undefined;
+    for (let vm = verdictRe.exec(r.content); vm !== null; vm = verdictRe.exec(r.content)) {
+      verdictText = vm[1];
+    }
     const confidence = parseConfidence(r.content);
     return {
       model: r.model,
       score: scoreMatch ? parseFloat(scoreMatch[1]!) : undefined,
-      verdict: verdictMatch ? verdictMatch[1]!.trim() : undefined,
+      verdict: verdictText ? verdictText.replace(/[*_]+$/, "").trim() : undefined,
       confidence,
     };
   });
