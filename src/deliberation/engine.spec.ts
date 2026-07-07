@@ -2402,6 +2402,22 @@ describe("aggregateEvaluationResults via deliberate", () => {
     expect(result.verdict).toBe("The subject is fundamentally sound.");
   });
 
+  it("should take the final score line, not an earlier per-criterion score", async () => {
+    // Regression: a body line "Per-criterion score: 6.5/10" previously won over the mandated final
+    // "score: 6" line because the score regex used first-match while verdict/confidence use last-match.
+    const worker = "Per-criterion score: 6.5/10\nweighted mean resolves to approximately 6.1\n\njudgment: credible but not compelling.\nverdict: acceptable\nscore: 6";
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(worker)),
+    });
+    const team = makeTeam(1);
+    const input = makeInput({ protocol: "evaluation_scoring" });
+    const config = makeConfig({ protocol: "evaluation_scoring" });
+    const output = await deliberate(team, input, deps, config);
+    const result = output.aggregation!.results[0]!;
+    expect(result.score).toBe(6);
+    expect(result.verdict).toBe("acceptable");
+  });
+
   it("should aggregate with consensus method", async () => {
     const deps = makeDeps({
       chat: mock(async () => chatResult("verdict: PASS\nscore: 9")),

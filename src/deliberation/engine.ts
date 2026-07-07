@@ -911,9 +911,22 @@ function aggregateEvaluationResults(
   method: AggregationMethod,
 ) {
   const parsed = responses.map((r) => {
-    const scoreMatch = r.content.match(/[*_]{0,2}(?:score|rating|점수|overall)[*_]{0,2}\s*[:=]?\s*[*_]{0,2}\s*(\d+(?:\.\d+)?)/i)
-      ?? r.content.match(/(\d+(?:\.\d+)?)\s*(?:\/\s*10|out of 10)/i)
-      ?? r.content.match(/\*\*(\d+(?:\.\d+)?)\*\*\s*\/\s*10/i);
+    // Take the LAST match of the first matching pattern, so the mandated final "score:" line wins
+    // over an earlier per-criterion mention (e.g. "Per-criterion score: 6.5/10"). Mirrors the
+    // last-match logic used for verdict/confidence below; first-match here previously captured a
+    // body per-criterion score instead of the final tier score.
+    const scorePatterns = [
+      /[*_]{0,2}(?:score|rating|점수|overall)[*_]{0,2}\s*[:=]?\s*[*_]{0,2}\s*(\d+(?:\.\d+)?)/gi,
+      /(\d+(?:\.\d+)?)\s*(?:\/\s*10|out of 10)/gi,
+      /\*\*(\d+(?:\.\d+)?)\*\*\s*\/\s*10/gi,
+    ];
+    let scoreMatch: RegExpExecArray | null = null;
+    for (const scoreRe of scorePatterns) {
+      for (let sm = scoreRe.exec(r.content); sm !== null; sm = scoreRe.exec(r.content)) {
+        scoreMatch = sm;
+      }
+      if (scoreMatch) break;
+    }
     // Require a ":"/"=" separator so a bolded section header like "**Verdict**" is skipped, and take
     // the LAST match so the mandated final "verdict:" line wins over any earlier inline mention.
     // Skip table rows (starting with |) — models sometimes emit tables after "verdict:"
