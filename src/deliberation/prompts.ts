@@ -579,7 +579,7 @@ Do not consider how other evaluators might score. Judge independently.
 1. Analyze each criterion with your reasoning.
 2. For each major claim, indicate your confidence as plain text (e.g., confidence: HIGH).
 3. Disclose your scoring basis (not the verdict — that goes in the closing block): which criterion or criteria weighed most, and the rule turning your per-criterion assessments into the overall score (e.g. the worst criterion floors it, or strengths and weaknesses balance out). The rule is yours; state it, so a split score reflects genuine disagreement rather than a hidden weighting.
-4. Close with the three-line block below. State the judgment sentence only in that block's judgment line, not earlier in the body.
+4. Close with the three-line block below.
 
 End with exactly these three lines, as plain text with no markdown emphasis on the labels or values — they are read literally. The verdict is one of the five fixed tier words below so independent evaluations can be compared:
 judgment: [one sentence — must be consistent with your analysis above]
