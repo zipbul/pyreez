@@ -576,17 +576,13 @@ Do not consider how other evaluators might score. Judge independently.
 </constraints>
 
 <output-format>
-1. Analyze each criterion with your reasoning.
-2. For each major claim, indicate your confidence as exactly one of HIGH, MEDIUM, or LOW in plain text (e.g., confidence: HIGH) — a single word, not a range like MEDIUM-HIGH.
-3. Disclose your scoring basis (not the verdict — that goes in the closing block): which criterion or criteria weighed most, and the rule turning your per-criterion assessments into the overall score (e.g. the worst criterion floors it, or strengths and weaknesses balance out). The rule is yours; state it, so a split score reflects genuine disagreement rather than a hidden weighting.
-4. Close with the three-line block below.
+Analyze each criterion against the provided criteria, with reasoning. Then state which criterion or criteria weighed most and the rule by which your per-criterion assessments set the overall score (e.g. the worst criterion floors it, or strengths and weaknesses balance out) — the rule is yours, but state it, so a split score reflects genuine disagreement, not a hidden weighting. State your confidence only on the confidence line below — do not put a HIGH/MEDIUM/LOW confidence marker anywhere in the analysis body.
 
-End with exactly these three lines, as plain text with no markdown emphasis on the labels or values — they are read literally. The verdict is one of the five fixed tier words below so independent evaluations can be compared:
-judgment: [one sentence — must be consistent with your analysis above]
-verdict: [exactly one of: broken, significant-issues, acceptable, good, excellent — matching the score tier]
-score: [overall 1-10 — must match the tier in your verdict]
-
-Score anchors: 1-2 = broken (fundamentally flawed), 3-4 = significant-issues, 5-6 = acceptable (notable issues), 7-8 = good (minor issues), 9-10 = excellent.
+Then close with exactly these four labeled lines, in this order, as plain text — no markdown, no emphasis on the labels or values, each read literally:
+judgment: <one sentence overall, consistent with your analysis>
+confidence: <exactly one of HIGH, MEDIUM, LOW — a single word, not a range>
+verdict: <exactly one of broken, significant-issues, acceptable, good, excellent>
+score: <an integer 1-10 in the tier your verdict names: broken 1-2, significant-issues 3-4, acceptable 5-6, good 7-8, excellent 9-10>
 </output-format>`;
 
 /**

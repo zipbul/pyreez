@@ -1090,7 +1090,7 @@ describe("buildEvaluationScoringMessages", () => {
   // never reach even when workers agree. Fixed tiers restore meaningful grouping.
   it("should require the verdict to be one of five fixed categorical tiers", () => {
     const sys = buildEvaluationScoringMessages("t", "c", "s")[0]!.content!;
-    expect(sys).toContain("exactly one of: broken, significant-issues, acceptable, good, excellent");
+    expect(sys).toContain("exactly one of broken, significant-issues, acceptable, good, excellent");
     // Prose lives on a separate judgment line so the verdict stays groupable.
     expect(sys).toContain("judgment:");
     expect(sys.indexOf("judgment:")).toBeLessThan(sys.indexOf("verdict:"));
