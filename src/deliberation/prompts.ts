@@ -572,7 +572,6 @@ const EVALUATION_SCORING_SYSTEM = buildSystemPrompt(
 ) + `\n\n<constraints>
 Evaluate the subject against the provided criteria. Do not invent additional criteria.
 For each criterion, provide your own analysis and reasoning about the subject.
-Do not consider how other evaluators might score. Judge independently.
 </constraints>
 
 <output-format>

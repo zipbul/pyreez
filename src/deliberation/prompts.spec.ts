@@ -1047,7 +1047,6 @@ describe("buildEvaluationScoringMessages", () => {
     const sys = buildEvaluationScoringMessages("t", "c", "s")[0]!.content!;
     expect(sys).toContain("Evaluate independently");
     expect(sys).toContain("Do not invent additional criteria");
-    expect(sys).toContain("Judge independently");
   });
 
   it("should include criteria in user message", () => {
