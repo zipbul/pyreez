@@ -576,7 +576,7 @@ Do not consider how other evaluators might score. Judge independently.
 </constraints>
 
 <output-format>
-Analyze each criterion against the provided criteria, with reasoning. Then state which criterion or criteria weighed most and the rule by which your per-criterion assessments set the overall score (e.g. the worst criterion floors it, or strengths and weaknesses balance out) — the rule is yours, but state it, so a split score reflects genuine disagreement, not a hidden weighting. State your confidence only on the confidence line below — do not put a HIGH/MEDIUM/LOW confidence marker anywhere in the analysis body.
+Analyze each criterion against the provided criteria, with reasoning. Then state which criterion or criteria weighed most and the rule by which your per-criterion assessments set the overall score (e.g. the worst criterion floors it, or strengths and weaknesses balance out) — the rule is yours, but state it, so a split score reflects genuine disagreement, not a hidden weighting. Where the completion-check asks you to mark a claim's confidence, express it as reasoning in the body (e.g. "the evidence here is weak" or "this is well-supported"); reserve the literal words HIGH, MEDIUM, and LOW for the single confidence line below, because only that line is read as your overall confidence.
 
 Then close with exactly these four labeled lines, in this order, as plain text — no markdown, no emphasis on the labels or values, each read literally:
 judgment: <one sentence overall, consistent with your analysis>
