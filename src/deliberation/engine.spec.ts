@@ -2464,6 +2464,26 @@ describe("aggregateEvaluationResults via deliberate", () => {
     expect(output.aggregation!.weightedScore).toBeCloseTo(8.08, 1);
   });
 
+  it("should take the final confidence: line, not the mode of body markers", async () => {
+    // Worker emits earlier body "LOW confidence" mentions but its mandated final line is
+    // "confidence: HIGH". Mode-counting would return LOW (2 body vs 1 final); the aggregation must
+    // mirror score/verdict last-match and report HIGH.
+    let callIdx = 0;
+    const responses = [
+      "Criterion 1: weak — LOW confidence. Criterion 2: also LOW confidence.\nverdict: broken\nscore: 2\nconfidence: HIGH",
+      "verdict: broken\nscore: 3\nconfidence: HIGH",
+    ];
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(responses[callIdx++] ?? "")),
+    });
+    const team = makeTeam(2);
+    const input = makeInput({ protocol: "evaluation_scoring", aggregation: "confidence_weighted" });
+    const config = makeConfig({ protocol: "evaluation_scoring" });
+    const output = await deliberate(team, input, deps, config);
+    const worker0 = output.aggregation!.results!.find((r: any) => r.model === team.workers[0]!.model);
+    expect((worker0 as any).confidence).toBe("high");
+  });
+
   it("should not include aggregation for non-evaluation protocols", async () => {
     const deps = makeDeps();
     const team = makeTeam(2);

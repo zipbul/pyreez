@@ -935,7 +935,16 @@ function aggregateEvaluationResults(
     for (let vm = verdictRe.exec(r.content); vm !== null; vm = verdictRe.exec(r.content)) {
       verdictText = vm[1];
     }
-    const confidence = parseConfidence(r.content);
+    // Confidence: take the LAST "confidence:"-labeled tier line, mirroring the score/verdict
+    // last-match logic — the mandated final "confidence:" line is the worker's overall confidence
+    // and must win over any earlier body mention. Falls back to whole-text mode parsing only when no
+    // labeled line is present (e.g. a worker that ignored the format), preserving prior behavior.
+    const confidenceRe = /[*_]{0,2}(?:confidence|신뢰도)[*_]{0,2}\s*[:=]\s*\[?[*_]{0,2}(high|medium|low)\b/gi;
+    let confidence: "high" | "medium" | "low" | undefined;
+    for (let cm = confidenceRe.exec(r.content); cm !== null; cm = confidenceRe.exec(r.content)) {
+      confidence = cm[1]!.toLowerCase() as "high" | "medium" | "low";
+    }
+    confidence ??= parseConfidence(r.content);
     return {
       model: r.model,
       score: scoreMatch ? parseFloat(scoreMatch[1]!) : undefined,
