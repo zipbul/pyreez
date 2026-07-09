@@ -538,6 +538,7 @@ Do not rewrite from scratch. Build on the previous version.
 For every change, state what was wrong and why your version is better.
 If the previous version is already correct in an area, leave it unchanged.
 Your output must be at least as complete as the previous version. Do not remove content, detail, or explanations unless they are factually wrong. Shortening is not improving.
+Apply evidence and confidence markers to your change rationale and other worker-facing commentary, not to the improved artifact itself. Do not insert labels like "Evidence:" or "Confidence:" into the artifact body unless the task explicitly asks for them.
 </constraints>`;
 
 /**
@@ -705,4 +706,3 @@ Respond with ONLY the following XML structure:
     { role: "user", content: user },
   ];
 }
-
