@@ -541,18 +541,42 @@ Your output must be at least as complete as the previous version. Do not remove 
 Apply evidence and confidence markers to your change rationale and other worker-facing commentary, not to the improved artifact itself. Do not insert labels like "Evidence:" or "Confidence:" into the artifact body unless the task explicitly asks for them.
 </constraints>`;
 
+// First worker in a refinement chain produces the initial artifact. It must keep evidence/
+// confidence markers out of the artifact body — the same discipline the refiners apply — so a
+// downstream refiner never has to strip them and a single-worker chain never emits a
+// label-polluted deliverable. (It deliberately does NOT borrow shared_convergence's R1 prompt,
+// which is analysis-oriented and injects per-claim confidence labels via CONFIDENCE_AND_UNCERTAINTY.)
+const SEQUENTIAL_INITIAL_SYSTEM = buildSystemPrompt(
+  "Produce the initial artifact for the task. No preamble — lead with the artifact.",
+) + `\n\n<constraints>
+Apply evidence and confidence markers to your worker-facing commentary, not to the artifact itself. Do not insert labels like "Evidence:" or "Confidence:" into the artifact body unless the task explicitly asks for them.
+</constraints>`;
+
+function buildSequentialRefinementInitial(
+  ctx: SharedContext,
+  instructions?: string,
+): ChatMessage[] {
+  const userParts: string[] = [];
+  if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
+  userParts.push(`<task>${escapeXmlContent(ctx.task)}</task>`);
+  return [
+    { role: "system", content: SEQUENTIAL_INITIAL_SYSTEM },
+    { role: "user", content: userParts.join("\n\n") },
+  ];
+}
+
 /**
  * Build messages for sequential_refinement.
- * First worker gets R1-style prompt; subsequent workers get previous output.
+ * First worker produces the initial artifact; subsequent workers refine the previous output.
  */
 export function buildSequentialRefinementMessages(
   ctx: SharedContext,
   previousWorkerOutput: string | undefined,
   instructions?: string,
 ): ChatMessage[] {
-  // First worker in chain — no previous output, use R1-style
+  // First worker in chain — no previous output, produce the initial artifact.
   if (!previousWorkerOutput) {
-    return buildSharedConvergenceR1(ctx, instructions);
+    return buildSequentialRefinementInitial(ctx, instructions);
   }
 
   const userParts: string[] = [];

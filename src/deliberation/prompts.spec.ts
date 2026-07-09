@@ -981,17 +981,24 @@ describe("buildHostInterrogationMessages", () => {
 // ================================================================
 
 describe("buildSequentialRefinementMessages", () => {
-  it("should use R1-style prompt when no previous output (first worker)", () => {
+  it("should produce an artifact-oriented first-worker prompt (not shared-convergence analysis)", () => {
     const msgs = buildSequentialRefinementMessages(makeCtx(), undefined);
-    // Should delegate to buildSharedConvergenceR1
-    const r1 = buildSharedConvergenceR1(makeCtx());
-    expect(msgs).toEqual(r1);
+    expect(msgs).toHaveLength(2);
+    const sys = msgs[0]!.content!;
+    const user = msgs[1]!.content!;
+    // First worker produces the initial artifact and must keep confidence/evidence markers
+    // out of the artifact body — same discipline as the refiners, so downstream (or a 1-worker
+    // chain) never emits a label-polluted deliverable.
+    expect(sys).toContain("initial artifact");
+    expect(sys).toContain("not to the artifact itself");
+    // Must NOT inherit CONFIDENCE_AND_UNCERTAINTY's per-claim marker instruction.
+    expect(user).not.toContain("indicate your confidence");
+    expect(user).toMatch(/<task>Write a sorting function<\/task>$/);
   });
 
-  it("should use R1-style with instructions when no previous output", () => {
-    const msgs = buildSequentialRefinementMessages(makeCtx(), undefined, "Be concise");
-    const r1 = buildSharedConvergenceR1(makeCtx(), "Be concise");
-    expect(msgs).toEqual(r1);
+  it("should include host-instructions in the first-worker prompt", () => {
+    const user = buildSequentialRefinementMessages(makeCtx(), undefined, "Be concise")[1]!.content!;
+    expect(user).toContain("<host-instructions>Be concise</host-instructions>");
   });
 
   it("should return system + user when previous output provided", () => {
