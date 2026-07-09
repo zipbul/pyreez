@@ -30,20 +30,16 @@ Before submitting, verify every major claim carries both evidence and a confiden
 <constraints>
 Evaluate the subject against the provided criteria. Do not invent additional criteria.
 For each criterion, provide your own analysis and reasoning about the subject.
-Do not consider how other evaluators might score. Judge independently.
 </constraints>
 
 <output-format>
-1. Analyze each criterion with your reasoning.
-2. For each major claim, indicate your confidence (e.g., **HIGH**, [MEDIUM], confidence: LOW).
-3. Write your verdict (one sentence overall judgment).
-4. Based on your verdict, assign a score.
+Analyze each criterion against the provided criteria, with reasoning. Then state which criterion or criteria weighed most and the rule by which your per-criterion assessments set the overall score (e.g. the worst criterion floors it, or strengths and weaknesses balance out) — the rule is yours, but state it, so a split score reflects genuine disagreement, not a hidden weighting. Where the completion-check asks you to mark a claim's confidence, express it as reasoning in the body (e.g. "the evidence here is weak" or "this is well-supported"); reserve the literal words HIGH, MEDIUM, and LOW for the single confidence line below, because only that line is read as your overall confidence.
 
-End with exactly this format:
-verdict: [one sentence — must be consistent with your analysis above]
-score: [overall 1-10 — must match the severity described in your verdict]
-
-Score anchors: 1-2 = fundamentally flawed/broken, 3-4 = significant issues, 5-6 = acceptable with notable issues, 7-8 = good with minor issues, 9-10 = excellent/exceptional.
+Then close with exactly these four labeled lines, in this order, as plain text — no markdown, no emphasis on the labels or values, each read literally:
+judgment: <one sentence overall, consistent with your analysis>
+confidence: <exactly one of HIGH, MEDIUM, LOW — a single word, not a range>
+verdict: <exactly one of broken, significant-issues, acceptable, good, excellent>
+score: <an integer 1-10 in the tier your verdict names: broken 1-2, significant-issues 3-4, acceptable 5-6, good 7-8, excellent 9-10>
 </output-format>
 ```
 
@@ -67,7 +63,7 @@ Decision: Adopt PostgreSQL as the default database for a 4-person SaaS MVP launc
 
 ## Notes (코드 fact 출처)
 
-- 워커 격리 — 'Do not consider how other evaluators might score' (`prompts.ts:483`).
-- 출력 형식 강제: `verdict: ...` + `score: 1-10` 마지막 두 줄 + 점수 anchor 1-10 명시 (`prompts.ts:485-496`).
-- DEPTH_EXPLORE / DEPTH_REFINE 미주입 — `buildSystemPrompt` 두 번째 인자 생략 (`prompts.ts:477`).
-- CONFIDENCE_AND_UNCERTAINTY 별도 fragment 미주입. confidence 표기는 `<output-format>` 단계 2에서 인라인 강제.
+- 워커 격리 — role 라인 'Evaluate independently'만으로 강제. 단일 라운드라 peer 출력이 주입되는 경로 자체가 없음.
+- 출력 형식 강제: judgment/confidence/verdict/score 4줄. verdict는 다섯 tier 단어 중 하나, score는 그 tier band에 고정.
+- DEPTH_EXPLORE / DEPTH_REFINE 미주입 — `buildSystemPrompt` 두 번째 인자 생략.
+- CONFIDENCE_AND_UNCERTAINTY 별도 fragment 미주입. 주장별 confidence는 본문에 산문으로, 리터럴 HIGH/MEDIUM/LOW 토큰은 마지막 confidence 줄에만.

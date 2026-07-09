@@ -36,7 +36,7 @@ After reaching your position, find the strongest argument against it. If you can
 ```
 <host-instructions>Tie each point to the team's stated constraints (4 people, 6-month MVP) and be concrete about the conditions under which it applies.</host-instructions>
 
-<analysis-lens>Prioritize practical constraints: cost, timeline, team capability, migration effort. What looks good on paper but fails in practice?</analysis-lens>
+<analysis-lens>Prioritize practical constraints: cost, time, the skills and resources required, and the effort to move from the current situation. What looks good in principle but fails in practice?</analysis-lens>
 
 For each major claim, indicate your confidence:
 - HIGH: strong evidence or direct expertise
@@ -76,7 +76,7 @@ After reaching your position, find the strongest argument against it. If you can
 ```
 <host-instructions>Tie each point to the team's stated constraints (4 people, 6-month MVP) and be concrete about the conditions under which it applies.</host-instructions>
 
-<analysis-lens>Prioritize long-term consequences: maintenance burden, scalability ceiling, ecosystem trajectory, lock-in risk. What decision will you regret in 2 years?</analysis-lens>
+<analysis-lens>Prioritize long-term consequences: ongoing burden, limits that appear as scale or stakes grow, where the field is heading, and how hard the choice is to reverse. What decision will you regret in 2 years?</analysis-lens>
 
 For each major claim, indicate your confidence:
 - HIGH: strong evidence or direct expertise
@@ -126,7 +126,7 @@ Position: Cannot decide without traffic profile. If reads dominate and shape is 
 
 <host-instructions>Tie each point to the team's stated constraints (4 people, 6-month MVP) and be concrete about the conditions under which it applies.</host-instructions>
 
-<analysis-lens>Prioritize practical constraints: cost, timeline, team capability, migration effort. What looks good on paper but fails in practice?</analysis-lens>
+<analysis-lens>Prioritize practical constraints: cost, time, the skills and resources required, and the effort to move from the current situation. What looks good in principle but fails in practice?</analysis-lens>
 
 <constraints>
 Assess discrepancies between your analysis and others' using specific evidence.
@@ -182,7 +182,7 @@ Position: Cannot decide without traffic profile. If reads dominate and shape is 
 
 <host-instructions>Tie each point to the team's stated constraints (4 people, 6-month MVP) and be concrete about the conditions under which it applies.</host-instructions>
 
-<analysis-lens>Prioritize practical constraints: cost, timeline, team capability, migration effort. What looks good on paper but fails in practice?</analysis-lens>
+<analysis-lens>Prioritize practical constraints: cost, time, the skills and resources required, and the effort to move from the current situation. What looks good in principle but fails in practice?</analysis-lens>
 
 <constraints>
 Assess discrepancies between your analysis and others' using specific evidence.
@@ -216,7 +216,7 @@ One analyst argues (their confidence: LOW):
 Position: Cannot decide without traffic profile. If reads dominate and shape is fixed → PostgreSQL wins. If shape mutates and team writes only TS → MongoDB ergonomics win. Evidence weak — depends on team's stack familiarity, which is unspecified.
 </other-positions>
 
-<analysis-lens>Prioritize practical constraints: cost, timeline, team capability, migration effort. What looks good on paper but fails in practice?</analysis-lens>
+<analysis-lens>Prioritize practical constraints: cost, time, the skills and resources required, and the effort to move from the current situation. What looks good in principle but fails in practice?</analysis-lens>
 
 <constraints>
 Assess discrepancies between your analysis and others' using specific evidence.

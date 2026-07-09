@@ -333,10 +333,10 @@ function dumpEvaluationScoring(): ProtocolDump {
       },
     ],
     notes: [
-      "워커 격리 — 'Do not consider how other evaluators might score' (`prompts.ts:483`).",
-      "출력 형식 강제: `verdict: ...` + `score: 1-10` 마지막 두 줄 + 점수 anchor 1-10 명시 (`prompts.ts:485-496`).",
-      "DEPTH_EXPLORE / DEPTH_REFINE 미주입 — `buildSystemPrompt` 두 번째 인자 생략 (`prompts.ts:477`).",
-      "CONFIDENCE_AND_UNCERTAINTY 별도 fragment 미주입. confidence 표기는 `<output-format>` 단계 2에서 인라인 강제.",
+      "워커 격리 — role 라인 'Evaluate independently'만으로 강제. 단일 라운드라 peer 출력이 주입되는 경로 자체가 없음.",
+      "출력 형식 강제: judgment/confidence/verdict/score 4줄. verdict는 다섯 tier 단어 중 하나, score는 그 tier band에 고정.",
+      "DEPTH_EXPLORE / DEPTH_REFINE 미주입 — `buildSystemPrompt` 두 번째 인자 생략.",
+      "CONFIDENCE_AND_UNCERTAINTY 별도 fragment 미주입. 주장별 confidence는 본문에 산문으로, 리터럴 HIGH/MEDIUM/LOW 토큰은 마지막 confidence 줄에만.",
     ],
   };
 }
