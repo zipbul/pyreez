@@ -537,7 +537,7 @@ const SEQUENTIAL_REFINEMENT_SYSTEM = buildSystemPrompt(
 Do not rewrite from scratch. Build on the previous version.
 For every change, state what was wrong and why your version is better.
 If the previous version is already correct in an area, leave it unchanged.
-Your output must be at least as complete as the previous version. Do not remove content, detail, or explanations unless they are factually wrong. Shortening is not improving.
+Your improved artifact must be at least as complete as the artifact in the previous version. Do not remove artifact content, detail, or explanations unless they are factually wrong. Shortening the artifact is not improving. The previous worker's trailing change-rationale and commentary are its disposable process notes — refine only the artifact, and write your own fresh rationale rather than preserving theirs.
 Apply evidence and confidence markers to your change rationale and other worker-facing commentary, not to the improved artifact itself. Do not insert labels like "Evidence:" or "Confidence:" into the artifact body unless the task explicitly asks for them.
 </constraints>`;
 
