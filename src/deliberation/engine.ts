@@ -1249,11 +1249,18 @@ export async function deliberate(
     allModelSwaps.push(...roundResult.modelSwaps);
 
     // Replenishment: if slots are empty and replenish callback exists, fill from alive providers.
-    // Skip for red_team — intentional partial participation per round.
+    // Only for the parallel protocols whose default deps.buildR1Messages matches the protocol
+    // (shared_convergence, adversarial_debate — see createEngineDepsForProtocol). The specialized
+    // executors (sequential_refinement, evaluation_scoring, host_interrogation, red_team) build their
+    // own protocol-specific messages locally; their outer deps default to buildSharedConvergenceR1, so
+    // a replenished worker would run the wrong (analysis) prompt. Those executors already tolerate a
+    // lost worker, so replenishment is skipped for them.
+    const replenishmentSupported =
+      cfg.protocol === "shared_convergence" || cfg.protocol === "adversarial_debate";
     const activeCount = roundResult.round.responses.length;
     const emptySlots = originalTeamSize - activeCount;
     let replenishedResponses: WorkerResponse[] = [];
-    if (cfg.protocol !== "red_team" && emptySlots > 0 && fallbackDeps?.replenish && i === 1) {
+    if (replenishmentSupported && emptySlots > 0 && fallbackDeps?.replenish && i === 1) {
       const aliveProviders = new Set(
         roundResult.round.responses.map((r) => extractProvider(r.model)),
       );

@@ -2601,6 +2601,38 @@ describe("replenishment with actual replacement workers", () => {
     // Either Phase 4 recovered or replenish filled the gap
     expect(output.rounds![0]!.responses!.length).toBeGreaterThanOrEqual(1);
   });
+
+  it("should NOT replenish for specialized-executor protocols (wrong default prompt)", async () => {
+    // Replenishment calls callWithFallback with the OUTER deps, whose buildR1Messages for
+    // sequential_refinement/evaluation_scoring/host_interrogation is buildSharedConvergenceR1
+    // (wire.ts) — a replenished worker would run the analysis prompt, not the protocol prompt.
+    // These protocols' executors already tolerate a lost worker, so replenishment must be skipped.
+    // Empty-slot setup mirrors the shared_convergence replenishment test: model-0 always fails,
+    // model-1 succeeds for its own slot but fails as the Phase-4 fallback for model-0 → 1 empty slot.
+    let callCount = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        callCount++;
+        if (model === "prov-a/model-0") throw new LLMClientError(500, "server error");
+        if (model === "prov-b/model-1") {
+          if (callCount <= 2) return chatResult(validWorkerContent("ok"), 10, 20);
+          throw new LLMClientError(500, "overloaded");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([], cooldown);
+    const customTeam: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-b/model-1", role: "worker" },
+      ],
+    };
+    const replenish = mock(() => [{ model: "prov-d/model-3", role: "worker" as const }]);
+    await deliberate(customTeam, makeInput(), deps, makeConfig({ protocol: "sequential_refinement" }), { pool, replenish });
+    expect(replenish).not.toHaveBeenCalled();
+  });
 });
 
 // =============================================================================
