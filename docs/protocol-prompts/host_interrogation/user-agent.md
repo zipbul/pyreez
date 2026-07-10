@@ -281,7 +281,9 @@ revision loop ~3회 cap (호스트 휴리스틱, code 미강제). 그 이상이�
 | `--questions "Q1,Q2,Q3"` | 실제 답할 질문 list. CSV. 따옴표 escape 주의 |
 | `previousExchanges` (API) | 워커별 이전 Q&A. session 연속 시 사용 |
 
-질문 N개 = 워커당 N번 호출. cost ≈ workers × questions.
+할당은 1:1 round-robin — worker[i]가 questions[i % N] **하나**에만 답한다 (`engine.ts` executeInterrogationRound). 호출 수 = workers. cost ≈ workers × 1.
+- workers > questions → 뒤 워커들이 앞 질문을 중복 수신 (같은 질문에 복수 관점).
+- questions > workers → 초과 질문은 실행되지 않음 (`questions_dropped` warning 발생). 모든 질문을 물으려면 workers ≥ questions로 맞출 것.
 
 ---
 
@@ -368,7 +370,7 @@ default 1. 다중 라운드 사용 사례 미정형 — 보통 1로 고정하고
 
 ### `--count`
 - 격리 답변 다수 원하면 ≥3. juror-style은 5-7 권장
-- 비용 = workers × questions × (rounds=1)
+- 비용 = workers × (rounds=1) — 워커당 질문 1개(1:1 round-robin)
 
 ---
 
