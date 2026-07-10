@@ -1122,6 +1122,15 @@ describe("buildRedTeamGeneratorMessages", () => {
     expect(sys).toContain("adversarial inputs");
   });
 
+  it("should keep evidence/confidence markers out of the generated artifact body", () => {
+    // The generator produces a deliverable (policy, discharge sheet, code), not an analysis.
+    // GLOBAL_DEPTH's completion-check demands a confidence marker per claim; without this redirect
+    // the generator litters the reader-facing artifact with "(Confidence: High; Evidence: ...)".
+    // Same discipline as sequential_refinement's initial-artifact worker.
+    const sys = buildRedTeamGeneratorMessages("t")[0]!.content!;
+    expect(sys).toContain("not to the artifact itself");
+  });
+
   it("should place task at end", () => {
     const user = buildRedTeamGeneratorMessages("Gen task")[1]!.content!;
     expect(user).toMatch(/<task>Gen task<\/task>$/);
@@ -1173,10 +1182,27 @@ describe("buildRedTeamAttackerMessages", () => {
 
   it("should include target outputs in user message", () => {
     const user = buildRedTeamAttackerMessages("t", ["output A", "output B"])[1]!.content!;
-    expect(user).toContain("<target-output>");
     expect(user).toContain("output A");
     expect(user).toContain("output B");
-    expect((user.match(/<target-output>/g) ?? []).length).toBe(2);
+    expect((user.match(/<target-output\b/g) ?? []).length).toBe(2);
+  });
+
+  it("should number multiple targets and require per-target attribution", () => {
+    // Unlabeled repeated tags let a worker merge the drafts and leave one uncovered; ids + the
+    // attribution note keep each output attacked on its own. (Observed: a worker collapsed two
+    // policies into one section-numbered document, attributing nothing to the second.)
+    const user = buildRedTeamAttackerMessages("t", ["output A", "output B"])[1]!.content!;
+    expect(user).toContain('<target-output id="1">');
+    expect(user).toContain('<target-output id="2">');
+    expect(user).toContain("<targets-note>");
+    expect(user).toContain("tag every finding with the id");
+  });
+
+  it("should not number or add a targets-note for a single target", () => {
+    const user = buildRedTeamAttackerMessages("t", ["only"])[1]!.content!;
+    expect(user).toContain("<target-output>");
+    expect(user).not.toContain('id="1"');
+    expect(user).not.toContain("<targets-note>");
   });
 
   it("should include host-instructions when provided", () => {

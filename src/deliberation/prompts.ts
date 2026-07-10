@@ -640,6 +640,7 @@ Anticipate how your output could be attacked or misused.
 <constraints>
 Produce the strongest version you can.
 If you are aware of a weakness, address it proactively.
+Apply evidence and confidence markers to your worker-facing commentary, not to the artifact itself. Do not insert labels like "Evidence:" or "Confidence:" into the artifact body unless the task explicitly asks for them.
 </constraints>`;
 
 const RED_TEAM_ATTACKER_SYSTEM = buildSystemPrompt(
@@ -683,8 +684,20 @@ export function buildRedTeamAttackerMessages(
 ): ChatMessage[] {
   const userParts: string[] = [];
   if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
-  const targets = targetOutputs.map((o) => `<target-output>\n${escapeXmlContent(o)}\n</target-output>`).join("\n\n");
+  // With one target the bare tag is unambiguous; with several, an unlabeled repeat of the same tag
+  // lets a worker collapse them into one document and attribute every finding to whichever draft has
+  // the clearest structure, leaving the others uncovered. Number the tags and require per-target
+  // attribution so each output gets its own findings.
+  const multipleTargets = targetOutputs.length > 1;
+  const targets = targetOutputs
+    .map((o, i) => multipleTargets
+      ? `<target-output id="${i + 1}">\n${escapeXmlContent(o)}\n</target-output>`
+      : `<target-output>\n${escapeXmlContent(o)}\n</target-output>`)
+    .join("\n\n");
   userParts.push(targets);
+  if (multipleTargets) {
+    userParts.push(`<targets-note>These are ${targetOutputs.length} separate, independent outputs — do not merge them into one. Attack each on its own terms, and tag every finding with the id of the target it applies to.</targets-note>`);
+  }
   userParts.push(`<task>${escapeXmlContent(task)}</task>`);
 
   return [

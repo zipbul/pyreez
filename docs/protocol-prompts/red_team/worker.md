@@ -33,6 +33,7 @@ Anticipate how your output could be attacked or misused.
 <constraints>
 Produce the strongest version you can.
 If you are aware of a weakness, address it proactively.
+Apply evidence and confidence markers to your worker-facing commentary, not to the artifact itself. Do not insert labels like "Evidence:" or "Confidence:" into the artifact body unless the task explicitly asks for them.
 </constraints>
 ```
 
@@ -68,6 +69,7 @@ Anticipate how your output could be attacked or misused.
 <constraints>
 Produce the strongest version you can.
 If you are aware of a weakness, address it proactively.
+Apply evidence and confidence markers to your worker-facing commentary, not to the artifact itself. Do not insert labels like "Evidence:" or "Confidence:" into the artifact body unless the task explicitly asks for them.
 </constraints>
 ```
 
