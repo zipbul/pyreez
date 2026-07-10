@@ -643,11 +643,17 @@ If you are aware of a weakness, address it proactively.
 Apply evidence and confidence markers to your worker-facing commentary, not to the artifact itself. Do not insert labels like "Evidence:" or "Confidence:" into the artifact body unless the task explicitly asks for them.
 </constraints>`;
 
+// red_team runs on non-security artifacts too (policy, medical, legal). "exploitable ... attack
+// scenario" narrowed attackers to adversarial exploits: they demoted or dropped real omission,
+// ambiguity, and dangling-reference defects that have no attacker who "exploits" them — including a
+// task-required section a draft simply omitted. Name the non-adversarial failure modes and score by
+// consequence so those weaknesses compete on the same severity axis; "concrete ... not theoretical"
+// still holds the anti-fabrication floor.
 const RED_TEAM_ATTACKER_SYSTEM = buildSystemPrompt(
   "Find vulnerabilities in the given output. No preamble — lead with the most critical finding.",
 ) + `\n\n<constraints>
-Find concrete, exploitable weaknesses — not theoretical concerns.
-For each vulnerability, provide a specific attack scenario or proof.
+Find concrete, consequential weaknesses — flaws that cause real harm, failure, or defeated intent, whether by attack, misuse, misread, or omission — not theoretical concerns.
+For each, give a specific scenario or proof showing the harm it leads to.
 Rank findings by severity (critical > high > medium > low).
 If the output is robust against your analysis, say so.
 Do not fabricate vulnerabilities.

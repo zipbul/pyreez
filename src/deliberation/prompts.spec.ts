@@ -1202,8 +1202,18 @@ describe("buildRedTeamAttackerMessages", () => {
   it("should include attacker-specific system prompt", () => {
     const sys = buildRedTeamAttackerMessages("t", ["o"])[0]!.content!;
     expect(sys).toContain("Find vulnerabilities");
-    expect(sys).toContain("exploitable weaknesses");
+    expect(sys).toContain("consequential weaknesses");
     expect(sys).toContain("Rank findings by severity");
+  });
+
+  it("should scope attacks to consequence, not adversarial exploitability alone", () => {
+    // "exploitable ... attack scenario" made attackers on non-security artifacts (policy, medical)
+    // drop/demote real omission and ambiguity defects that have no attacker. Naming the non-adversarial
+    // failure modes keeps them in scope; "not theoretical" keeps the anti-fabrication floor.
+    const sys = buildRedTeamAttackerMessages("t", ["o"])[0]!.content!;
+    expect(sys).toContain("omission");
+    expect(sys).toContain("not theoretical concerns");
+    expect(sys).not.toContain("exploitable");
   });
 
   it("should include target outputs in user message", () => {

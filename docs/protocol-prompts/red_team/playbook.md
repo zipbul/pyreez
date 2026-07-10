@@ -34,7 +34,7 @@
 
 자동 주입:
 - **Generator**: depth(global only) + "Think through edge cases, failure modes, adversarial inputs" + "Anticipate how output could be attacked or misused" + "Produce strongest version. Address known weakness proactively"
-- **Attacker**: depth(global only) + "Find concrete, exploitable weaknesses — not theoretical" + "specific attack scenario or proof" + severity ranking(critical>high>medium>low) + "Do not fabricate vulnerabilities" + "If robust, say so"
+- **Attacker**: depth(global only) + "Find concrete, consequential weaknesses (attack·misuse·misread·omission) — not theoretical" + "specific scenario or proof showing the harm" + severity ranking(critical>high>medium>low) + "Do not fabricate vulnerabilities" + "If robust, say so"
 
 DEPTH_EXPLORE/REFINE **미주입**. CONFIDENCE fragment **미주입** — attacker는 severity로 신뢰도 표현.
 
@@ -70,7 +70,7 @@ attacker 자동 주입에 "Do not fabricate" 있으나 보강:
 
 ### 6. 자동주입 중복 금지
 - generator: "produce strongest version", "anticipate attacks", "edge case"
-- attacker: "find weakness", "concrete exploitable", "severity ranking", "do not fabricate"
+- attacker: "find weakness", "concrete consequential (attack·misuse·misread·omission)", "severity ranking", "do not fabricate"
 - 양쪽: "no preamble", premise reject
 
 ---

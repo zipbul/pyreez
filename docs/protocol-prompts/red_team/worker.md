@@ -108,8 +108,8 @@ Before submitting, verify every major claim carries both evidence and a confiden
 </completion-check>
 
 <constraints>
-Find concrete, exploitable weaknesses — not theoretical concerns.
-For each vulnerability, provide a specific attack scenario or proof.
+Find concrete, consequential weaknesses — flaws that cause real harm, failure, or defeated intent, whether by attack, misuse, misread, or omission — not theoretical concerns.
+For each, give a specific scenario or proof showing the harm it leads to.
 Rank findings by severity (critical > high > medium > low).
 If the output is robust against your analysis, say so.
 Do not fabricate vulnerabilities.
@@ -131,6 +131,6 @@ PostgreSQL is the right default because relational integrity catches MVP-stage d
 
 ## Notes (코드 fact 출처)
 
-- 비대칭 system prompt: generator는 edge case 사전 대응 (`prompts.ts:521-529`), attacker는 'concrete, exploitable' + severity 랭킹 + 'Do not fabricate' (`prompts.ts:531-539`).
-- DEPTH_EXPLORE / DEPTH_REFINE 미주입 — 두 system 모두 `buildSystemPrompt` 두 번째 인자 생략 (`prompts.ts:521, 531`).
+- 비대칭 system prompt: generator는 edge case 사전 대응 (`prompts.ts:635-644`), attacker는 'concrete, consequential' (attack·misuse·misread·omission 포함) + severity 랭킹 + 'Do not fabricate' (`prompts.ts:646-654`).
+- DEPTH_EXPLORE / DEPTH_REFINE 미주입 — 두 system 모두 `buildSystemPrompt` 두 번째 인자 생략 (`prompts.ts:635, 646`).
 - CONFIDENCE_AND_UNCERTAINTY 미주입.
