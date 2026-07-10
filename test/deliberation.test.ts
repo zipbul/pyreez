@@ -389,7 +389,9 @@ describe("Deliberation E2E", () => {
       // Second round: attackers analyze
       if (sysMsg.includes("Find vulnerabilities")) {
         const userMsg = messages.find((m) => m.role === "user")?.content ?? "";
-        expect(userMsg).toContain("<target-output>");
+        // Multiple generators (this fixture has 2) render numbered <target-output id="N"> tags, so
+        // match the open tag rather than the bare-and-closed form that only appears for a lone target.
+        expect(userMsg).toContain("<target-output");
         return chatResult("Found SQL injection vulnerability");
       }
       return chatResult("Secure login implementation");
