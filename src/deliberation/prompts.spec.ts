@@ -1163,6 +1163,32 @@ describe("buildRedTeamGeneratorMessages", () => {
     const taskIdx = user.indexOf("<task>");
     expect(attackIdx).toBeLessThan(taskIdx);
   });
+
+  it("should add a revision directive telling the generator to harden against the attacks", () => {
+    // Bare attack-results are just context; workers then guess (fresh output / phantom "id:3" draft /
+    // refuse the task). The directive names the one action so the generate→attack→harden loop iterates.
+    // Load-bearing clauses: "single improved version" (not fresh regen), the id-reference clause (kills
+    // the phantom-id-series read), and routing rebuttals to commentary (keeps them out of the artifact).
+    const user = buildRedTeamGeneratorMessages("t", undefined, "vuln found")[1]!.content!;
+    expect(user).toContain("<revision-directive>");
+    expect(user).toContain("Produce a single improved version that closes each valid finding");
+    expect(user).toContain("do not adopt or extend them");
+    expect(user).toContain("worker-facing commentary");
+  });
+
+  it("should place the revision directive after the attack results and before the task", () => {
+    const user = buildRedTeamGeneratorMessages("t", undefined, "vuln found")[1]!.content!;
+    const attackIdx = user.indexOf("<attack-results>");
+    const directiveIdx = user.indexOf("<revision-directive>");
+    const taskIdx = user.indexOf("<task>");
+    expect(attackIdx).toBeLessThan(directiveIdx);
+    expect(directiveIdx).toBeLessThan(taskIdx);
+  });
+
+  it("should omit the revision directive when there are no attack results", () => {
+    const user = buildRedTeamGeneratorMessages("t")[1]!.content!;
+    expect(user).not.toContain("<revision-directive>");
+  });
 });
 
 describe("buildRedTeamAttackerMessages", () => {

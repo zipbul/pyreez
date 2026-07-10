@@ -84,6 +84,8 @@ High: "Migrations cost an afternoon" is unsubstantiated; no estimate model provi
 Medium: Recommendation lacks rollback plan if schema thrash exceeds expectations.
 </attack-results>
 
+<revision-directive>The attack-results above are weaknesses an adversary found in the previous draft(s) of this output. Produce a single improved version that closes each valid finding; treat any target ids in the findings only as references to those drafts, and do not adopt or extend them. Where a finding is mistaken, do not let it change your output, and note why in your worker-facing commentary rather than in the artifact.</revision-directive>
+
 <task>Identify 3 specific conditions under which choosing PostgreSQL as the default database produces worse outcomes than MongoDB for a 4-person SaaS team launching an MVP within 6 months.</task>
 ```
 

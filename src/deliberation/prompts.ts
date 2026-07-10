@@ -665,6 +665,14 @@ export function buildRedTeamGeneratorMessages(
   if (instructions) userParts.push(`<host-instructions>${escapeXmlContent(instructions)}</host-instructions>`);
   if (previousAttackResults) {
     userParts.push(`<attack-results>\n${escapeXmlContent(previousAttackResults)}\n</attack-results>`);
+    // Without a directive the attack-results are just context: workers guess what to do with them and
+    // diverge — one produced a fresh output ignoring the loop, one invented a phantom "id:3" draft
+    // series, one read the findings as grounds to refuse the task. State the one action so the
+    // generate→attack→harden loop actually iterates instead of resetting each generator round.
+    // The generator never receives the prior draft text, so phrase everything relative to its own new
+    // output; ids in the findings are just draft references (present only with 2+ generators), never a
+    // scheme to join; keep any rebuttal in worker-facing commentary so it can't leak into the artifact.
+    userParts.push(`<revision-directive>The attack-results above are weaknesses an adversary found in the previous draft(s) of this output. Produce a single improved version that closes each valid finding; treat any target ids in the findings only as references to those drafts, and do not adopt or extend them. Where a finding is mistaken, do not let it change your output, and note why in your worker-facing commentary rather than in the artifact.</revision-directive>`);
   }
   userParts.push(`<task>${escapeXmlContent(task)}</task>`);
 
