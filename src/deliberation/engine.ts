@@ -1413,6 +1413,14 @@ export async function deliberate(
     warnings.push(`provider_diversity_low: ${providers.size} provider(s) — minimum 2 recommended`);
   }
 
+  // host_interrogation assigns questions 1:1 round-robin over workers, so questions beyond the
+  // team size are never asked. Surface that instead of dropping them silently.
+  if (cfg.protocol === "host_interrogation" && input.questions && input.questions.length > originalTeamSize) {
+    warnings.push(
+      `questions_dropped: ${input.questions.length - originalTeamSize} of ${input.questions.length} questions have no worker slot (one question per worker) — use at least ${input.questions.length} workers to ask them all`,
+    );
+  }
+
   // R1 diversity score — cheap text-distance metric. Always emitted as a value
   // for downstream tooling, but no longer raises warnings: empirical measurement
   // (9 task types) showed r1Diversity clusters in 0.74–0.85 range regardless of

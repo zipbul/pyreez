@@ -2775,6 +2775,40 @@ describe("R1 conformity warning in deliberate output", () => {
 });
 
 // =============================================================================
+// host_interrogation questions_dropped warning
+// =============================================================================
+
+describe("host_interrogation question assignment warnings", () => {
+  it("warns when questions outnumber workers (trailing questions never asked)", async () => {
+    // Assignment is 1:1 round-robin over workers, so with 2 workers and 4 questions
+    // the last 2 questions have no worker slot and are silently skipped.
+    const deps = makeDeps();
+    const team = makeTeam(2);
+    const input = makeInput({
+      protocol: "host_interrogation",
+      questions: ["q0", "q1", "q2", "q3"],
+    });
+    const config = makeConfig({ protocol: "host_interrogation" });
+    const output = await deliberate(team, input, deps, config);
+    const warns = output.warnings ?? [];
+    expect(warns.some((w) => w.includes("questions_dropped"))).toBe(true);
+  });
+
+  it("does not warn when workers cover all questions", async () => {
+    const deps = makeDeps();
+    const team = makeTeam(3);
+    const input = makeInput({
+      protocol: "host_interrogation",
+      questions: ["q0", "q1"],
+    });
+    const config = makeConfig({ protocol: "host_interrogation" });
+    const output = await deliberate(team, input, deps, config);
+    const warns = output.warnings ?? [];
+    expect(warns.some((w) => w.includes("questions_dropped"))).toBe(false);
+  });
+});
+
+// =============================================================================
 // computeR1Diversity
 // =============================================================================
 
