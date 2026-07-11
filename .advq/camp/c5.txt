@@ -1,1 +1,0 @@
-A data pipeline relies on Kafka exactly-once semantics (transactions plus the idempotent producer) across two datacenters. Identify the concrete conditions under which messages are still lost, duplicated, or reordered.

@@ -1,6 +1,0 @@
-[lane] c1 start 12:36:24
-[lane] c1 done exit=0 bytes=37856 12:39:53
-[lane] c2 start 12:39:53
-[lane] c2 done exit=0 bytes=37717 12:43:33
-[lane] c3 start 12:43:33
-[lane] c3 done exit=0 bytes=33885 12:51:09

@@ -1,4 +1,0 @@
-RESULT_t2 <- t2.json R2 claude 14039B
-RESULT_t3 <- t3.json R2 claude 17561B
-PROCESS_t2 <- t2.json R1 claude 11890B
-PROCESS_t3 <- t3.json R1 claude 11842B

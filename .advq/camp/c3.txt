@@ -1,1 +1,0 @@
-A team uses PostgreSQL as a job queue with SELECT ... FOR UPDATE SKIP LOCKED, polled every 100ms by 50 worker processes. Identify the concrete conditions under which this queue loses jobs, double-processes them, or collapses under load.
