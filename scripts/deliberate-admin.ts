@@ -3,7 +3,7 @@
  * Usage: bun run scripts/deliberate-admin.ts
  */
 
-import { loadConfigFromEnv, loadRoutingConfig } from "../src/config";
+import { loadConfigFromEnv } from "../src/config";
 import { createChatAdapter, createDeliberateFn } from "../src/deliberation/wire";
 import { ProviderRegistry } from "../src/llm/registry";
 import { buildProviders } from "../src/llm/providers";
@@ -50,8 +50,7 @@ For each decision, state your recommendation with reasoning. Be specific.`;
 // -- Main --
 
 async function main() {
-  const routing = await loadRoutingConfig();
-  const config = loadConfigFromEnv(routing);
+  const config = loadConfigFromEnv();
   const registry = new ModelRegistry();
 
   const providers = buildProviders(config.providers);

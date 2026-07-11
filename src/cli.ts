@@ -11,7 +11,7 @@ import type { HandlersConfig, HandlerResult } from "./handlers";
 import type { FileAccess } from "./llm/types";
 import { handleDeliberate, handleAcceptance } from "./handlers";
 import { CooldownStateSchema, AcceptanceWorkersArraySchema, parseWithSchema } from "./validation/schemas";
-import { loadConfigFromEnv, loadRoutingConfig } from "./config";
+import { loadConfigFromEnv } from "./config";
 import { createChatAdapter, createDeliberateFn } from "./deliberation/wire";
 import {
   writeTranscript,
@@ -23,12 +23,11 @@ import {
 import { appendAffinityLog, compactAffinity, loadAffinityTree } from "./model/affinity";
 import { discoverCodex, discoverGrok, discoverClaude, type DiscoveredModel } from "./model/discovery";
 import { refreshModelCache, availableModels } from "./model/model-cache";
-import { registryFromModels, mergeDiscoveredWithCurated, type RegistryLike } from "./model/discovered-registry";
+import { discoveredRegistry, type RegistryLike } from "./model/discovered-registry";
 import { claudeSupportedModels } from "./llm/providers/claude-agent";
 import { FileDeliberationStore } from "./deliberation/file-store";
 import { ProviderRegistry } from "./llm/registry";
 import { buildProviders } from "./llm/providers";
-import { ModelRegistry } from "./model/registry";
 import { BunFileIO } from "./report/bun-file-io";
 import { FileRunLogger } from "./report/run-logger";
 import { createCooldownManager } from "./deliberation/cooldown";
@@ -142,9 +141,7 @@ async function buildConfig(
   needsDiscovery = true,
 ): Promise<HandlersConfig> {
 
-  const routing = await loadRoutingConfig();
-  const config = loadConfigFromEnv(routing);
-  const curated = new ModelRegistry();
+  const config = loadConfigFromEnv();
   const fileIO = new BunFileIO();
   const deliberationStore = new FileDeliberationStore(".pyreez/deliberations", fileIO);
   const runLogger = new FileRunLogger(".pyreez/runs", fileIO);
@@ -153,8 +150,7 @@ async function buildConfig(
   const providers = buildProviders(config.providers);
 
   // Availability comes from LIVE discovery (cached, refreshed when stale) — not a hand-maintained list.
-  // Discovery only runs for commands that select models; other commands route by prefix. Curated
-  // models.jsonc fills in providers discovery does NOT cover (e.g. gemini has no probe) and cold bootstrap.
+  // Discovery only runs for commands that select models; other commands route by the id prefix.
   const DISCOVERY_TTL_MS = 24 * 60 * 60 * 1000;
   const DEPRECATE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
   let discovered: DiscoveredModel[] = [];
@@ -171,7 +167,7 @@ async function buildConfig(
     );
     discovered = availableModels(modelCache);
   }
-  const registry: RegistryLike = registryFromModels(mergeDiscoveredWithCurated(discovered, curated.getAll()));
+  const registry: RegistryLike = discoveredRegistry(discovered);
 
   const providerRegistry = new ProviderRegistry(
     providers,
@@ -183,7 +179,7 @@ async function buildConfig(
   const { modelIds, warnings } = filterModelsByProviders(registry, providers);
   for (const w of warnings) console.error(`[pyreez] ${w}`);
   if (modelIds.length === 0) {
-    die("[pyreez] No models available. Check API keys and .pyreez/models.jsonc.");
+    die("[pyreez] No models available. Check provider auth (PYREEZ_XAI_KEY / claude-code / codex / gemini CLI login).");
   }
 
   const sharedCooldown = createCooldownManager();
