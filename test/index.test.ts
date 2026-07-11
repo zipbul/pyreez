@@ -5,6 +5,7 @@
 import { describe, it, expect } from "bun:test";
 import { filterModelsByProviders } from "../src/index";
 import { ModelRegistry } from "../src/model/registry";
+import type { ModelInfo } from "../src/model/types";
 import type { LLMProvider, ChatCompletionRequest, ChatCompletionResponse } from "../src/llm/types";
 
 function fakeProvider(name: string): LLMProvider {
@@ -17,8 +18,21 @@ function fakeProvider(name: string): LLMProvider {
   };
 }
 
+function model(id: string, provider: ModelInfo["provider"], available = true): ModelInfo {
+  return { id, name: id, provider, contextWindow: 128000, cost: { inputPer1M: 1, outputPer1M: 1 }, supportsToolCalling: true, available };
+}
+
+// The registry is now injected (no on-disk catalog). Provide a representative multi-provider set,
+// with one unavailable model, so filtering/availability behavior is exercised.
 describe("filterModelsByProviders", () => {
-  const registry = new ModelRegistry();
+  const registry = new ModelRegistry([
+    model("anthropic/opus", "anthropic"),
+    model("anthropic/haiku", "anthropic"),
+    model("google/gemini", "google"),
+    model("openai/gpt", "openai"),
+    model("xai/grok", "xai"),
+    model("xai/grok-unavailable", "xai", false),
+  ]);
 
   it("should return only models from configured providers", () => {
     const providers = [fakeProvider("anthropic"), fakeProvider("google")];

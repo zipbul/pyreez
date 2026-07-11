@@ -1,54 +1,10 @@
 /**
- * Model registry — loads models from .pyreez/models.jsonc.
+ * In-memory model registry. Models are supplied by the caller (live provider discovery);
+ * there is no on-disk curated catalog — an empty registry is valid (discovery fills it).
  */
 
 import type { ModelInfo } from "./types";
 import type { ProviderName } from "../llm/types";
-
-// -- JSON → ModelInfo parser --
-
-interface JsonModelEntry {
-  name: string;
-  provider: ProviderName;
-  contextWindow: number;
-  cost: { inputPer1M: number; outputPer1M: number };
-  available?: boolean;
-  family?: string;
-  supportsToolCalling?: boolean;
-  benchmark?: Record<string, number>;
-}
-
-interface ModelsJsonSchema {
-  version: number;
-  models: Record<string, JsonModelEntry>;
-}
-
-function parseModels(data: ModelsJsonSchema): ModelInfo[] {
-  const result: ModelInfo[] = [];
-  for (const [id, entry] of Object.entries(data.models)) {
-    result.push({
-      id,
-      name: entry.name,
-      provider: entry.provider,
-      contextWindow: entry.contextWindow,
-      cost: entry.cost,
-      supportsToolCalling: entry.supportsToolCalling !== false,
-      available: entry.available !== false,
-      family: entry.family,
-      benchmark: entry.benchmark,
-    });
-  }
-  return result;
-}
-
-/** Load models from .pyreez/models.jsonc using Bun.JSONC parser. */
-function loadModels(): readonly ModelInfo[] {
-  const text = require("fs").readFileSync(".pyreez/models.jsonc", "utf-8");
-  const data = Bun.JSONC.parse(text) as ModelsJsonSchema;
-  return parseModels(data);
-}
-
-const MODELS: readonly ModelInfo[] = loadModels();
 
 /**
  * Registry of available LLM models.
@@ -56,9 +12,9 @@ const MODELS: readonly ModelInfo[] = loadModels();
 export class ModelRegistry {
   private readonly models: ReadonlyMap<string, ModelInfo>;
 
-  constructor(models?: readonly ModelInfo[]) {
+  constructor(models: readonly ModelInfo[] = []) {
     const map = new Map<string, ModelInfo>();
-    for (const model of models ?? MODELS) {
+    for (const model of models) {
       map.set(model.id, model);
     }
     this.models = map;
@@ -93,6 +49,3 @@ export class ModelRegistry {
     return map;
   }
 }
-
-/** Exported for unit testing only. */
-export const __testing__ = { parseModels } as const;
