@@ -48,7 +48,9 @@ export type FileAccess = "read" | "write";
  * GenerationParams so there is one source of truth. Each provider maps these to its own SDK/CLI knobs.
  */
 export interface Capabilities {
-  /** Web search/fetch so the worker can VERIFY claims instead of recalling them. */
+  /** Web search/fetch so the worker can VERIFY claims instead of recalling them.
+   *  Tri-state: true = force on, false = force no-lookup, undefined = provider default
+   *  (xai defaults web ON because of its no-lookup confabulation floor; others default off). */
   webAccess?: boolean;
   /** Reasoning effort on a 1–10 scale; each provider buckets it to its own level set. */
   reasoning_effort?: number;

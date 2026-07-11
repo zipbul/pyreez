@@ -319,7 +319,7 @@ async function main(): Promise<void> {
         subject,
         aggregation: flags["aggregation"],
         file_access: fileAccess as FileAccess | undefined,
-        web_access: flags["web-access"] === "true" ? true : undefined,
+        web_access: flags["web-access"] === "true" ? true : flags["web-access"] === "false" ? false : undefined,
         reasoning_effort: reasoningEffort,
         topic_path: topicPath,
         axes,
@@ -543,7 +543,7 @@ async function main(): Promise<void> {
       // message list; web/effort/fileAccess into params).
       const params = {
         ...(s.reasoning_effort != null ? { reasoning_effort: s.reasoning_effort } : {}),
-        ...(s.webAccess ? { webAccess: true } : {}),
+        ...(s.webAccess != null ? { webAccess: s.webAccess } : {}),
         ...(s.fileAccess ? { fileAccess: s.fileAccess } : {}),
       };
 

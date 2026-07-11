@@ -204,6 +204,24 @@ describe("createChatAdapter", () => {
     expect(req.reasoning_effort).toBe(7);
   });
 
+  it("should forward explicit webAccess: false instead of dropping it", async () => {
+    // webAccess is tri-state: undefined = provider default (xai defaults web ON), false = forced
+    // no-lookup. Dropping the false here would silently re-enable web for grok workers.
+    const rawChat = mock((_req: any) =>
+      Promise.resolve(makeChatResponse("ok", 10, 20)),
+    );
+    const adapter = createChatAdapter(rawChat);
+
+    await adapter(
+      "xai/grok-build",
+      [{ role: "user", content: "test" }],
+      { webAccess: false },
+    );
+
+    const req = rawChat.mock.calls[0]![0] as any;
+    expect(req.webAccess).toBe(false);
+  });
+
   it("forwards opts.resumeSessionId into the request and surfaces response.sessionId", async () => {
     const rawChat = mock((_req: any) =>
       Promise.resolve({ ...makeChatResponse("ok", 10, 20), sessionId: "S1" }),

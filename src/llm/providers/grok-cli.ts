@@ -5,6 +5,10 @@
  * could never verify claims and confabulated DB/tech mechanisms in no-lookup mode. The CLI
  * grants web_search/web_fetch tools (on by default), letting Grok workers VERIFY before asserting.
  *
+ * Because of that no-lookup confabulation floor (~8% even after prompt discipline), this provider
+ * keeps web tools ON when request.webAccess is undefined — the opposite of the other providers'
+ * default. Only an explicit webAccess: false disables them (forced no-lookup runs).
+ *
  * Serializes messages, passes the system block via --system-prompt-override, reads the plain-text
  * response from stdout. Spawned by name ("grok") — under `bun run`, the pinned
  * node_modules/.bin/grok precedes any global install on PATH.
@@ -83,8 +87,9 @@ export class GrokCliProvider implements LLMProvider {
       args.push("--reasoning-effort", bucketEffort(request.reasoning_effort, GROK_EFFORT));
     }
 
-    // Web search + web fetch tools are ON by default; disable them for no-lookup workers.
-    if (!request.webAccess) args.push("--disable-web-search");
+    // Web search + web fetch stay ON unless the host forces no-lookup with an explicit false —
+    // undefined means "provider default", and for grok that default is web ON (see header).
+    if (request.webAccess === false) args.push("--disable-web-search");
 
     try {
       const env: Record<string, string | undefined> = { ...process.env };

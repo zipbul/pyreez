@@ -107,7 +107,8 @@ export function createChatAdapter(
       messages: conversation,
       ...(system ? { system } : {}),
       ...(params?.fileAccess ? { fileAccess: params.fileAccess } : {}),
-      ...(params?.webAccess ? { webAccess: true } : {}),
+      // webAccess is tri-state: undefined = provider default (xai: web ON), false = forced no-lookup.
+      ...(params?.webAccess != null ? { webAccess: params.webAccess } : {}),
       ...(params?.reasoning_effort != null ? { reasoning_effort: params.reasoning_effort } : {}),
       ...(opts?.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
     });
@@ -254,7 +255,7 @@ export function createDeliberateFn(
     const effectiveMaxRounds = input.maxRounds ?? defaultMaxRounds(protocol);
     const workerGenParams: GenerationParams = {
       ...(input.fileAccess ? { fileAccess: input.fileAccess } : {}),
-      ...(input.webAccess ? { webAccess: true } : {}),
+      ...(input.webAccess != null ? { webAccess: input.webAccess } : {}),
       ...(input.reasoning_effort ? { reasoning_effort: input.reasoning_effort } : {}),
     };
     const config: EngineConfig = {

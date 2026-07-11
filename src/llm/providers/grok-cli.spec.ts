@@ -111,8 +111,15 @@ describe("GrokCliProvider", () => {
 
   // -- web / effort / system --
 
-  it("disables web search when webAccess is falsy", async () => {
+  it("keeps web search on by default (webAccess undefined)", async () => {
+    // Grok confabulates in no-lookup mode (~8% floor even after prompt discipline), so this
+    // provider defaults its web tools ON; a host opts out per run with an explicit false.
     await provider().chat(baseReq());
+    expect(argv()).not.toContain("--disable-web-search");
+  });
+
+  it("disables web search only on explicit webAccess: false", async () => {
+    await provider().chat(baseReq({ webAccess: false }));
     expect(argv()).toContain("--disable-web-search");
   });
 

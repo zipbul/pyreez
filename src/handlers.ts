@@ -138,7 +138,7 @@ export async function handleDeliberate(
         ...(args.aggregation ? { aggregation: args.aggregation as DeliberateInput["aggregation"] } : {}),
         ...(args.onRound ? { onRound: args.onRound } : {}),
         ...(args.file_access ? { fileAccess: args.file_access } : {}),
-        ...(args.web_access ? { webAccess: true } : {}),
+        ...(args.web_access != null ? { webAccess: args.web_access } : {}),
         ...(args.reasoning_effort ? { reasoning_effort: args.reasoning_effort } : {}),
         ...(args.topic_path?.length ? { topicPath: args.topic_path } : {}),
         ...(args.axes?.length ? { axes: args.axes } : {}),

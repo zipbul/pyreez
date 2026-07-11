@@ -168,7 +168,8 @@ inspect는 단일 호출이지만 component 3종 (convergence judge + ranking + 
 | 공방 | ✗ skip | ✗ | ✓ | gen final + attacker severity + qualityFindings |
 
 > `qualityFindings`는 응답 본문의 unsupported/contradicted claim 검출 — protocol-independent. 모든 protocol에 `--factual true`로 opt-in 가능.
-> finding이 **외부 사실**(DB·API 동작·버전 default·벤치마크·incident)에 걸리고 정확성이 결론을 가르면 `--web-access true` — claude 워커가 소스를 fetch·검증·인용하고 peer 날조까지 잡는다(anthropic 모델 한정, ~2-3× 비용). 사실 정확성이 중요한 high-stakes에서만.
+> finding이 **외부 사실**(DB·API 동작·버전 default·벤치마크·incident)에 걸리고 정확성이 결론을 가르면 `--web-access true` — claude·grok 워커가 소스를 fetch·검증·인용하고 peer 날조까지 잡는다(~2-3× 비용). 사실 정확성이 중요한 high-stakes에서만.
+> **grok(xai)은 웹이 기본 ON이다** — no-lookup 모드에선 검증 서사·수치를 날조하는 floor가 있어 provider가 기본으로 켠다. 재현성·비용·민감 내용의 검색 유출이 문제면 `--web-access false`로 끄되, 그 모드의 grok 인용은 검증 안 된 것으로 취급하라.
 
 ---
 

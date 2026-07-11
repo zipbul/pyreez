@@ -592,7 +592,7 @@ async function callWithFallback(
       const settings = {
         ...(recordedSystem ? { system: recordedSystem } : {}),
         ...(gp?.reasoning_effort != null ? { reasoning_effort: gp.reasoning_effort } : {}),
-        ...(gp?.webAccess ? { webAccess: true } : {}),
+        ...(gp?.webAccess != null ? { webAccess: gp.webAccess } : {}),
         ...(gp?.fileAccess ? { fileAccess: gp.fileAccess } : {}),
       };
       config.recordTranscript?.({
