@@ -55,3 +55,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # multi-model review measurement scratch (captures, judge reports, introspection)
 .advreview/
+
+# stale in-repo memory snapshot (real memory lives in ~/.claude)
+.claude/projects/
