@@ -21,7 +21,7 @@ export function filterModelsByProviders(
   if (availableModels.length === 0) {
     warnings.push(
       `No models match configured providers (${[...configuredProviders].join(", ")}). ` +
-      "Check .pyreez/models.jsonc provider names.",
+      "Check that each provider CLI is authenticated (claude-code / codex / gemini / grok login).",
     );
   }
   return { modelIds: availableModels.map((m) => m.id), warnings };

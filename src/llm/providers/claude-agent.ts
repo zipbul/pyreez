@@ -18,6 +18,16 @@ import type {
   ChatCompletionResponse,
 } from "../types";
 
+/**
+ * The slice of the SDK's `query()` result actually used here — narrower than its full `Query`
+ * interface (which also carries many control-request methods like interrupt/setPermissionMode)
+ * so tests can inject a plain async-generator double instead of implementing all of `Query`.
+ * Test seam: constructor/function parameter defaulting to the real `query`, not `mock.module()`
+ * (which leaks across test files — see wire.spec.ts's incident).
+ */
+export type ClaudeQueryFn = (params: { prompt: string | AsyncIterable<unknown>; options?: unknown }) =>
+  AsyncIterable<unknown> & { supportedModels?: () => Promise<unknown>; return?: (value?: unknown) => Promise<unknown> };
+
 // Tool groups for fileAccess gating. Workers do pure inference by default; the host opts into
 // codebase access per request. Read = inspect-only; Write = mutate (Bash counts as write/exec).
 const READ_FILE_TOOLS = ["Read", "Glob", "Grep"];
@@ -26,6 +36,8 @@ const WRITE_FILE_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"];
 export class ClaudeAgentProvider implements LLMProvider {
   readonly name = "anthropic" as const;
   readonly capabilities = { web: true, effort: true, fileAccess: true } as const;
+
+  constructor(private readonly queryFn: ClaudeQueryFn = query as ClaudeQueryFn) {}
 
   async chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const model = toCliModelId(request.model);
@@ -62,7 +74,7 @@ export class ClaudeAgentProvider implements LLMProvider {
     try {
       let text = "";
       let sessionId: string | undefined;
-      for await (const message of query({ prompt, options } as any)) {
+      for await (const message of this.queryFn({ prompt, options })) {
         const msg = message as any;
         // Every SDK message carries the session_id; capture it so the session can be resumed later.
         if (typeof msg.session_id === "string") sessionId = msg.session_id;
@@ -85,11 +97,13 @@ export class ClaudeAgentProvider implements LLMProvider {
  * inference turn (no token cost); ~sub-second. Streaming-input mode is required, so we pass an empty
  * async-iterable prompt and never consume the message stream. Returns [] on any failure.
  */
-export async function claudeSupportedModels(): Promise<{ value: string; displayName?: string; description?: string }[]> {
+export async function claudeSupportedModels(
+  queryFn: ClaudeQueryFn = query as ClaudeQueryFn,
+): Promise<{ value: string; displayName?: string; description?: string }[]> {
   async function* noInput(): AsyncGenerator<never> { /* yields nothing */ }
-  const q = query({ prompt: noInput(), options: {} } as any) as any;
+  const q = queryFn({ prompt: noInput(), options: {} });
   try {
-    const models = await q.supportedModels();
+    const models = await q.supportedModels?.();
     return Array.isArray(models) ? models : [];
   } catch {
     return [];

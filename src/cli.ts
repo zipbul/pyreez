@@ -9,9 +9,9 @@
 
 import type { HandlersConfig, HandlerResult } from "./handlers";
 import type { FileAccess } from "./llm/types";
+import type { FileIO } from "./report/types";
 import { handleDeliberate, handleAcceptance } from "./handlers";
 import { CooldownStateSchema, AcceptanceWorkersArraySchema, parseWithSchema } from "./validation/schemas";
-import { loadConfigFromEnv } from "./config";
 import { createChatAdapter, createDeliberateFn } from "./deliberation/wire";
 import {
   writeTranscript,
@@ -42,7 +42,7 @@ import { fuseCandidates } from "./synthesis/fuser";
 
 // -- Arg parsing --
 
-function parseArgs(argv: string[]): { command: string; flags: Record<string, string> } {
+export function parseArgs(argv: string[]): { command: string; flags: Record<string, string> } {
   // argv: [bun, script, command, ...flags]
   const command = argv[2] ?? "";
   const flags: Record<string, string> = {};
@@ -104,13 +104,8 @@ export async function resolveStdinFlags(
   flags[piped[0]!] = await reader();
 }
 
-function die(message: string): never {
-  console.error(message);
-  process.exit(1);
-}
-
-function printUsage(): never {
-  console.error(`Usage: bun run src/cli.ts <command> [options]
+function usageText(): string {
+  return `Usage: bun run src/cli.ts <command> [options]
 
 Commands:
   models       List available models with benchmark scores
@@ -129,11 +124,17 @@ Debug capture: "deliberate" ALWAYS records each worker's prompt+output+sessionId
 .pyreez/debug/<id> (printed at the end) so any run is debuggable. interrogate re-enters the worker's
 provider session by id (or reconstructs if the session is gone). Disable with --no-debug-capture.
 
-Run "bun run src/cli.ts <command> --help" for command-specific help.`);
-  process.exit(1);
+Run "bun run src/cli.ts <command> --help" for command-specific help.`;
 }
 
 // -- Wiring (same as index.ts) --
+
+/** Real-only die, for buildConfig() — never runs under test (tests inject CliDeps.config, which
+ *  bypasses buildConfig() entirely). main() defines its own injectable die() for the dispatch path. */
+function die(message: string): never {
+  console.error(message);
+  process.exit(1);
+}
 
 async function buildConfig(
   recordTranscript?: TranscriptRecorder,
@@ -141,13 +142,12 @@ async function buildConfig(
   needsDiscovery = true,
 ): Promise<HandlersConfig> {
 
-  const config = loadConfigFromEnv();
   const fileIO = new BunFileIO();
   const deliberationStore = new FileDeliberationStore(".pyreez/deliberations", fileIO);
   const runLogger = new FileRunLogger(".pyreez/runs", fileIO);
 
   // Build providers (single registration point)
-  const providers = buildProviders(config.providers);
+  const providers = buildProviders();
 
   // Availability comes from LIVE discovery (cached, refreshed when stale) — not a hand-maintained list.
   // Discovery only runs for commands that select models; other commands route by the id prefix.
@@ -176,10 +176,15 @@ async function buildConfig(
 
   const chatAdapter = createChatAdapter((req) => providerRegistry.chat(req));
 
+  // Only the model-selecting commands need a populated registry. The rest (affinity, interrogate,
+  // rank, fuse, …) route by the model id they are given, or touch no model at all — with discovery
+  // skipped their registry is empty by construction, so gating them on it would kill them outright.
   const { modelIds, warnings } = filterModelsByProviders(registry, providers);
-  for (const w of warnings) console.error(`[pyreez] ${w}`);
-  if (modelIds.length === 0) {
-    die("[pyreez] No models available. Check provider auth (PYREEZ_XAI_KEY / claude-code / codex / gemini CLI login).");
+  if (needsDiscovery) {
+    for (const w of warnings) console.error(`[pyreez] ${w}`);
+    if (modelIds.length === 0) {
+      die("[pyreez] No models available. Check that each provider CLI is logged in (claude-code / codex / gemini / grok).");
+    }
   }
 
   const sharedCooldown = createCooldownManager();
@@ -230,8 +235,41 @@ async function buildConfig(
 
 // -- Main --
 
-async function main(): Promise<void> {
-  const { command, flags } = parseArgs(process.argv);
+/**
+ * Injectable seam for main(). Every field defaults to the real behavior — production invocation
+ * (`main()` with no args) is unchanged. Tests override `config` to skip discovery/provider/file-IO
+ * wiring entirely, and override `exit` to a throwing stub so a "die" path doesn't kill the runner.
+ */
+export interface CliDeps {
+  /** Pre-built handler config, bypassing buildConfig() (discovery + real providers + file IO). */
+  config?: HandlersConfig;
+  /** Defaults to reading real process stdin once. */
+  readStdin?: () => Promise<string>;
+  /** Defaults to console.log. */
+  stdout?: (text: string) => void;
+  /** Defaults to console.error. */
+  stderr?: (text: string) => void;
+  /** Defaults to process.exit. MUST throw (or otherwise not return) in tests — it is typed `never`
+   *  because real code past a call to it is unreachable; a no-op stub would let execution fall
+   *  through into code that assumes the process already stopped. */
+  exit?: (code: number) => never;
+  /** Defaults to a real BunFileIO. Used by interrogate/affinity/affinity-compact/transcript-write —
+   *  the only main()-body paths that touch the file system directly (buildConfig()'s own file IO
+   *  is bypassed entirely by `config` and isn't affected by this). */
+  fileIO?: FileIO;
+}
+
+export async function main(argv: string[] = process.argv, deps: CliDeps = {}): Promise<void> {
+  const stdout = deps.stdout ?? ((text: string) => console.log(text));
+  const stderr = deps.stderr ?? ((text: string) => console.error(text));
+  const fileIO = deps.fileIO ?? new BunFileIO();
+  const exit = deps.exit ?? ((code: number): never => process.exit(code));
+  // Function declarations (not const arrow values) so TS's control-flow analysis narrows types
+  // after `if (!x) die(...)` the same way it did for the module-level `die` this replaces.
+  function die(message: string): never { stderr(message); return exit(1); }
+  function printUsage(): never { stderr(usageText()); return exit(1); }
+
+  const { command, flags } = parseArgs(argv);
 
   if (!command || command === "help" || command === "--help") {
     printUsage();
@@ -239,7 +277,7 @@ async function main(): Promise<void> {
 
   // Resolve a single stdin pipe ("-") into its flag before dispatch. Reads stdin once; rejects
   // more than one "-" flag. After this, flags hold literal content and no command re-reads stdin.
-  await resolveStdinFlags(flags);
+  await resolveStdinFlags(flags, deps.readStdin);
 
   // Debug capture (deliberate): ALWAYS on so a run is debuggable after the fact — accumulate each
   // worker's prompt+output+session+settings during the run, then write them. Goes to .pyreez/debug/<id>
@@ -250,7 +288,7 @@ async function main(): Promise<void> {
   const transcriptEntries: TranscriptEntry[] = [];
   // Discovery (live probes) is only needed by commands that select/list models; others route by prefix.
   const needsDiscovery = command === "deliberate" || command === "models";
-  const config = await buildConfig(
+  const config = deps.config ?? await buildConfig(
     transcriptDir ? (e) => { transcriptEntries.push(e); } : undefined,
     flags["refresh"] === "true",
     needsDiscovery,
@@ -322,7 +360,7 @@ async function main(): Promise<void> {
         onRound: (round) => {
           const models = round.responses.map((r) => r.model).join(", ");
           const failed = round.failedWorkers?.length ?? 0;
-          console.error(`[pyreez] round ${round.number}: ${round.responses.length} responses (${models})${failed ? `, ${failed} failed` : ""}`);
+          stderr(`[pyreez] round ${round.number}: ${round.responses.length} responses (${models})${failed ? `, ${failed} failed` : ""}`);
         },
       });
       break;
@@ -533,7 +571,7 @@ async function main(): Promise<void> {
       if (!question) die("--question is required for interrogate");
       if (!config.chatFn) die("chat function not available");
 
-      const entry = await loadTranscriptEntry(dir!, round, worker, new BunFileIO());
+      const entry = await loadTranscriptEntry(dir!, round, worker, fileIO);
       const s = entry.settings ?? {};
       // Re-apply the worker's exact knobs so the debug call matches the original (system goes into the
       // message list; web/effort/fileAccess into params).
@@ -571,14 +609,14 @@ async function main(): Promise<void> {
 
     case "affinity": {
       // Read-only: print the compacted affinity tree so a host agent can see per-topic model strengths.
-      const tree = await loadAffinityTree(new BunFileIO(), ".pyreez/affinity.json");
+      const tree = await loadAffinityTree(fileIO, ".pyreez/affinity.json");
       result = { data: tree };
       break;
     }
 
     case "affinity-compact": {
       // Fold the append-only log into the tree (atomic swap). Offline maintenance.
-      const tree = await compactAffinity(new BunFileIO(), ".pyreez/affinity-log.jsonl", ".pyreez/affinity.json");
+      const tree = await compactAffinity(fileIO, ".pyreez/affinity-log.jsonl", ".pyreez/affinity.json");
       const protocols = Object.keys(tree);
       result = { data: { compacted: true, protocols } };
       break;
@@ -589,16 +627,15 @@ async function main(): Promise<void> {
   }
 
   if (transcriptDir && result!.data) {
-    await writeTranscript(transcriptDir, transcriptEntries, result!.data, new BunFileIO());
-    console.error(`[pyreez] transcript: ${transcriptEntries.length} entries → ${transcriptDir}`);
+    await writeTranscript(transcriptDir, transcriptEntries, result!.data, fileIO);
+    stderr(`[pyreez] transcript: ${transcriptEntries.length} entries → ${transcriptDir}`);
   }
 
   if (result!.error) {
-    console.error(result!.error);
-    process.exit(1);
+    die(result!.error);
   }
 
-  console.log(JSON.stringify(result!.data, null, 2));
+  stdout(JSON.stringify(result!.data, null, 2));
 }
 
 if (import.meta.main) {

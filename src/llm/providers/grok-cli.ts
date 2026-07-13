@@ -26,10 +26,6 @@ import type {
 /** Kill CLI subprocess after 5 minutes of no stdout/stderr activity (web fetch can be slow). */
 const IDLE_TIMEOUT_MS = 300_000;
 
-export interface GrokCliProviderConfig {
-  readonly apiKey: string;
-}
-
 /**
  * Convert pyreez model ID to Grok CLI -m value.
  * "xai/grok-4-1-fast" → "grok-4-1-fast"
@@ -45,7 +41,7 @@ export class GrokCliProvider implements LLMProvider {
   readonly name = "xai" as const;
   readonly capabilities = { web: true, effort: true, fileAccess: true } as const;
 
-  constructor(private readonly config: GrokCliProviderConfig) {}
+  // No constructor config: the grok CLI authenticates with its own login (~/.grok/auth.json).
 
   async chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const modelId = toGrokCliModelId(request.model);
@@ -94,8 +90,6 @@ export class GrokCliProvider implements LLMProvider {
     try {
       const env: Record<string, string | undefined> = { ...process.env };
       delete env.CLAUDECODE;
-      env.XAI_API_KEY = this.config.apiKey;
-      env.GROK_CODE_XAI_API_KEY = this.config.apiKey;
 
       const { stdout, stderr, exitCode } = await spawnWithIdleTimeout(
         ["grok", ...args],

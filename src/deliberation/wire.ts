@@ -54,6 +54,18 @@ export interface WireDeps {
   readonly judge?: { readonly model: string; readonly chat: RubricChatFn };
   /** Optional sink for a scored affinity record (one per worker). Best-effort, off the hot path. */
   readonly recordAffinity?: (record: AffinityLogRecord) => Promise<void> | void;
+
+  // -- Test seam --
+  // Override the team-composition / engine collaborators below. Each defaults to the real
+  // implementation from ./team-composer and ./engine — only test code should ever set these.
+  // This exists so unit tests can inject fakes directly instead of mock.module()'ing "./engine" /
+  // "./team-composer": mock.module() rewrites Bun's process-wide module registry and isn't
+  // restored between test files, so a test that mocks these modules leaks its stubs into every
+  // other file that imports the real wire.ts afterward in the same `bun test` run.
+  readonly composeTeam?: typeof composeTeam;
+  readonly scoreModel?: typeof scoreModel;
+  readonly deliberate?: typeof deliberate;
+  readonly createFallbackPool?: typeof createFallbackPool;
 }
 
 // -- Think Tag Stripping --
@@ -200,6 +212,12 @@ export function createDeliberateFn(
   deps: WireDeps,
 ): (input: DeliberateInput) => Promise<DeliberateOutput> {
   return async (input) => {
+    // Test seam (see WireDeps) — real implementations unless a test overrides them.
+    const doComposeTeam = deps.composeTeam ?? composeTeam;
+    const doScoreModel = deps.scoreModel ?? scoreModel;
+    const doCreateFallbackPool = deps.createFallbackPool ?? createFallbackPool;
+    const runDeliberate = deps.deliberate ?? deliberate;
+
     const cooldown = deps.cooldown ?? createCooldownManager();
 
     // 1. Validate models array non-empty and all IDs exist in registry
@@ -239,7 +257,7 @@ export function createDeliberateFn(
     const specifiedModels = modelIds
       .map((id) => deps.registry.getById(id)!)
       .filter(Boolean);
-    let team = composeTeam(
+    let team = doComposeTeam(
       { task: input.task, modelIds },
       {
         getModels: () => specifiedModels,
@@ -268,9 +286,9 @@ export function createDeliberateFn(
     // 7. Build fallback pool + replenishment
     const allAvailable = deps.registry.getAvailable();
     const sortedByScore = [...allAvailable].sort(
-      (a, b) => scoreModel(b) - scoreModel(a) || b.cost.outputPer1M - a.cost.outputPer1M,
+      (a, b) => doScoreModel(b) - doScoreModel(a) || b.cost.outputPer1M - a.cost.outputPer1M,
     );
-    const pool = createFallbackPool(sortedByScore, cooldown);
+    const pool = doCreateFallbackPool(sortedByScore, cooldown);
     const teamModelIds = new Set(team.workers.map((w) => w.model));
 
     const fallbackDeps: FallbackDeps = {
@@ -290,7 +308,7 @@ export function createDeliberateFn(
     };
 
     // 8. Run deliberation
-    let result = await deliberate(team, input, engineDeps, config, fallbackDeps);
+    let result = await runDeliberate(team, input, engineDeps, config, fallbackDeps);
 
     // 9. Auto-save to store (best-effort)
     if (deps.store) {

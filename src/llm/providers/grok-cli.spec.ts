@@ -37,7 +37,7 @@ describe("GrokCliProvider", () => {
   });
 
   function provider() {
-    return new GrokCliProvider({ apiKey: "test-key" });
+    return new GrokCliProvider();
   }
 
   function baseReq(over: Partial<ChatCompletionRequest> = {}): ChatCompletionRequest {
@@ -141,12 +141,6 @@ describe("GrokCliProvider", () => {
     const i = a.indexOf("--reasoning-effort");
     expect(i).toBeGreaterThan(-1);
     expect(a[i + 1]).toBe("max");
-  });
-
-  it("injects the api key into spawn env", async () => {
-    await provider().chat(baseReq());
-    expect(spawnOpts().env.XAI_API_KEY).toBe("test-key");
-    expect(spawnOpts().env.GROK_CODE_XAI_API_KEY).toBe("test-key");
   });
 
   // -- response + errors --

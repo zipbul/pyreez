@@ -3,10 +3,17 @@
  *
  * SUT: stripThinkTags, createChatAdapter, createDeliberateFn
  * All external dependencies (composeTeam, deliberate, prompts) are test-doubled.
+ *
+ * composeTeam/deliberate/scoreModel/createFallbackPool are injected via WireDeps' test seam
+ * (see wire.ts) instead of mock.module(). mock.module() rewrites Bun's process-wide module
+ * registry and isn't restored between test files, so mocking "./engine"/"./team-composer" here
+ * used to leak into every other test file that imports the real wire.ts in the same `bun test`
+ * run (surfaced as other files getting a stale stubbed DeliberateOutput back).
  */
 
 import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { LLMClientError } from "../llm/errors";
+import { createChatAdapter, createDeliberateFn, stripThinkTags } from "./wire";
 import type {
   DeliberateInput,
   DeliberateOutput,
@@ -14,7 +21,7 @@ import type {
 } from "./types";
 import type { ModelInfo } from "../model/types";
 
-// -- Mock modules (TST-MOCK-STRATEGY: mock.module for module-level imports) --
+// -- Test doubles for the WireDeps test seam --
 
 const mockComposeTeam = mock<(options: any, deps: any) => TeamComposition>(
   () => {
@@ -33,24 +40,14 @@ const mockDeliberate = mock<
   throw new Error("mockDeliberate not configured");
 });
 
-mock.module("./team-composer", () => ({
-  composeTeam: (...args: any[]) => (mockComposeTeam as Function)(...args),
-  scoreModel: (_model: any) => 1,
-}));
-
-mock.module("./engine", () => ({
-  deliberate: (...args: any[]) => (mockDeliberate as Function)(...args),
-  createFallbackPool: () => ({
-    getNext: () => undefined,
-    getNextByProvider: () => undefined,
-    markFailed: () => {},
-    isOnCooldown: () => false,
-    getEntry: () => undefined,
-  }),
-}));
-
-// Import SUT after mocks
-const { createChatAdapter, createDeliberateFn, stripThinkTags } = await import("./wire");
+const fakeScoreModel = (_model: any) => 1;
+const fakeCreateFallbackPool = () => ({
+  getNext: () => undefined,
+  getNextByProvider: () => undefined,
+  markFailed: () => {},
+  isOnCooldown: () => false,
+  getEntry: () => undefined,
+});
 
 // -- Fixtures --
 
@@ -345,6 +342,10 @@ describe("createDeliberateFn", () => {
       chat: mock(() =>
         Promise.resolve({ content: "response", inputTokens: 10, outputTokens: 20 }),
       ),
+      composeTeam: mockComposeTeam,
+      scoreModel: fakeScoreModel,
+      deliberate: mockDeliberate,
+      createFallbackPool: fakeCreateFallbackPool,
       ...overrides,
     };
   }
