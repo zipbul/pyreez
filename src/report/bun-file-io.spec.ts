@@ -98,6 +98,25 @@ describe("BunFileIO", () => {
     expect(mockReaddir).toHaveBeenCalledWith(".pyreez/reports");
   });
 
+  it("respects the prefix before '*' (not just the suffix) — interrogate worker/round selection", async () => {
+    // A pattern like "r2_w1_*.json" must match ONLY r2_w1_* files, not every *.json in the dir.
+    // Bug: glob filtered on the suffix (".json") alone, so loadTranscriptEntry always got the first
+    // sorted entry (r1_w0) regardless of --round/--worker.
+    mockReaddir.mockImplementation(() =>
+      Promise.resolve([
+        "r1_w0_anthropic-haiku.json",
+        "r1_w1_xai-grok-build.json",
+        "r2_w1_xai-grok-build.json",
+        "r2_w2_openai-gpt.json",
+        "result.json",
+      ]),
+    );
+
+    const result = await io.glob("dir/r2_w1_*.json");
+
+    expect(result).toEqual(["dir/r2_w1_xai-grok-build.json"]);
+  });
+
   it("should delete all matching files via removeGlob", async () => {
     mockReaddir.mockImplementation(() =>
       Promise.resolve(["a.jsonl", "b.jsonl"]),

@@ -2,6 +2,9 @@
  * Axis types — shared across deliberation infrastructure.
  */
 
+import type { ChatMessage } from "../llm/types";
+import type { GenerationParams } from "../deliberation/types";
+
 /**
  * Result of a single LLM call, including token usage.
  */
@@ -11,6 +14,8 @@ export interface ChatResult {
   readonly outputTokens: number;
   /** True when the response was cut off (finish_reason === "length"). */
   readonly truncated?: boolean;
+  /** Provider session id for this call (when exposed), recorded so the session can be resumed. */
+  readonly sessionId?: string;
 }
 
 /**
@@ -18,6 +23,6 @@ export interface ChatResult {
  */
 export type ChatFn = (
   modelId: string,
-  input: string | import("../llm/types").ChatMessage[],
-  params?: import("../deliberation/types").GenerationParams,
+  input: string | ChatMessage[],
+  params?: GenerationParams,
 ) => Promise<ChatResult>;

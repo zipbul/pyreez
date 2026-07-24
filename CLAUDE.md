@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**pyreez** is a heterogeneous multi-model deliberation infrastructure exposed as an MCP server. Routes tasks to optimal models, orchestrates multi-model deliberation, calibrates ratings via Bradley-Terry scoring.
+**pyreez** is a heterogeneous multi-model deliberation infrastructure exposed as a command-line tool (`src/cli.ts`). Routes tasks to optimal models, orchestrates multi-model deliberation, calibrates ratings via Bradley-Terry scoring.
 
 Runtime: **Bun** (v1.3+). Language: **TypeScript** (strict mode).
 
@@ -13,7 +13,7 @@ bun install              # Install dependencies
 bun test                 # Run all tests
 bun test src/axis/       # Run tests in a directory
 bun run typecheck        # tsc --noEmit
-bun run index.ts         # Start MCP server (stdio)
+bun run src/cli.ts       # Run the CLI (see `src/cli.ts` for subcommands)
 ```
 
 ## Communication

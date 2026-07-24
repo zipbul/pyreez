@@ -6,11 +6,11 @@
 
 import { LLMClientError } from "../errors";
 import { spawnWithIdleTimeout, IdleTimeoutError } from "./spawn-with-idle";
+import { composeSystemPrompt, flattenConversation } from "./message-util";
 import type {
   LLMProvider,
   ChatCompletionRequest,
   ChatCompletionResponse,
-  ChatMessage,
 } from "../types";
 
 /** Kill CLI subprocess after 5 minutes of no stdout/stderr activity. */
@@ -26,44 +26,18 @@ export function toGeminiCliModelId(pyreezId: string): string {
     : pyreezId;
 }
 
-/**
- * Serialize chat messages into a single prompt string for `gemini -p`.
- */
-export function serializeMessages(messages: ChatMessage[]): {
-  system: string | undefined;
-  prompt: string;
-} {
-  const systemParts: string[] = [];
-  const conversationParts: string[] = [];
-
-  for (const msg of messages) {
-    if (msg.role === "system") {
-      systemParts.push(msg.content ?? "");
-    } else if (msg.role === "user") {
-      conversationParts.push(msg.content ?? "");
-    } else if (msg.role === "assistant") {
-      conversationParts.push(`[Assistant]: ${msg.content ?? ""}`);
-    }
-  }
-
-  return {
-    system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
-    prompt: conversationParts.join("\n\n"),
-  };
-}
 
 export class GeminiCliProvider implements LLMProvider {
   readonly name = "google" as const;
+  // gemini CLI has no reasoning-effort flag; google_web_search is on by default; honors fileAccess via cwd.
+  readonly capabilities = { web: true, effort: false, fileAccess: true } as const;
 
   async chat(
     request: ChatCompletionRequest,
   ): Promise<ChatCompletionResponse> {
     const modelId = toGeminiCliModelId(request.model);
-    const { system, prompt } = serializeMessages(request.messages);
-
-    const fullPrompt = system
-      ? `${system}\n\n${prompt}`
-      : prompt;
+    // gemini CLI has no system-prompt flag — frame the system block into the prompt.
+    const fullPrompt = composeSystemPrompt(request.system, flattenConversation(request.messages));
 
     const args = [
       "-p", fullPrompt,
@@ -71,10 +45,22 @@ export class GeminiCliProvider implements LLMProvider {
       "-o", "json",
     ];
 
+    // Resume the recorded session (interrogate) instead of starting fresh; settings are re-passed.
+    if (request.resumeSessionId) args.push("--resume", request.resumeSessionId);
+
     // --sandbox intentionally omitted: launches Docker on Linux, causing EACCES
     // on ~/.gemini/projects.json.tmp (volume mount permission bug).
-    // Non-fileAccess runs from cwd=/tmp so tool calls are no-ops.
-    args.push("-y");
+    //
+    // Read-only by design, matching the other providers (claude: read-only --tools;
+    // codex: --sandbox read-only). `--approval-mode plan` is gemini's read-only mode — the model
+    // can read context but never edit/run, so deliberation cannot mutate the workspace. This
+    // replaces the former `-y` (YOLO: auto-approve ALL tools incl. writes), which gave gemini
+    // write/shell access the other providers never had.
+    // Map the file-access level: read (and no-access) → plan (read-only, no edits); write → auto_edit.
+    args.push("--approval-mode", request.fileAccess === "write" ? "auto_edit" : "plan");
+    // gemini 0.40+ aborts (exit 55) in an untrusted directory; both cwd modes (/tmp and the
+    // project dir under fileAccess) are untrusted. Trust the workspace for this headless session.
+    args.push("--skip-trust");
 
     try {
       const { stdout, stderr, exitCode } = await spawnWithIdleTimeout(
@@ -132,15 +118,29 @@ export class GeminiCliProvider implements LLMProvider {
     const stats = parsed.stats?.models;
     let inputTokens = 0;
     let outputTokens = 0;
+    let cachedTokens = 0;
+    let sawCached = false;
 
     if (stats) {
       for (const model of Object.values(stats)) {
-        inputTokens += (model as any)?.tokens?.input ?? 0;
-        outputTokens += (model as any)?.tokens?.candidates ?? 0;
+        const tokens = (model as any)?.tokens;
+        inputTokens += tokens?.input ?? 0;
+        outputTokens += tokens?.candidates ?? 0;
+        if (tokens?.cached != null) {
+          cachedTokens += tokens.cached;
+          sawCached = true;
+        }
       }
     }
 
-    return this.buildResponse(text, originalModel, inputTokens, outputTokens);
+    return this.buildResponse(
+      text,
+      originalModel,
+      inputTokens,
+      outputTokens,
+      sawCached ? cachedTokens : undefined,
+      parsed.session_id,
+    );
   }
 
   private buildResponse(
@@ -148,6 +148,8 @@ export class GeminiCliProvider implements LLMProvider {
     originalModel: string,
     inputTokens = 0,
     outputTokens = 0,
+    cachedTokens?: number,
+    sessionId?: string,
   ): ChatCompletionResponse {
     return {
       id: `gemini-cli-${Date.now()}`,
@@ -161,11 +163,13 @@ export class GeminiCliProvider implements LLMProvider {
           finish_reason: "stop",
         },
       ],
+      ...(sessionId ? { sessionId } : {}),
       ...(inputTokens || outputTokens ? {
         usage: {
           prompt_tokens: inputTokens,
           completion_tokens: outputTokens,
           total_tokens: inputTokens + outputTokens,
+          ...(cachedTokens != null ? { cached_tokens: cachedTokens } : {}),
         },
       } : {}),
     };
@@ -182,6 +186,7 @@ interface GeminiCliJsonOutput {
         input?: number;
         candidates?: number;
         total?: number;
+        cached?: number;
       };
     }>;
   };

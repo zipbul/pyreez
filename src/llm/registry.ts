@@ -4,6 +4,7 @@
  */
 
 import { LLMClientError } from "./errors";
+import { gateCapabilities } from "./capabilities";
 import type {
   ProviderName,
   LLMProvider,
@@ -28,7 +29,14 @@ export class ProviderRegistry {
   }
 
   async chat(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
-    const providerName = this.modelProviderMap.get(request.model);
+    // Prefer the explicit map; fall back to the id's provider prefix (e.g. "openai/gpt-5.5") when it
+    // names a CONFIGURED provider. This lets live-discovered ids (absent from any curated map) route,
+    // while a truly unknown id — or one whose prefix isn't a configured provider — still hard-errors.
+    let providerName = this.modelProviderMap.get(request.model);
+    if (!providerName) {
+      const prefix = request.model.split("/")[0] as ProviderName;
+      if (this.providers.has(prefix)) providerName = prefix;
+    }
     if (!providerName) {
       throw new LLMClientError(
         400,
@@ -46,6 +54,9 @@ export class ProviderRegistry {
       );
     }
 
-    return provider.chat(request);
+    // Gate the request against the provider's declared capabilities: hard-error on unsupported
+    // correctness capabilities (web/file), strip soft ones (effort) so they aren't silently ignored.
+    const { request: gated } = gateCapabilities(request, provider.capabilities);
+    return provider.chat(gated);
   }
 }

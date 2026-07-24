@@ -1,0 +1,30 @@
+{
+  "skill_name": "pyreez-protocol-optimize",
+  "note": "Prompts state the SYMPTOM only (not the method). A capable agent WITHOUT the skill should tend to patch prompts.ts by eyeballing; an agent WITH the skill should run the protocol, interrogate the actual workers, root-cause, and holistically rewrite. That behavioral gap is what the assertions measure. Baselines must NOT read the skill (contamination guard).",
+  "evals": [
+    {
+      "id": 0,
+      "name": "adversarial-domain-bias",
+      "prompt": "adversarial_debate 프로토콜로 비공학 안건(신약 3상 임상시험 설계, 난민 수용 정책, SaaS 가격전략)을 심의시켜보면 비판 품질이 뭔가 어긋나. 이 프로토콜 프롬프트를 최적화해줘.",
+      "expected_output": "Runs the protocol on non-engineering tasks across ≥2 providers, extracts the rendered prompt from the debug transcript, interrogates ≥1 worker, identifies domain-leaking vocabulary as the root cause, and proposes a domain-neutral holistic rewrite without editing prompts.ts.",
+      "files": [],
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "convergence-premature",
+      "prompt": "shared_convergence로 '주 4일제 전면 도입'을 심의시켰더니 워커들 결론이 너무 판박이로 똑같이 나와서 다양성이 없어. 이 프로토콜 프롬프트를 개선해줘.",
+      "expected_output": "Runs shared_convergence on the labor-policy task, interrogates the actual workers about why they converged, ties the root cause to a specific prompt mechanism, and proposes a holistic rewrite rather than a one-word patch.",
+      "files": [],
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "scoring-verdict-mismatch",
+      "prompt": "evaluation_scoring으로 단편소설 문학성을 채점시키면 점수랑 총평(verdict)이 자꾸 어긋나. 이 프로토콜 프롬프트를 고쳐줘.",
+      "expected_output": "Runs evaluation_scoring on the literary-criticism subject, extracts the rendered prompt, interrogates a worker about the score/verdict inconsistency, roots the cause in the output-format, and proposes a holistic rewrite.",
+      "files": [],
+      "assertions": []
+    }
+  ]
+}

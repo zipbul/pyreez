@@ -37,13 +37,18 @@ export class BunFileIO implements FileIO {
   }
 
   /**
-   * Simple glob for "dir/*.ext" patterns.
-   * Uses readdir + suffix filter. Returns sorted absolute-ish paths.
+   * Simple glob for single-'*' patterns like "dir/*.ext" or "dir/r2_w1_*.json".
+   * Matches BOTH the prefix before '*' and the suffix after it. Returns sorted paths.
    */
   async glob(pattern: string): Promise<string[]> {
     const sep = pattern.lastIndexOf("/");
     const dir = sep >= 0 ? pattern.slice(0, sep) : ".";
-    const suffix = pattern.slice(pattern.indexOf("*") + 1);
+    const base = sep >= 0 ? pattern.slice(sep + 1) : pattern;
+    // Filtering on the suffix alone made "r2_w1_*.json" match every "*.json" in the dir (so
+    // loadTranscriptEntry always returned the first sorted entry regardless of --round/--worker).
+    const star = base.indexOf("*");
+    const prefix = star >= 0 ? base.slice(0, star) : base;
+    const suffix = star >= 0 ? base.slice(star + 1) : "";
 
     let entries: string[];
     try {
@@ -53,7 +58,12 @@ export class BunFileIO implements FileIO {
     }
 
     return entries
-      .filter((e) => e.endsWith(suffix))
+      .filter(
+        (e) =>
+          e.startsWith(prefix) &&
+          e.endsWith(suffix) &&
+          e.length >= prefix.length + suffix.length,
+      )
       .map((e) => (dir === "." && sep < 0 ? e : join(dir, e)))
       .sort();
   }

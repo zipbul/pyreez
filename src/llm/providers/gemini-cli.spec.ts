@@ -1,15 +1,12 @@
 /**
- * Unit tests for GeminiCliProvider, toGeminiCliModelId, and serializeMessages.
+ * Unit tests for GeminiCliProvider and toGeminiCliModelId.
+ * (serializeMessages is shared in message-util and tested in message-util.spec.)
  */
 
 import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { LLMClientError } from "../errors";
 import { IdleTimeoutError } from "./spawn-with-idle";
-import {
-  GeminiCliProvider,
-  toGeminiCliModelId,
-  serializeMessages,
-} from "./gemini-cli";
+import { GeminiCliProvider, toGeminiCliModelId } from "./gemini-cli";
 
 // -- Pure functions --
 
@@ -20,51 +17,6 @@ describe("toGeminiCliModelId", () => {
 
   it("should return id unchanged when no google/ prefix", () => {
     expect(toGeminiCliModelId("gemini-2.5-pro")).toBe("gemini-2.5-pro");
-  });
-});
-
-describe("serializeMessages", () => {
-  it("should extract system messages separately", () => {
-    const result = serializeMessages([
-      { role: "system", content: "You are helpful." },
-      { role: "user", content: "Hello" },
-    ]);
-    expect(result.system).toBe("You are helpful.");
-    expect(result.prompt).toBe("Hello");
-  });
-
-  it("should join multiple system messages with double newline", () => {
-    const result = serializeMessages([
-      { role: "system", content: "Rule 1" },
-      { role: "system", content: "Rule 2" },
-      { role: "user", content: "Hi" },
-    ]);
-    expect(result.system).toBe("Rule 1\n\nRule 2");
-  });
-
-  it("should return undefined system when no system messages", () => {
-    const result = serializeMessages([
-      { role: "user", content: "Hello" },
-    ]);
-    expect(result.system).toBeUndefined();
-  });
-
-  it("should prefix assistant messages with role marker", () => {
-    const result = serializeMessages([
-      { role: "user", content: "Q?" },
-      { role: "assistant", content: "A." },
-      { role: "user", content: "Follow up" },
-    ]);
-    expect(result.prompt).toBe("Q?\n\n[Assistant]: A.\n\nFollow up");
-  });
-
-  it("should handle null content gracefully", () => {
-    const result = serializeMessages([
-      { role: "system", content: null },
-      { role: "user", content: null },
-    ]);
-    expect(result.system).toBe("");
-    expect(result.prompt).toBe("");
   });
 });
 
@@ -105,10 +57,10 @@ describe("GeminiCliProvider", () => {
     expect(opts.cwd).toBe("/tmp");
   });
 
-  it("should use process.cwd() when fileAccess is true", async () => {
+  it("should use process.cwd() when fileAccess is set", async () => {
     setSpawnResult(JSON.stringify({ response: "ok" }));
     const provider = new GeminiCliProvider();
-    await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }], fileAccess: true });
+    await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }], fileAccess: "read" });
     const opts = spawnMod.spawnWithIdleTimeout.mock.calls[0]![1] as { cwd: string };
     expect(opts.cwd).toBe(process.cwd());
   });
@@ -131,6 +83,39 @@ describe("GeminiCliProvider", () => {
     expect(res.usage!.prompt_tokens).toBe(100);
     expect(res.usage!.completion_tokens).toBe(50);
     expect(res.model).toBe("google/gemini-3.1-pro-preview");
+  });
+
+  it("should expose tokens.cached as cached_tokens", async () => {
+    const output = JSON.stringify({
+      response: "ok",
+      stats: {
+        models: {
+          "gemini-3.1-pro": { tokens: { input: 3203, candidates: 43, cached: 2847 } },
+        },
+      },
+    });
+    setSpawnResult(output);
+    const provider = new GeminiCliProvider();
+    const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
+    expect(res.usage!.prompt_tokens).toBe(3203);
+    expect(res.usage!.completion_tokens).toBe(43);
+    expect(res.usage!.cached_tokens).toBe(2847);
+  });
+
+  it("should sum cached tokens across multiple models", async () => {
+    const output = JSON.stringify({
+      response: "ok",
+      stats: {
+        models: {
+          "a": { tokens: { input: 100, candidates: 50, cached: 80 } },
+          "b": { tokens: { input: 200, candidates: 75, cached: 150 } },
+        },
+      },
+    });
+    setSpawnResult(output);
+    const provider = new GeminiCliProvider();
+    const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
+    expect(res.usage!.cached_tokens).toBe(230);
   });
 
   it("should sum tokens across multiple models in stats", async () => {
@@ -323,22 +308,26 @@ describe("GeminiCliProvider", () => {
     expect(args).toContain("gemini-3.1-pro-preview");
     expect(args).toContain("-o");
     expect(args).toContain("json");
-    expect(args).toContain("-y");
+    // Read-only mode (parity with claude/codex), not YOLO auto-approve-all.
+    expect(args).toContain("--approval-mode");
+    expect(args).toContain("plan");
+    expect(args).not.toContain("-y");
+    // gemini 0.40+ exits 55 in an untrusted dir; --skip-trust prevents the abort.
+    expect(args).toContain("--skip-trust");
   });
 
-  it("should prepend system prompt to the -p value when system messages exist", async () => {
+  it("frames request.system into the -p value via the XML boundary (no native system flag)", async () => {
     setSpawnResult(JSON.stringify({ response: "ok" }));
     const provider = new GeminiCliProvider();
     await provider.chat({
       model: "google/gemini-3.1-pro-preview",
-      messages: [
-        { role: "system", content: "Be concise." },
-        { role: "user", content: "Hello" },
-      ],
+      system: "Be concise.",
+      messages: [{ role: "user", content: "Hello" }],
     });
     const args = spawnMod.spawnWithIdleTimeout.mock.calls[0]![0] as string[];
     const pIdx = args.indexOf("-p");
     const prompt = args[pIdx + 1]!;
+    expect(prompt).toContain("<system-instructions>");
     expect(prompt).toContain("Be concise.");
     expect(prompt).toContain("Hello");
   });

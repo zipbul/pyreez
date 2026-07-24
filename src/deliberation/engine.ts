@@ -12,6 +12,7 @@
 
 import type { ChatMessage } from "../llm/types";
 import type { ModelInfo } from "../model/types";
+import type { TranscriptRecorder } from "./transcript";
 import type {
   Degradation,
   DeliberateInput,
@@ -19,6 +20,7 @@ import type {
   FailedWorker,
   GenerationParams,
   ModelSwap,
+  AggregationMethod,
   Protocol,
   Round,
   SharedContext,
@@ -36,6 +38,13 @@ import { extractProvider } from "./provider-util";
 import { classifyError, findLLMClientError, isRetryableError, normalizeErrorMessage, type CooldownEntry, type CooldownErrorType, type CooldownManager } from "./cooldown";
 
 import type { RoundInfo } from "./prompts";
+import {
+  buildSequentialRefinementMessages,
+  buildHostInterrogationMessages,
+  buildEvaluationScoringMessages,
+  buildRedTeamGeneratorMessages,
+  buildRedTeamAttackerMessages,
+} from "./prompts";
 
 // Re-export ChatResult from canonical location for backward compatibility
 export type { ChatResult } from "../axis/types";
@@ -128,7 +137,7 @@ export interface EngineDeps {
     messages: ChatMessage[],
     params?: GenerationParams,
   ) => Promise<ChatResult>;
-  /** Build R1 messages for a protocol. */
+  /** Build R1 messages for a protocol. Prompts are tool-agnostic — web access is not a prompt input. */
   readonly buildR1Messages: (
     ctx: SharedContext,
     instructions?: string,
@@ -162,6 +171,8 @@ export interface EngineConfig {
   readonly protocol: Protocol;
   /** Generation params for worker LLM calls. */
   readonly workerGenParams?: GenerationParams;
+  /** Optional sink: invoked with the exact prompt+output after each successful worker call. */
+  readonly recordTranscript?: TranscriptRecorder;
 }
 
 /** Default convergence threshold for early termination. */
@@ -182,11 +193,20 @@ export function parseConfidence(text: string): "high" | "medium" | "low" | undef
   const normalized = text.toLowerCase();
   // Match patterns: "HIGH confidence", "confidence: HIGH", "HIGH:", "[HIGH]", "**HIGH**",
   // Korean labels: "신뢰도: HIGH" (confidence-related Korean labels only)
-  const pattern = /\b(high|medium|low)\s*(?:confidence|:)|\bconfidence\s*:\s*(high|medium|low)\b|\[(high|medium|low)\]|\*\*(high|medium|low)\*\*|신뢰도\s*:\s*(high|medium|low)\b/gi;
+  // Alternatives 2 and 5 tolerate optional markdown emphasis (**bold**/__/_) around the label and
+  // value (e.g. "**confidence**: HIGH"), with word boundaries to block substrings like
+  // "overconfidence:" or value "lower"/"mediumship".
+  // The two lookbehinds block a letter before the label even across markdown emphasis, so
+  // "overconfidence:" AND "over**confidence**:" are both rejected, while "**confidence**:" passes.
+  // The final alternative reads adversarial_debate's mandated verdict line "verdict: <severity>, <confidence>"
+  // (e.g. "verdict: critical, HIGH"): that format carries confidence ONLY inside the verdict field, so the
+  // other alternatives miss it. Anchored to the literal "verdict:" label + severity + comma, it captures only
+  // the confidence token (not the severity), and cannot fire on other protocols' prose.
+  const pattern = /\b(high|medium|low)\s*(?:confidence|:)|(?<![a-z])(?<![a-z][*_]{1,2})[*_]{0,2}confidence[*_]{0,2}\s*:\s*\[?[*_]{0,2}(high|medium|low)\b|\[(high|medium|low)\]|\*\*(high|medium|low)\*\*|[*_]{0,2}신뢰도[*_]{0,2}\s*:\s*\[?[*_]{0,2}(high|medium|low)\b|verdict\s*:\s*(?:critical|high|medium|low)\s*,\s*(high|medium|low)\b/gi;
   const counts = { high: 0, medium: 0, low: 0 };
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(normalized)) !== null) {
-    const level = (match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5])!.toLowerCase() as "high" | "medium" | "low";
+    const level = (match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? match[6])!.toLowerCase() as "high" | "medium" | "low";
     counts[level]++;
   }
   const total = counts.high + counts.medium + counts.low;
@@ -239,11 +259,8 @@ export function levenshteinDistance(a: string, b: string): number {
  * all worker responses. 0.0 = identical, 1.0 = maximally different.
  * Returns null when fewer than 2 responses or all responses are empty.
  *
- * Demystifying MAD (arXiv 2601.19921, Jan 2026): initial answer diversity
- * correlates with debate success. Low R1 diversity is a leading indicator that
- * heterogeneous models converged before debate even started — usually because
- * the question pre-determined the answer. Host should reframe (see
- * HOST_QUESTIONING_DEPTH Rule 2).
+ * Low R1 diversity signals that workers converged before debate even started —
+ * typically because the question pre-determined the answer. Host should reframe.
  */
 export function computeR1Diversity(round: Round): number | null {
   const responses = round.responses;
@@ -268,10 +285,6 @@ export function computeR1Diversity(round: Round): number | null {
  * Detect minority dissent — when N-1 workers cluster on the same answer and
  * one outlier disagrees with HIGH confidence, surface the outlier so the host
  * doesn't auto-trust the majority.
- *
- * Defense against debate hacking (arXiv 2510.20963) and the "majority pressure
- * suppresses correct minority" failure documented in arXiv 2509.11035 (ConfMAD)
- * and "Can LLM Agents Really Debate?" (arXiv 2511.07784).
  *
  * Heuristic: requires N≥3. Compute each response's average distance to peers.
  * If exactly one response has avg distance > 0.50 AND all the rest cluster
@@ -321,16 +334,16 @@ export function detectMinorityDissent(round: Round): string | null {
   const outlier = responses[outlierIdx]!;
   if (outlier.confidence !== "high") return null;
 
-  return `minority_dissent: worker ${outlier.model} (HIGH confidence) disagrees with the majority cluster — review the dissent before adopting the majority position. Majority pressure can suppress correct minority answers (ConfMAD arXiv 2509.11035, debate hacking arXiv 2510.20963).`;
+  return `minority_dissent: worker ${outlier.model} (HIGH confidence) disagrees with the majority cluster — review the dissent before adopting the majority position. Majority pressure can suppress correct minority answers.`;
 }
 
 /**
  * Detect R1 conformity — all workers report HIGH confidence AND their responses
  * are textually similar (Levenshtein change rate < 0.30 between every pair).
  *
- * Signal of the failure mode in arXiv 2509.14034 (ConfMAD): when most agents
- * agree confidently in R1, debate may be locked in even if the consensus is wrong.
- * Returns a warning string for the host, or null when the signal is absent.
+ * Signal that when most agents agree confidently in R1, debate may be locked
+ * in even if the consensus is wrong. Returns a warning string for the host, or
+ * null when the signal is absent.
  */
 export function detectConformity(round: Round): string | null {
   const responses = round.responses;
@@ -351,7 +364,7 @@ export function detectConformity(round: Round): string | null {
     }
   }
   if (pairs === 0) return null;
-  return `r1_conformity_suspected: all ${responses.length} workers reported HIGH confidence with textually similar answers — verify minority dissent was not suppressed (ConfMAD arXiv 2509.14034).`;
+  return `r1_conformity_suspected: all ${responses.length} workers reported HIGH confidence with textually similar answers — verify minority dissent was not suppressed.`;
 }
 
 function checkConvergence(
@@ -507,6 +520,8 @@ async function callWithFallback(
 
   // Build messages — session continuation if history exists and model unchanged, full rebuild otherwise
   const buildMessages = (): ChatMessage[] => {
+    // Prompts are tool-agnostic: web access (input.webAccess) wires the worker's tool set via
+    // config.workerGenParams, but is NOT a prompt input — the evidence discipline reads the same either way.
     // Session continuation: append follow-up to existing history (only if same model)
     if (isR2Plus && activeHistory && deps.buildFollowUp) {
       const lastRound = ctx.rounds[ctx.rounds.length - 1];
@@ -569,6 +584,27 @@ async function callWithFallback(
       if (!result.content.trim()) {
         throw new Error(`empty response from ${currentModel}`);
       }
+
+      // Capture the exact prompt+output+session+settings (all already here) for transcript/interrogate.
+      // Settings = the knobs this worker ran under (system + genParams), so a debug call matches exactly.
+      const recordedSystem = messages.find((m) => m.role === "system")?.content;
+      const gp = config.workerGenParams;
+      const settings = {
+        ...(recordedSystem ? { system: recordedSystem } : {}),
+        ...(gp?.reasoning_effort != null ? { reasoning_effort: gp.reasoning_effort } : {}),
+        ...(gp?.webAccess != null ? { webAccess: gp.webAccess } : {}),
+        ...(gp?.fileAccess ? { fileAccess: gp.fileAccess } : {}),
+      };
+      config.recordTranscript?.({
+        round: roundNumber,
+        workerIndex,
+        model: currentModel,
+        messages,
+        output: result.content,
+        ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+        ...(Object.keys(settings).length ? { settings } : {}),
+        ...(result.truncated ? { truncated: true } : {}),
+      });
 
       // Build conversation history for session continuation in next round
       const fullHistory = [...messages, { role: "assistant" as const, content: result.content }];
@@ -662,7 +698,6 @@ async function executeSequentialRound(
   let totalOutput = 0;
   let previousOutput: string | undefined;
 
-  const { buildSequentialRefinementMessages } = await import("./prompts");
 
   for (const workerIdx of order) {
     const participant = participants[workerIdx];
@@ -730,7 +765,6 @@ async function executeInterrogationRound(
 ): Promise<RoundResult> {
   const participants = [...ctx.team.workers];
   const questions = input.questions ?? [];
-  const { buildHostInterrogationMessages } = await import("./prompts");
 
   // Each worker gets a question with fallback support
   const results = await Promise.allSettled(
@@ -765,7 +799,6 @@ async function executeEvaluationRound(
   const participants = [...ctx.team.workers];
   const criteria = input.criteria ?? "Evaluate the quality, correctness, and completeness.";
   const subject = input.subject ?? ctx.task;
-  const { buildEvaluationScoringMessages } = await import("./prompts");
 
   const results = await Promise.allSettled(
     participants.map((participant, index) => {
@@ -794,7 +827,6 @@ async function executeRedTeamRound(
 ): Promise<RoundResult> {
   const participants = [...ctx.team.workers];
   const roles = input.roles;
-  const { buildRedTeamGeneratorMessages, buildRedTeamAttackerMessages } = await import("./prompts");
 
   const getRole = (idx: number): "generator" | "attacker" => {
     if (roles?.[idx]) return roles[idx]!;
@@ -876,19 +908,47 @@ function sparseSelect(
  */
 function aggregateEvaluationResults(
   responses: readonly WorkerResponse[],
-  method: import("./types").AggregationMethod,
+  method: AggregationMethod,
 ) {
   const parsed = responses.map((r) => {
-    const scoreMatch = r.content.match(/(?:score|rating|점수|overall)\s*[:=]?\s*(\d+(?:\.\d+)?)/i)
-      ?? r.content.match(/(\d+(?:\.\d+)?)\s*(?:\/\s*10|out of 10)/i)
-      ?? r.content.match(/\*\*(\d+(?:\.\d+)?)\*\*\s*\/\s*10/i);
+    // Take the LAST match of the first matching pattern, so the mandated final "score:" line wins
+    // over an earlier per-criterion mention (e.g. "Per-criterion score: 6.5/10"). Mirrors the
+    // last-match logic used for verdict/confidence below; first-match here previously captured a
+    // body per-criterion score instead of the final tier score.
+    const scorePatterns = [
+      /[*_]{0,2}(?:score|rating|점수|overall)[*_]{0,2}\s*[:=]?\s*[*_]{0,2}\s*(\d+(?:\.\d+)?)/gi,
+      /(\d+(?:\.\d+)?)\s*(?:\/\s*10|out of 10)/gi,
+      /\*\*(\d+(?:\.\d+)?)\*\*\s*\/\s*10/gi,
+    ];
+    let scoreMatch: RegExpExecArray | null = null;
+    for (const scoreRe of scorePatterns) {
+      for (let sm = scoreRe.exec(r.content); sm !== null; sm = scoreRe.exec(r.content)) {
+        scoreMatch = sm;
+      }
+      if (scoreMatch) break;
+    }
+    // Require a ":"/"=" separator so a bolded section header like "**Verdict**" is skipped, and take
+    // the LAST match so the mandated final "verdict:" line wins over any earlier inline mention.
     // Skip table rows (starting with |) — models sometimes emit tables after "verdict:"
-    const verdictMatch = r.content.match(/(?:verdict|결론|판정)\s*[:=]?\s*([^|\n].+?)(?:\n|$)/i);
-    const confidence = parseConfidence(r.content);
+    const verdictRe = /[*_]{0,2}(?:verdict|결론|판정)[*_]{0,2}\s*[:=]\s*[*_]{0,2}([^|\n].+?)(?:\n|$)/gi;
+    let verdictText: string | undefined;
+    for (let vm = verdictRe.exec(r.content); vm !== null; vm = verdictRe.exec(r.content)) {
+      verdictText = vm[1];
+    }
+    // Confidence: take the LAST "confidence:"-labeled tier line, mirroring the score/verdict
+    // last-match logic — the mandated final "confidence:" line is the worker's overall confidence
+    // and must win over any earlier body mention. Falls back to whole-text mode parsing only when no
+    // labeled line is present (e.g. a worker that ignored the format), preserving prior behavior.
+    const confidenceRe = /[*_]{0,2}(?:confidence|신뢰도)[*_]{0,2}\s*[:=]\s*\[?[*_]{0,2}(high|medium|low)\b/gi;
+    let confidence: "high" | "medium" | "low" | undefined;
+    for (let cm = confidenceRe.exec(r.content); cm !== null; cm = confidenceRe.exec(r.content)) {
+      confidence = cm[1]!.toLowerCase() as "high" | "medium" | "low";
+    }
+    confidence ??= parseConfidence(r.content);
     return {
       model: r.model,
       score: scoreMatch ? parseFloat(scoreMatch[1]!) : undefined,
-      verdict: verdictMatch ? verdictMatch[1]!.trim() : undefined,
+      verdict: verdictText ? verdictText.replace(/[*_]+$/, "").trim() : undefined,
       confidence,
     };
   });
@@ -1189,11 +1249,18 @@ export async function deliberate(
     allModelSwaps.push(...roundResult.modelSwaps);
 
     // Replenishment: if slots are empty and replenish callback exists, fill from alive providers.
-    // Skip for red_team — intentional partial participation per round.
+    // Only for the parallel protocols whose default deps.buildR1Messages matches the protocol
+    // (shared_convergence, adversarial_debate — see createEngineDepsForProtocol). The specialized
+    // executors (sequential_refinement, evaluation_scoring, host_interrogation, red_team) build their
+    // own protocol-specific messages locally; their outer deps default to buildSharedConvergenceR1, so
+    // a replenished worker would run the wrong (analysis) prompt. Those executors already tolerate a
+    // lost worker, so replenishment is skipped for them.
+    const replenishmentSupported =
+      cfg.protocol === "shared_convergence" || cfg.protocol === "adversarial_debate";
     const activeCount = roundResult.round.responses.length;
     const emptySlots = originalTeamSize - activeCount;
     let replenishedResponses: WorkerResponse[] = [];
-    if (cfg.protocol !== "red_team" && emptySlots > 0 && fallbackDeps?.replenish && i === 1) {
+    if (replenishmentSupported && emptySlots > 0 && fallbackDeps?.replenish && i === 1) {
       const aliveProviders = new Set(
         roundResult.round.responses.map((r) => extractProvider(r.model)),
       );
@@ -1344,6 +1411,14 @@ export async function deliberate(
   const warnings: string[] = [];
   if (providers.size < 2 && usedModelsList.length >= 2) {
     warnings.push(`provider_diversity_low: ${providers.size} provider(s) — minimum 2 recommended`);
+  }
+
+  // host_interrogation assigns questions 1:1 round-robin over workers, so questions beyond the
+  // team size are never asked. Surface that instead of dropping them silently.
+  if (cfg.protocol === "host_interrogation" && input.questions && input.questions.length > originalTeamSize) {
+    warnings.push(
+      `questions_dropped: ${input.questions.length - originalTeamSize} of ${input.questions.length} questions have no worker slot (one question per worker) — use at least ${input.questions.length} workers to ask them all`,
+    );
   }
 
   // R1 diversity score — cheap text-distance metric. Always emitted as a value

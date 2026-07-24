@@ -16,7 +16,6 @@ import {
   buildRedTeamGeneratorMessages,
   buildRedTeamAttackerMessages,
   buildAcceptanceMessages,
-  extractDebateDigest,
 } from "./prompts";
 import type {
   SharedContext,
@@ -74,12 +73,14 @@ describe("buildSharedConvergenceR1", () => {
     expect(msgs[1]!.role).toBe("user");
   });
 
-  it("should include global depth in system", () => {
+  it("system wraps GLOBAL_DEPTH in <grounding>/<completion-check> XML blocks", () => {
     const sys = buildSharedConvergenceR1(makeCtx())[0]!.content!;
-    expect(sys).toContain("verify your key claims");
-    expect(sys).toContain("Ground factual claims");
-    expect(sys).toContain("reject it");
-    expect(sys).toContain("Express uncertainty");
+    expect(sys).toContain("<grounding>");
+    expect(sys).toContain("<completion-check>");
+    expect(sys).toContain("specific evidence");
+    expect(sys).toContain("Reject a flawed premise");
+    expect(sys).toContain("never force confidence");
+    expect(sys).toContain("verify every major claim");
   });
 
   it("should include explore depth in system", () => {
@@ -281,9 +282,11 @@ describe("buildSharedConvergenceR2", () => {
     expect((user.match(/One analyst argues/g) ?? []).length).toBe(4);
   });
 
-  it("should include global and explore depth in system", () => {
+  it("shared R2 system contains structured GLOBAL_DEPTH + DEPTH_EXPLORE", () => {
     const sys = buildSharedConvergenceR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
-    expect(sys).toContain("reject it");
+    expect(sys).toContain("<grounding>");
+    expect(sys).toContain("<completion-check>");
+    expect(sys).toContain("Reject a flawed premise");
     expect(sys).toContain("multiple approaches");
   });
 
@@ -348,24 +351,18 @@ describe("buildSharedConvergenceFollowUp", () => {
     expect(msg.content).toContain("Redis is better");
   });
 
-  it("should include host-instructions when provided", () => {
+  it("session-continuation dedup: omits host-instructions/CONFIDENCE/task already in message[1]", () => {
+    // FollowUp is appended to existing history [system, R1-user, R1-assistant].
+    // Re-emitting task/instructions/CONFIDENCE wastes tokens and dilutes attention.
     const msg = buildSharedConvergenceFollowUp(makeCtx(), [], "Focus on perf");
-    expect(msg.content).toContain("<host-instructions>Focus on perf</host-instructions>");
+    expect(msg.content).not.toContain("<host-instructions>");
+    expect(msg.content).not.toContain("HIGH:");
+    expect(msg.content).not.toContain("<task>");
   });
 
-  it("should include confidence instructions", () => {
-    const msg = buildSharedConvergenceFollowUp(makeCtx(), []);
-    expect(msg.content).toContain("HIGH:");
-  });
-
-  it("should include final round commitment", () => {
+  it("should include final round commitment (new signal not in history)", () => {
     const msg = buildSharedConvergenceFollowUp(makeCtx(), [], undefined, { current: 3, max: 3 });
     expect(msg.content).toMatch(/final round.*Commit/i);
-  });
-
-  it("should place task at end", () => {
-    const msg = buildSharedConvergenceFollowUp(makeCtx(), []);
-    expect(msg.content).toMatch(/<task>Write a sorting function<\/task>$/);
   });
 
   it("should NOT include system prompt content", () => {
@@ -412,11 +409,52 @@ describe("buildAdversarialDebateR1", () => {
     expect(r1[1]!.content!).not.toContain("<assigned-stance>");
   });
 
-  it("should give identical prompts regardless of workerIndex", () => {
+  it("assigns workerIndex-keyed attack-angle (R1 diversity)", () => {
     const ctx = makeCtx();
-    const r1w0 = buildAdversarialDebateR1(ctx, "inst", { current: 1, max: 3 }, 0);
-    const r1w1 = buildAdversarialDebateR1(ctx, "inst", { current: 1, max: 3 }, 1);
-    expect(r1w0[1]!.content!).toEqual(r1w1[1]!.content!);
+    const r1w0 = buildAdversarialDebateR1(ctx, "inst", { current: 1, max: 3 }, 0)[1]!.content!;
+    const r1w1 = buildAdversarialDebateR1(ctx, "inst", { current: 1, max: 3 }, 1)[1]!.content!;
+    expect(r1w0).not.toEqual(r1w1);
+    expect(r1w0).toContain("<attack-angle>");
+    expect(r1w1).toContain("<attack-angle>");
+  });
+
+  it("attack-angle cycles through 5 distinct framings", () => {
+    const ctx = makeCtx();
+    const angles = new Set<string>();
+    for (let i = 0; i < 5; i++) {
+      const user = buildAdversarialDebateR1(ctx, undefined, undefined, i)[1]!.content!;
+      const m = user.match(/<attack-angle>(.*?)<\/attack-angle>/s);
+      expect(m).not.toBeNull();
+      angles.add(m![1]!);
+    }
+    expect(angles.size).toBe(5);
+  });
+
+  it("attack-angle omitted when workerIndex is undefined", () => {
+    const user = buildAdversarialDebateR1(makeCtx())[1]!.content!;
+    expect(user).not.toContain("<attack-angle>");
+  });
+
+  it("R1 user carries the lean (no-peer) <approach> block", () => {
+    const user = buildAdversarialDebateR1(makeCtx(), undefined, undefined, 0)[1]!.content!;
+    expect(user).toContain("<approach>");
+    expect(user).toMatch(/Do not soften your criticism/i);
+    // "substantive and falsifiable" removed: "substantive" is covered by the role
+    // ("evidence-backed weaknesses") + the required evidence field, and "falsifiable" by the
+    // required falsification field — introspection (3 heterogeneous workers) reported the clause
+    // double-covered, with the falsification field the operative driver.
+    // R1 has no peers/prior round: peer-relative directives must NOT appear here
+    expect(user).not.toContain("another analyst");
+    expect(user).not.toContain("reach consensus");
+    expect(user).not.toMatch(/restate prior findings/i);
+    // steelmanning is owned by the output-format steelman field, not duplicated in approach
+    expect(user).not.toContain("Steelman each position");
+  });
+
+  it("R1 system carries evidence + output-format, task is last", () => {
+    const msgs = buildAdversarialDebateR1(makeCtx(), undefined, undefined, 0);
+    expect(msgs[0]!.content!).toContain("<output-format>");
+    expect(msgs[1]!.content!).toMatch(/<task>Write a sorting function<\/task>$/);
   });
 });
 
@@ -431,16 +469,156 @@ describe("buildAdversarialDebateR2", () => {
     expect(msgs[1]!.role).toBe("user");
   });
 
-  it("should use adversarial system prompt (find weaknesses)", () => {
+  it("system states the adversarial stress-testing role", () => {
     const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
-    expect(sys).toContain("find weaknesses");
+    expect(sys).toContain("stress-testing a proposal");
+    expect(sys).toContain("evidence-backed weaknesses");
   });
 
-  it("should use steelman-specific anti-conformity", () => {
+  it("role bounds the whole response to findings + final line and bans narrating search/consolidation", () => {
+    // A fast model (grok-composer) leaked chain-of-thought into the final-round response
+    // ("Wait - let me reorder...", "Actually consolidate...", "Searching for ... to strengthen the
+    // consolidation pass."). Positional preamble bans just relocated the leak, so the boundary is
+    // stated once at response level: response = findings + final line, reasoning stays in reasoning.
+    // Measured effect: cut grok's leak from 3 interstitial/inline lines to a single harmless L0
+    // preamble ("Running a final ... search, then consolidating"); verdicts/confidence still parse.
+    // The other 4 models (haiku/sonnet/gpt-5.4-mini/gpt-5.5) never leak. The residual one-line
+    // preamble is grok-specific floor behavior, not remediable by more prompt text.
+    const r1 = buildAdversarialDebateR1(makeCtx(), undefined, undefined, 0)[0]!.content!;
+    const r2 = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    for (const sys of [r1, r2]) {
+      expect(sys).toContain("Your entire response is the findings");
+      expect(sys).toContain("never narrate your searching or consolidating");
+    }
+  });
+
+  it("system carries the output-format with severity tiers + confidence + steelman field", () => {
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    expect(sys).toContain("<output-format>");
+    // verdict rendered as a parseable value (lowercase severity, uppercase confidence).
+    // The bullet is `- verdict: <value-desc>` like every sibling field; the value-desc must NOT
+    // re-embed a `verdict:` label — doing so made grok emit a doubled "verdict: verdict:" prefix
+    // (100% of findings) while anthropic/openai emitted it once (interpretation split, confirmed by
+    // worker interrogation). Example is the bare value "critical, HIGH", no label.
+    expect(sys).toContain("(critical | high | medium | low)");
+    expect(sys).toContain("(HIGH | MEDIUM | LOW)");
+    expect(sys).toContain("e.g. critical, HIGH");
+    expect(sys).not.toContain("verdict: critical, HIGH");
+    expect(sys).toContain("steelman:");
+    expect(sys).toMatch(/Order findings by severity, most critical first/);
+    // reason-before-verdict (de-commit-first) is enforced by FIELD ORDER, not a redundant prose clause:
+    // the reasoning fields (weakness/evidence/falsification) precede verdict in the listed order.
+    expect(sys.indexOf("evidence:")).toBeLessThan(sys.indexOf("verdict:"));
+  });
+
+  it("output-format hardens field compliance: rename/add guard, target exception, no-backtick verdict", () => {
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    // template drift (rename/add), not just omission, is the dominant format failure — forbid all three
+    expect(sys).toMatch(/no renamed, added, or omitted fields/);
+    // the conditional `target` field must not read as an "omitted field" violation
+    expect(sys).toMatch(/target is the sole exception/);
+    // the output-format field-condition must match the closing's rule: target is required when a
+    // finding challenges OR absorbs a peer. When these two sites disagreed (output-format said "only
+    // when challenging", closing said "challenges or absorbs"), workers split — one dropped target on
+    // absorbed peers per output-format, another added it per closing. Both must say "challenges or absorbs".
+    expect(sys).toMatch(/include it only when your finding challenges or absorbs a specific peer/);
+    expect(sys).toMatch(/- target \(only when your finding challenges or absorbs a specific peer\)/);
+    // models sometimes copy the backticks that delimited the verdict template, or re-emit the label,
+    // into their output — the value-desc forbids both
+    expect(sys).toMatch(/no backticks, quotes, or a repeated "verdict" label/);
+  });
+
+  it("target requirement is consistent across output-format and closing (no sibling mismatch)", () => {
+    // Regression guard for the fixed contradiction: both the field-condition (system output-format)
+    // and the final-round closing must gate `target` on the SAME predicate — "challenges or absorbs".
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    const userFinal = buildAdversarialDebateR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 3, max: 3 },
+    )[1]!.content!;
+    expect(sys).toMatch(/challenges or absorbs a specific peer/);
+    expect(userFinal).toMatch(/When a finding challenges or absorbs a peer's position, lead it with the target field/);
+    // output-format must NOT restrict target to "only when challenging a peer" anymore
+    expect(sys).not.toMatch(/include it only when challenging a peer/);
+    expect(sys).not.toMatch(/- target \(only when challenging a peer\)/);
+  });
+
+  it("R1 resolves the severity-vs-attack-angle lead-ordering conflict; ordering stated once", () => {
+    // R1: the system severity rule must defer lens SCOPE to the <attack-angle> (whole-response in R1,
+    // lead-only in R2) instead of releasing non-lead findings to lens-free severity ordering — otherwise
+    // "order the rest by severity" undoes the per-worker diversity the lens exists to create. The clause
+    // must also preserve the cross-lens peer-challenge exception so R2 target findings are not forbidden.
+    const r1 = buildAdversarialDebateR1(makeCtx(), undefined, { current: 1, max: 3 }, 0);
+    const r1sys = r1[0]!.content!;
+    const r1user = r1[1]!.content!;
+    expect(r1sys).toMatch(/When an <attack-angle> is present, follow it for which weaknesses to search and lead with, and order by severity within the scope it sets/);
+    expect(r1sys).toMatch(/a finding that challenges a peer \(using target\) may fall outside your current lens/);
+    // the old lens-free release must be gone from the system clause
+    expect(r1sys).not.toMatch(/assigns your lead finding, lead with that and order the rest by severity/);
+    // ordering is owned entirely by <output-format>; the attack-angle wrapper must not mention it at all
+    // (interrogation flagged both the duplicate "Then order the rest by severity" AND a dead cross-reference)
+    expect(r1user).not.toMatch(/order the rest by severity/i);
+    expect(r1user).not.toMatch(/ordering of the rest/i);
+  });
+
+  it("R2/FollowUp rotated attack-angle announces it SUPERSEDES the prior round's lens", () => {
+    // In session-continuation the R1 <attack-angle> stays in history; the R2 lens must say it replaces it,
+    // else the worker sees two lenses with no precedence (surfaced by 3-worker interrogation).
+    const r2 = buildAdversarialDebateR2(makeCtx(), [makeResponse("w/b", "x", 1)], makeResponse("w/a", "y", 0),
+      undefined, { current: 2, max: 3 }, 0)[1]!.content!;
+    expect(r2).toMatch(/New lens for this round — it replaces the lens you led with earlier/);
+    const fu = buildAdversarialDebateFollowUp(makeCtx(), [], undefined, { current: 2, max: 3 }, 0).content;
+    expect(fu).toMatch(/New lens for this round — it replaces the lens you led with earlier/);
+  });
+
+  it("final-round attack-angle is a search pass (folds by severity), NOT a re-lead — no conflict with closing", () => {
+    // The closing consolidates all surviving findings; a "re-lead / do not keep leading from the old one"
+    // lens contradicts that, so the worker obeys the closing and applies the lens cosmetically, burying any
+    // genuinely new weakness the lens surfaces (surfaced by worker interrogation). Final round reframes the
+    // lens as a search pass whose output the closing folds in by severity.
+    const fin = buildAdversarialDebateFollowUp(makeCtx(), [], undefined, { current: 3, max: 3 }, 0).content;
+    expect(fin).toMatch(/run one last search pass through this lens; fold anything new it surfaces/);
+    expect(fin).not.toMatch(/do not keep leading from the old one/);
+    expect(fin).toMatch(/This is the final round/); // closing still present
+  });
+
+  it("R2+ <approach> carries the peer-aware directives (no-soften, no-consensus, revise-on-own-evidence)", () => {
     const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
-    expect(user).toContain("steelman");
-    expect(user).toContain("Do not agree to reach consensus");
+    expect(user).toContain("<approach>");
+    expect(user).toContain("do not agree merely to reach consensus");
     expect(user).toContain("Do not soften criticism");
+    expect(user).toMatch(/never because another analyst sounded confident/);
+  });
+
+  it("falsification criterion lives in the system output-format", () => {
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    expect(sys).toMatch(/falsification|change your mind/i);
+  });
+
+  it("cold-rebuild (model-swap) path: debate-so-far + re-sent host-instructions + supersede angle + closing", () => {
+    // Fires only when a model is swapped mid-debate (no ownPrevious, ctx has prior rounds). Live runs never
+    // exercised it this session (no forced failure), so pin it deterministically: the swapped worker must
+    // still get the transcript, the re-sent host-instructions, the superseding rotated angle, and — at the
+    // final round — the closing.
+    const ctx = makeCtx([makeRound(1)]);
+    const user = buildAdversarialDebateR2(
+      ctx, otherResponses, undefined /* cold join */, "HOST FORMAT X", { current: 3, max: 3 }, 0,
+    )[1]!.content!;
+    expect(user).toContain("<debate-so-far>");
+    expect(user).not.toContain("<your-previous>");
+    expect(user).toContain("HOST FORMAT X"); // host-instructions re-sent for the swapped model
+    // Final round: the closing governs (consolidate), so the lens is a search pass folded by severity —
+    // NOT a "re-lead from a new lens", which would contradict the closing.
+    expect(user).toMatch(/run one last search pass through this lens; fold anything new it surfaces/);
+    expect(user).not.toMatch(/do not keep leading from the old one/);
+    expect(user).toMatch(/This is the final round/);
+  });
+
+  it("revise-on-record-evidence rule (anti-herding, but peer evidence counts) is re-injected in <approach>", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    // revision is allowed on evidence in the record (incl. a peer's concrete evidence), NOT only self-derived
+    expect(user).toMatch(/Revise[^.]*evidence in the record/i);
+    // anti-herding guard preserved: never revise merely because a peer sounded confident
+    expect(user).toMatch(/never because another analyst sounded confident/i);
   });
 
   it("should NOT use general anti-conformity", () => {
@@ -454,9 +632,11 @@ describe("buildAdversarialDebateR2", () => {
     expect(user).not.toContain("<other-positions>");
   });
 
-  it("should present in 3rd person", () => {
+  it("should present peers in 3rd person with turn-local Analyst labels", () => {
     const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
-    expect(user).toContain("One analyst argues:");
+    expect(user).toMatch(/Analyst A argues/);
+    expect(user).not.toContain("Worker ");
+    expect(user).not.toContain("Model ");
   });
 
   it("should include own previous response", () => {
@@ -473,9 +653,16 @@ describe("buildAdversarialDebateR2", () => {
     expect(user).toContain("### Round 2");
   });
 
-  it("should include confidence instructions", () => {
-    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
-    expect(user).toContain("HIGH:");
+  it("confidence taxonomy lives in the system block (defined once, not duplicated in approach)", () => {
+    const msgs = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious);
+    const sys = msgs[0]!.content!;
+    const user = msgs[1]!.content!;
+    // confidence is tied to the decisiveness of the finding's own falsification test (calibration,
+    // not tier-amputation): cheap deterministic check → HIGH, load/probabilistic test → MEDIUM
+    expect(sys).toMatch(/HIGH = a confirmed source or one cheap deterministic check decides it/);
+    expect(sys).toMatch(/needs a benchmark\/load test\/other contingent evidence/);
+    // de-duplicated: the confidence-label reminder is no longer repeated in the user/approach block
+    expect(user).not.toContain("Label each finding's confidence");
   });
 
   it("should place task at end", () => {
@@ -483,18 +670,148 @@ describe("buildAdversarialDebateR2", () => {
     expect(user).toMatch(/<task>Write a sorting function<\/task>$/);
   });
 
-  it("should NOT include final round commitment (adversarial ignores roundInfo)", () => {
-    // _roundInfo is unused in adversarial R2
-    const user = buildAdversarialDebateR2(
+  it("includes final-round consolidation closing ONLY on the final round", () => {
+    const userFinal = buildAdversarialDebateR2(
       makeCtx(), otherResponses, ownPrevious, undefined, { current: 3, max: 3 },
     )[1]!.content!;
-    expect(user).not.toContain("final round");
+    expect(userFinal).toContain("<closing>");
+    expect(userFinal).toContain("This is the final round");
+    // closing precedes the task (task stays last)
+    expect(userFinal.indexOf("<closing>")).toBeLessThan(userFinal.indexOf("<task>"));
+    // final-round peer challenges must carry the machine-readable target field. Without a positive
+    // instruction, workers (measured across 4 provider models) folded challenges into prose and dropped
+    // target; the closing must require leading a peer-challenging finding with target.
+    expect(userFinal).toMatch(/lead it with the target field naming that analyst/);
+    // load-bearing: still forbid separate per-peer sections (prevents the prior standalone-block bloat)
+    expect(userFinal).toMatch(/do not add separate per-peer challenge/);
+
+    const userMid = buildAdversarialDebateR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 2, max: 3 },
+    )[1]!.content!;
+    expect(userMid).not.toContain("<closing>");
+
+    const userNoRound = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(userNoRound).not.toContain("<closing>");
+
+    // single-round debate (max=1): the max>1 guard suppresses the closing
+    const userSingle = buildAdversarialDebateR2(
+      makeCtx(), otherResponses, ownPrevious, undefined, { current: 1, max: 1 },
+    )[1]!.content!;
+    expect(userSingle).not.toContain("<closing>");
   });
 
-  it("should include global and explore depth in system", () => {
+  it("re-injects the workerIndex-keyed attack-angle in R2", () => {
+    const a0 = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious, undefined, undefined, 0)[1]!.content!;
+    const a1 = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious, undefined, undefined, 1)[1]!.content!;
+    expect(a0).toContain("<attack-angle>");
+    expect(a1).toContain("<attack-angle>");
+    expect(a0).not.toEqual(a1); // distinct angle per worker
+    const none = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(none).not.toContain("<attack-angle>");
+  });
+
+  it("formats a peer without confidence as a bare Analyst label (no confidence suffix)", () => {
+    const noConf = [makeResponse("w/b", "Use mergesort", 1)]; // makeResponse sets no confidence
+    const user = buildAdversarialDebateR2(makeCtx(), noConf, ownPrevious)[1]!.content!;
+    expect(user).toMatch(/Analyst A argues:/);
+    expect(user).not.toMatch(/Analyst A argues \(their confidence/);
+  });
+
+  it("adversarial system uses evidence/output blocks, not GLOBAL_DEPTH", () => {
     const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
-    expect(sys).toContain("reject it");
-    expect(sys).toContain("multiple approaches");
+    expect(sys).toContain("<evidence-and-confidence>");
+    expect(sys).toContain("<output-format>");
+    expect(sys).toMatch(/never build on it or refuse/i);
+    // adversarial no longer carries the shared GLOBAL_DEPTH/DEPTH_EXPLORE blocks
+    expect(sys).not.toContain("<grounding>");
+    expect(sys).not.toContain("<completion-check>");
+  });
+
+  it("evidence-discipline contract: tool-agnostic confirm-or-abstain + anti-fabrication + [unverified]", () => {
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    // reasoning chain is the default evidence (removes the citation-first incentive that drove confabulation)
+    expect(sys).toMatch(/mechanism → break → consequence/);
+    // confirm-or-abstain: assert a specific ONLY when confirmable (recall OR a check you ran) — the one
+    // invariant that holds with or without web tools, so the prompt needs no tool-mode branch
+    expect(sys).toMatch(/only when you can confirm it/i);
+    expect(sys).toMatch(/confirm it with the means available to you \(certain recall, or verification if you have tools\)/i);
+    // fabricated-incident guard names the specific categories (source/quote/number/identifier)
+    expect(sys).toMatch(/a source, quoted string, number, or named identifier/i);
+    // abstention behavior when a specific can't be confirmed → describe-without-naming + [unverified]
+    expect(sys).toMatch(/describe it without naming/i);
+    // number-laundering guard: order-of-magnitude range, not a fabricated figure
+    expect(sys).toMatch(/order-of-magnitude range/i);
+    // estimated operational number must carry [unverified]
+    expect(sys).toMatch(/estimated rather than confirmed/i);
+    // single [unverified] convention, no competing tag
+    expect(sys).toContain("[unverified]");
+    expect(sys).not.toContain("[from-memory]");
+    // anti-citation-theater: quotes only around reproducible text; false-authority warning
+    expect(sys).toMatch(/quotation marks only around text you can reproduce verbatim/i);
+    expect(sys).toMatch(/manufactures false authority/i);
+    // pre-submit re-read audit
+    expect(sys).toMatch(/Before submitting/i);
+    // output-format evidence field allows reasoning chain as evidence (not citation-only)
+    expect(sys).toMatch(/evidence:.*reasoning chain/i);
+  });
+
+  it("reasoning-depth levers: staged framing, reason-before-verdict order, pre-submit consistency, abstention", () => {
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[0]!.content!;
+    // D3 staged framing (depth without banned CoT)
+    expect(sys).toMatch(/enumerate candidate failure modes/i);
+    // depth-split: a distinct sub-mechanism (different fix/falsification) is its own finding, not absorbed
+    // as a subspecies — moves the deeper one-step-beneath weakness from dropped/absorbed to surfaced.
+    expect(sys).toMatch(/distinct mechanism one step beneath it/i);
+    expect(sys).toMatch(/its own finding rather than absorbing it as a subspecies/i);
+    expect(sys).toMatch(/your own counter-attack defeats/i);
+    // D2 de-commit-first: the merged verdict line comes AFTER the reasoning fields (weakness/evidence)
+    expect(sys.indexOf("weakness:")).toBeLessThan(sys.indexOf("verdict:"));
+    expect(sys.indexOf("evidence:")).toBeLessThan(sys.indexOf("verdict:"));
+    // confidence calibrated by falsifier decisiveness (replaces self-assessed "deductively tight", which
+    // measured ~65% inflated): contingent/load-dependent failures cap at MEDIUM
+    expect(sys).toMatch(/it only bites under particular load\/timing\/config/i);
+    // pre-submit check is internal-contradiction only. The CoVe cited-item re-verify clause was measured
+    // ineffective even on a citation-prone task ([unverified] marks stayed 0 with and without it, version
+    // fabrication unchanged) and removed — keep only the self-consistency fix.
+    expect(sys).toMatch(/whose own text undercuts its label/i);
+    expect(sys).not.toMatch(/re-verify each cited source/i);
+  });
+
+  it("approach re-injects a conditional substantive-critique rule (add if one survives, else say so — no quota)", () => {
+    const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
+    expect(user).toMatch(/If a new substantive, falsifiable critique survives your counter-attack, add it/i);
+    // anti-quota with a non-skippable fallback: if nothing new, engage the weakest peer finding (no free
+    // exit, no filler). Folded into a finding's fields (closing-compatible) rather than a standalone
+    // holds/refuted artifact, which contradicted the closing's "no separate per-peer sections" + the
+    // output verdict schema (severity/confidence). Contradiction was benign in output (R2 n=6: 0 per-peer
+    // sections) but removed for prompt consistency.
+    expect(user).toMatch(/engage the weakest peer finding head-on within a finding/i);
+  });
+
+  it("prompt is tool-agnostic: one evidence block, never announces or branches on web tools", () => {
+    // Whether a worker holds web tools is set by the harness wiring (request.webAccess → provider tool
+    // set), the single source of truth. The prompt must NOT restate that capability — announcing a tool
+    // the wiring didn't grant (or suppressing one it did) desyncs the two sources.
+    const sys = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious, undefined, undefined, 0)[0]!.content!;
+    expect(sys).not.toMatch(/web search|web fetch|you have .*? tools|VERIFY it/i);
+    expect(sys).not.toContain("No lookups");
+    // exactly one evidence-and-confidence block (no no-lookup vs web variants)
+    expect((sys.match(/<evidence-and-confidence>/g) ?? []).length).toBe(1);
+    // the invariant discipline that is true with or without tools
+    expect(sys).toMatch(/only when you can confirm it/i);
+    // role + output-format unchanged
+    expect(sys).toContain("stress-testing a proposal");
+    expect(sys).toContain("<output-format>");
+    // R1 carries the same tool-agnostic system block
+    const r1 = buildAdversarialDebateR1(makeCtx(), undefined, undefined, 0)[0]!.content!;
+    expect(r1).not.toMatch(/web search|VERIFY it/i);
+    expect(r1).toMatch(/only when you can confirm it/i);
+  });
+
+  it("adversarial system is static (cache-stable) regardless of instructions", () => {
+    const a = buildAdversarialDebateR1(makeCtx(), "alpha")[0]!.content;
+    const b = buildAdversarialDebateR1(makeCtx(), "beta")[0]!.content;
+    expect(a).toBe(b);
   });
 
   it("should escape XML in other responses", () => {
@@ -526,11 +843,20 @@ describe("buildAdversarialDebateR2", () => {
     expect(user).not.toContain("<assigned-stance>");
   });
 
-  it("should place positions-to-challenge before constraints (Lost-in-the-Middle)", () => {
+  it("should place positions-to-challenge before approach (Lost-in-the-Middle)", () => {
     const user = buildAdversarialDebateR2(makeCtx(), otherResponses, ownPrevious)[1]!.content!;
     const posIdx = user.indexOf("<positions-to-challenge>");
-    const constIdx = user.indexOf("<constraints>");
-    expect(posIdx).toBeLessThan(constIdx);
+    const apprIdx = user.indexOf("<approach>");
+    expect(posIdx).toBeLessThan(apprIdx);
+  });
+
+  it("cold-join transcript carries peer confidence labels", () => {
+    const ctx = makeCtx([
+      { number: 1, responses: [{ model: "w/b", content: "Use Redis", workerIndex: 1, confidence: "high" }] },
+    ]);
+    const user = buildAdversarialDebateR2(ctx, [], undefined)[1]!.content!;
+    expect(user).toContain("<debate-so-far>");
+    expect(user).toMatch(/confidence:\s*HIGH/i);
   });
 });
 
@@ -540,10 +866,10 @@ describe("buildAdversarialDebateFollowUp", () => {
     expect(msg.role).toBe("user");
   });
 
-  it("should use adversarial anti-conformity", () => {
+  it("should use adversarial anti-conformity (peer-aware approach)", () => {
     const msg = buildAdversarialDebateFollowUp(makeCtx(), []);
-    expect(msg.content).toContain("steelman");
     expect(msg.content).toContain("Do not soften criticism");
+    expect(msg.content).toContain("do not agree merely to reach consensus");
   });
 
   it("should use positions-to-challenge tag", () => {
@@ -553,19 +879,11 @@ describe("buildAdversarialDebateFollowUp", () => {
     expect(msg.content).not.toContain("<other-positions>");
   });
 
-  it("should include host-instructions when provided", () => {
+  it("session-continuation dedup: omits host-instructions/CONFIDENCE/task already in message[1]", () => {
     const msg = buildAdversarialDebateFollowUp(makeCtx(), [], "Focus on security");
-    expect(msg.content).toContain("<host-instructions>Focus on security</host-instructions>");
-  });
-
-  it("should include confidence instructions", () => {
-    const msg = buildAdversarialDebateFollowUp(makeCtx(), []);
-    expect(msg.content).toContain("HIGH:");
-  });
-
-  it("should place task at end", () => {
-    const msg = buildAdversarialDebateFollowUp(makeCtx(), []);
-    expect(msg.content).toMatch(/<task>Write a sorting function<\/task>$/);
+    expect(msg.content).not.toContain("<host-instructions>");
+    expect(msg.content).not.toContain("HIGH:");
+    expect(msg.content).not.toContain("<task>");
   });
 
   it("should NOT include system prompt content", () => {
@@ -579,12 +897,21 @@ describe("buildAdversarialDebateFollowUp", () => {
     expect(msg.content).not.toContain("<assigned-stance>");
   });
 
-  it("should place positions-to-challenge before constraints in FollowUp", () => {
+  it("should place positions-to-challenge before approach in FollowUp", () => {
     const others = [makeResponse("w/b", "Redis", 1)];
     const msg = buildAdversarialDebateFollowUp(makeCtx(), others);
     const posIdx = msg.content!.indexOf("<positions-to-challenge>");
-    const constIdx = msg.content!.indexOf("<constraints>");
-    expect(posIdx).toBeLessThan(constIdx);
+    const apprIdx = msg.content!.indexOf("<approach>");
+    expect(posIdx).toBeLessThan(apprIdx);
+  });
+
+  it("re-injects attack-angle and final-round closing when provided", () => {
+    const others = [makeResponse("w/b", "Redis", 1)];
+    const mid = buildAdversarialDebateFollowUp(makeCtx(), others, undefined, { current: 2, max: 3 }, 0);
+    expect(mid.content).toContain("<attack-angle>");
+    expect(mid.content).not.toContain("<closing>");
+    const final = buildAdversarialDebateFollowUp(makeCtx(), others, undefined, { current: 3, max: 3 }, 0);
+    expect(final.content).toContain("<closing>");
   });
 });
 
@@ -654,17 +981,24 @@ describe("buildHostInterrogationMessages", () => {
 // ================================================================
 
 describe("buildSequentialRefinementMessages", () => {
-  it("should use R1-style prompt when no previous output (first worker)", () => {
+  it("should produce an artifact-oriented first-worker prompt (not shared-convergence analysis)", () => {
     const msgs = buildSequentialRefinementMessages(makeCtx(), undefined);
-    // Should delegate to buildSharedConvergenceR1
-    const r1 = buildSharedConvergenceR1(makeCtx());
-    expect(msgs).toEqual(r1);
+    expect(msgs).toHaveLength(2);
+    const sys = msgs[0]!.content!;
+    const user = msgs[1]!.content!;
+    // First worker produces the initial artifact and must keep confidence/evidence markers
+    // out of the artifact body — same discipline as the refiners, so downstream (or a 1-worker
+    // chain) never emits a label-polluted deliverable.
+    expect(sys).toContain("initial artifact");
+    expect(sys).toContain("not to the artifact itself");
+    // Must NOT inherit CONFIDENCE_AND_UNCERTAINTY's per-claim marker instruction.
+    expect(user).not.toContain("indicate your confidence");
+    expect(user).toMatch(/<task>Write a sorting function<\/task>$/);
   });
 
-  it("should use R1-style with instructions when no previous output", () => {
-    const msgs = buildSequentialRefinementMessages(makeCtx(), undefined, "Be concise");
-    const r1 = buildSharedConvergenceR1(makeCtx(), "Be concise");
-    expect(msgs).toEqual(r1);
+  it("should include host-instructions in the first-worker prompt", () => {
+    const user = buildSequentialRefinementMessages(makeCtx(), undefined, "Be concise")[1]!.content!;
+    expect(user).toContain("<host-instructions>Be concise</host-instructions>");
   });
 
   it("should return system + user when previous output provided", () => {
@@ -720,7 +1054,6 @@ describe("buildEvaluationScoringMessages", () => {
     const sys = buildEvaluationScoringMessages("t", "c", "s")[0]!.content!;
     expect(sys).toContain("Evaluate independently");
     expect(sys).toContain("Do not invent additional criteria");
-    expect(sys).toContain("Judge independently");
   });
 
   it("should include criteria in user message", () => {
@@ -755,6 +1088,19 @@ describe("buildEvaluationScoringMessages", () => {
     expect(sys).toContain("confidence");
     expect(sys).toContain("HIGH");
   });
+
+  // The verdict must be one of five fixed tier words, not free prose. Aggregation
+  // (voting/consensus) groups workers by the verbatim lowercased verdict string
+  // (engine.ts aggregateEvaluationResults) — free-form sentences make every worker
+  // a unique singleton, so voting always reports voteCount=1 and consensus can
+  // never reach even when workers agree. Fixed tiers restore meaningful grouping.
+  it("should require the verdict to be one of five fixed categorical tiers", () => {
+    const sys = buildEvaluationScoringMessages("t", "c", "s")[0]!.content!;
+    expect(sys).toContain("exactly one of broken, significant-issues, acceptable, good, excellent");
+    // Prose lives on a separate judgment line so the verdict stays groupable.
+    expect(sys).toContain("judgment:");
+    expect(sys.indexOf("judgment:")).toBeLessThan(sys.indexOf("verdict:"));
+  });
 });
 
 // ================================================================
@@ -774,6 +1120,15 @@ describe("buildRedTeamGeneratorMessages", () => {
     expect(sys).toContain("Produce the requested output");
     expect(sys).toContain("edge cases");
     expect(sys).toContain("adversarial inputs");
+  });
+
+  it("should keep evidence/confidence markers out of the generated artifact body", () => {
+    // The generator produces a deliverable (policy, discharge sheet, code), not an analysis.
+    // GLOBAL_DEPTH's completion-check demands a confidence marker per claim; without this redirect
+    // the generator litters the reader-facing artifact with "(Confidence: High; Evidence: ...)".
+    // Same discipline as sequential_refinement's initial-artifact worker.
+    const sys = buildRedTeamGeneratorMessages("t")[0]!.content!;
+    expect(sys).toContain("not to the artifact itself");
   });
 
   it("should place task at end", () => {
@@ -808,6 +1163,32 @@ describe("buildRedTeamGeneratorMessages", () => {
     const taskIdx = user.indexOf("<task>");
     expect(attackIdx).toBeLessThan(taskIdx);
   });
+
+  it("should add a revision directive telling the generator to harden against the attacks", () => {
+    // Bare attack-results are just context; workers then guess (fresh output / phantom "id:3" draft /
+    // refuse the task). The directive names the one action so the generate→attack→harden loop iterates.
+    // Load-bearing clauses: "single improved version" (not fresh regen), the id-reference clause (kills
+    // the phantom-id-series read), and routing rebuttals to commentary (keeps them out of the artifact).
+    const user = buildRedTeamGeneratorMessages("t", undefined, "vuln found")[1]!.content!;
+    expect(user).toContain("<revision-directive>");
+    expect(user).toContain("Produce a single improved version that closes each valid finding");
+    expect(user).toContain("do not adopt or extend them");
+    expect(user).toContain("worker-facing commentary");
+  });
+
+  it("should place the revision directive after the attack results and before the task", () => {
+    const user = buildRedTeamGeneratorMessages("t", undefined, "vuln found")[1]!.content!;
+    const attackIdx = user.indexOf("<attack-results>");
+    const directiveIdx = user.indexOf("<revision-directive>");
+    const taskIdx = user.indexOf("<task>");
+    expect(attackIdx).toBeLessThan(directiveIdx);
+    expect(directiveIdx).toBeLessThan(taskIdx);
+  });
+
+  it("should omit the revision directive when there are no attack results", () => {
+    const user = buildRedTeamGeneratorMessages("t")[1]!.content!;
+    expect(user).not.toContain("<revision-directive>");
+  });
 });
 
 describe("buildRedTeamAttackerMessages", () => {
@@ -821,16 +1202,43 @@ describe("buildRedTeamAttackerMessages", () => {
   it("should include attacker-specific system prompt", () => {
     const sys = buildRedTeamAttackerMessages("t", ["o"])[0]!.content!;
     expect(sys).toContain("Find vulnerabilities");
-    expect(sys).toContain("exploitable weaknesses");
+    expect(sys).toContain("consequential weaknesses");
     expect(sys).toContain("Rank findings by severity");
+  });
+
+  it("should scope attacks to consequence, not adversarial exploitability alone", () => {
+    // "exploitable ... attack scenario" made attackers on non-security artifacts (policy, medical)
+    // drop/demote real omission and ambiguity defects that have no attacker. Naming the non-adversarial
+    // failure modes keeps them in scope; "not theoretical" keeps the anti-fabrication floor.
+    const sys = buildRedTeamAttackerMessages("t", ["o"])[0]!.content!;
+    expect(sys).toContain("omission");
+    expect(sys).toContain("not theoretical concerns");
+    expect(sys).not.toContain("exploitable");
   });
 
   it("should include target outputs in user message", () => {
     const user = buildRedTeamAttackerMessages("t", ["output A", "output B"])[1]!.content!;
-    expect(user).toContain("<target-output>");
     expect(user).toContain("output A");
     expect(user).toContain("output B");
-    expect((user.match(/<target-output>/g) ?? []).length).toBe(2);
+    expect((user.match(/<target-output\b/g) ?? []).length).toBe(2);
+  });
+
+  it("should number multiple targets and require per-target attribution", () => {
+    // Unlabeled repeated tags let a worker merge the drafts and leave one uncovered; ids + the
+    // attribution note keep each output attacked on its own. (Observed: a worker collapsed two
+    // policies into one section-numbered document, attributing nothing to the second.)
+    const user = buildRedTeamAttackerMessages("t", ["output A", "output B"])[1]!.content!;
+    expect(user).toContain('<target-output id="1">');
+    expect(user).toContain('<target-output id="2">');
+    expect(user).toContain("<targets-note>");
+    expect(user).toContain("tag every finding with the id");
+  });
+
+  it("should not number or add a targets-note for a single target", () => {
+    const user = buildRedTeamAttackerMessages("t", ["only"])[1]!.content!;
+    expect(user).toContain("<target-output>");
+    expect(user).not.toContain('id="1"');
+    expect(user).not.toContain("<targets-note>");
   });
 
   it("should include host-instructions when provided", () => {
@@ -884,52 +1292,17 @@ describe("buildAcceptanceMessages", () => {
     const user = buildAcceptanceMessages("S", "P", "My task")[1]!.content!;
     expect(user).toMatch(/## Task\nMy task$/);
   });
-});
 
-// ================================================================
-// extractDebateDigest
-// ================================================================
-
-describe("extractDebateDigest", () => {
-  it("should extract position and evidence tags", () => {
-    const content = `<position>Quicksort is optimal</position>\n<evidence>O(n log n) average</evidence>`;
-    const digest = extractDebateDigest(content);
-    expect(digest).toContain("Position: Quicksort is optimal");
-    expect(digest).toContain("Evidence: O(n log n) average");
-  });
-
-  it("should extract alternatives tag", () => {
-    const content = `<position>Redis</position>\n<evidence>Fast</evidence>\n<alternatives>Memcached</alternatives>`;
-    const digest = extractDebateDigest(content);
-    expect(digest).toContain("Alternatives: Memcached");
-  });
-
-  it("should fall back to first 3 lines for short content", () => {
-    expect(extractDebateDigest("line 1\nline 2\nline 3")).toBe("line 1\nline 2\nline 3");
-  });
-
-  it("should use last line as summary for long free-form content", () => {
-    const content = "P1.\nP2.\nP3.\nP4.\nIn conclusion, Redis is the best choice.";
-    expect(extractDebateDigest(content)).toContain("Redis is the best choice");
-  });
-
-  it("should trim whitespace in extracted tags", () => {
-    const content = "<position>  spaced  </position>\n<evidence>\n  indented\n</evidence>";
-    const digest = extractDebateDigest(content);
-    expect(digest).toContain("Position: spaced");
-    expect(digest).toContain("Evidence: indented");
-  });
-
-  it("should fall back to first 3 lines when last line is code block", () => {
-    const content = "L1.\nL2.\nL3.\nL4.\n```code";
-    const digest = extractDebateDigest(content);
-    expect(digest).toBe("L1.\nL2.\nL3.");
-  });
-
-  it("should fall back to first 3 lines when last line is too short", () => {
-    const content = "L1.\nL2.\nL3.\nL4.\nOk.";
-    const digest = extractDebateDigest(content);
-    expect(digest).toBe("L1.\nL2.\nL3.");
+  it("preserves markdown body verbatim — no XML escape on code samples", () => {
+    // Synthesis / original position may contain legitimate angle brackets
+    // (TypeScript generics, HTML, comparison operators). Acceptance user
+    // message is markdown, not XML, so these must round-trip without escape.
+    const code = "Use Array<T> where T extends Comparable";
+    const user = buildAcceptanceMessages(code, code, code)[1]!.content!;
+    expect(user).toContain("Array<T>");
+    expect(user).toContain("T extends Comparable");
+    expect(user).not.toContain("Array&lt;T&gt;");
+    expect(user).not.toContain("&lt;T&gt;");
   });
 });
 
@@ -964,8 +1337,15 @@ describe("cross-protocol design principles", () => {
     const scFollow = buildSharedConvergenceFollowUp(makeCtx(), others).content;
     const adFollow = buildAdversarialDebateFollowUp(makeCtx(), others).content;
 
-    for (const content of [scR2, adR2, scFollow, adFollow]) {
+    // shared_convergence keeps the anonymous "One analyst argues:" framing.
+    for (const content of [scR2, scFollow]) {
       expect(content).toContain("One analyst argues:");
+    }
+    // adversarial uses turn-local "Analyst A/B" labels (still 3rd person).
+    for (const content of [adR2, adFollow]) {
+      expect(content).toMatch(/Analyst [A-Z] argues/);
+    }
+    for (const content of [scR2, adR2, scFollow, adFollow]) {
       expect(content).not.toContain("Worker ");
       expect(content).not.toContain("Model ");
     }
@@ -988,21 +1368,20 @@ describe("cross-protocol design principles", () => {
     expect(interr).toContain("<constraints>");
   });
 
-  it("confidence instructions present in all deliberation builders", () => {
-    // R1
+  it("confidence anchor present in standalone-prompt builders (not FollowUp — session-continuation reuses prior turn)", () => {
+    // shared_convergence carries the anchor in the user turn.
     expect(buildSharedConvergenceR1(makeCtx())[1]!.content).toContain("HIGH:");
-    // R2
     expect(buildSharedConvergenceR2(
       makeCtx(), [], undefined,
     )[1]!.content).toContain("HIGH:");
-    // FollowUp
-    expect(buildSharedConvergenceFollowUp(makeCtx(), []).content).toContain("HIGH:");
-    // Adversarial R2
+    // adversarial carries the confidence taxonomy in the SYSTEM block (defined once, not in the user turn).
     expect(buildAdversarialDebateR2(
       makeCtx(), [], undefined,
-    )[1]!.content).toContain("HIGH:");
-    // Adversarial FollowUp
-    expect(buildAdversarialDebateFollowUp(makeCtx(), []).content).toContain("HIGH:");
+    )[0]!.content).toContain("HIGH = a confirmed source or one cheap deterministic check decides it");
+    // FollowUp builders MUST omit the anchor — message[1] in the live history
+    // already carries it; re-injecting would be a duplicate.
+    expect(buildSharedConvergenceFollowUp(makeCtx(), []).content).not.toContain("HIGH:");
+    expect(buildAdversarialDebateFollowUp(makeCtx(), []).content).not.toContain("HIGH:");
   });
 
   it("system = fixed (caching), user = variable", () => {
@@ -1015,6 +1394,80 @@ describe("cross-protocol design principles", () => {
     const user1 = buildSharedConvergenceR1(makeCtx(), "inst1")[1]!.content!;
     const user2 = buildSharedConvergenceR1(makeCtx(), "inst2")[1]!.content!;
     expect(user1).not.toBe(user2);
+  });
+
+  it("escapes XML metacharacters in all user-provided values across all builders", () => {
+    // A malicious or accidental angle-bracket in any caller-supplied string must
+    // not break tag boundaries. Each builder gets a value containing `</tag>` and
+    // we assert that no raw closing tag for our wrappers leaks into the prompt.
+    const dirty = "x</task>y<positions-to-challenge>z";
+    const dirtyCtx: SharedContext = {
+      task: dirty,
+      team: makeTeam(),
+      rounds: [],
+    };
+    const dirtyOwn = makeResponse("w/a", dirty, 0);
+    const dirtyOther = makeResponse("w/b", dirty, 1);
+
+    function assertEscaped(content: string, label: string) {
+      // Raw closing tag inserted via user input must be escaped.
+      const occurrences = (content.match(/<\/task>/g) || []).length;
+      // At most one legitimate </task> (the wrapper close). Any extra means injection.
+      expect(occurrences, `${label} has injected </task>`).toBeLessThanOrEqual(1);
+      expect(content, `${label} contains escaped form`).toContain("&lt;/task&gt;");
+    }
+
+    // shared_convergence
+    assertEscaped(buildSharedConvergenceR1(dirtyCtx, dirty)[1]!.content!, "scR1");
+    assertEscaped(
+      buildSharedConvergenceR2(dirtyCtx, [dirtyOther], dirtyOwn, dirty)[1]!.content!,
+      "scR2",
+    );
+    assertEscaped(
+      buildSharedConvergenceFollowUp(dirtyCtx, [dirtyOther], dirty).content!,
+      "scFollow",
+    );
+
+    // adversarial_debate
+    assertEscaped(buildAdversarialDebateR1(dirtyCtx, dirty)[1]!.content!, "advR1");
+    assertEscaped(
+      buildAdversarialDebateR2(dirtyCtx, [dirtyOther], dirtyOwn, dirty)[1]!.content!,
+      "advR2",
+    );
+    assertEscaped(
+      buildAdversarialDebateFollowUp(dirtyCtx, [dirtyOther], dirty).content!,
+      "advFollow",
+    );
+
+    // host_interrogation
+    assertEscaped(
+      buildHostInterrogationMessages(dirty, dirty, [
+        { question: dirty, answer: dirty },
+      ])[1]!.content!,
+      "hostInterrogation",
+    );
+
+    // sequential_refinement
+    assertEscaped(
+      buildSequentialRefinementMessages(dirtyCtx, dirty, dirty)[1]!.content!,
+      "sequential",
+    );
+
+    // evaluation_scoring
+    assertEscaped(
+      buildEvaluationScoringMessages(dirty, dirty, dirty, dirty)[1]!.content!,
+      "evaluation",
+    );
+
+    // red_team
+    assertEscaped(
+      buildRedTeamGeneratorMessages(dirty, dirty, dirty)[1]!.content!,
+      "redTeamGenerator",
+    );
+    assertEscaped(
+      buildRedTeamAttackerMessages(dirty, [dirty, dirty], dirty)[1]!.content!,
+      "redTeamAttacker",
+    );
   });
 
   it("should be idempotent", () => {

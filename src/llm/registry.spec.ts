@@ -34,6 +34,7 @@ function makeResponse(model: string): ChatCompletionResponse {
 function makeProvider(name: ProviderName, chatImpl?: LLMProvider["chat"]): LLMProvider {
   return {
     name,
+    capabilities: { web: true, effort: true, fileAccess: true },
     chat: chatImpl ?? mock((req: ChatCompletionRequest) => Promise.resolve(makeResponse(req.model))),
   };
 }
@@ -89,6 +90,29 @@ describe("ProviderRegistry", () => {
     }
   });
 
+  it("routes an id absent from the map by its provider prefix when that provider is configured", async () => {
+    // discovered-only id: not in the map, but "openai/" names a configured provider
+    const openai = makeProvider("openai");
+    const registry = new ProviderRegistry([openai], makeProviderMap([]));
+    const result = await registry.chat({
+      model: "openai/gpt-5.5-newly-discovered",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(result.id).toBe("resp-openai/gpt-5.5-newly-discovered");
+    expect((openai.chat as ReturnType<typeof mock>)).toHaveBeenCalledTimes(1);
+  });
+
+  it("still throws unknown_model when the prefix is not a configured provider", async () => {
+    const openai = makeProvider("openai");
+    const registry = new ProviderRegistry([openai], makeProviderMap([]));
+    try {
+      await registry.chat({ model: "xai/grok-build", messages: [{ role: "user", content: "hi" }] });
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect((error as LLMClientError).type).toBe("unknown_model");
+    }
+  });
+
   it("should throw LLMClientError with 503 when provider is not configured", async () => {
     // Arrange — map points to anthropic, but no anthropic provider registered
     const openai = makeProvider("openai");
@@ -130,14 +154,14 @@ describe("ProviderRegistry", () => {
     await registry.chat({
       model: "anthropic/claude-sonnet-4.6",
       messages,
-      temperature: 0.5,
+      reasoning_effort: 7,
     });
 
     // Assert
     const call = chatMock.mock.calls[0]![0] as ChatCompletionRequest;
     expect(call.model).toBe("anthropic/claude-sonnet-4.6");
     expect(call.messages).toEqual(messages);
-    expect(call.temperature).toBe(0.5);
+    expect(call.reasoning_effort).toBe(7);
   });
 
   it("should handle multiple providers correctly", async () => {

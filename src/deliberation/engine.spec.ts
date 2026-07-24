@@ -208,6 +208,37 @@ describe("executeRound", () => {
 
     expect(workerIndices).toEqual([0, 1, 2]);
   });
+
+  it("does NOT pass webAccess to the prompt builder (prompts are tool-agnostic; web is wired via chat params)", async () => {
+    // Whether a worker holds web tools is decided by the harness wiring and reaches the provider through
+    // config.workerGenParams (asserted in "GenerationParams forwarding"). The prompt builder is tool-agnostic
+    // and must NOT receive a webAccess argument — a prompt that restated capability could desync from the wiring.
+    const team: TeamComposition = {
+      workers: [
+        { model: "anthropic/claude-sonnet-4.6", role: "worker" },
+        { model: "openai/gpt-5.4", role: "worker" },
+      ],
+    };
+    const input = makeInput({ webAccess: true });
+    const config = makeConfig({ workerGenParams: { webAccess: true } });
+
+    const builderArgCounts: number[] = [];
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(validWorkerContent("response"))),
+      buildR1Messages: mock((...args: unknown[]) => {
+        builderArgCounts.push(args.length);
+        return [{ role: "user" as const, content: "work" }];
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+    await executeRound(ctx, 1, deps, config, input);
+
+    // ctx, instructions, roundInfo, workerIndex — and no 5th webAccess arg
+    expect(builderArgCounts.length).toBeGreaterThan(0);
+    expect(Math.max(...builderArgCounts)).toBeLessThanOrEqual(4);
+  });
 });
 
 // =============================================================================
@@ -751,7 +782,7 @@ describe("GenerationParams forwarding", () => {
     const team = makeTeam(1);
     const input = makeInput();
     const config = makeConfig({
-      workerGenParams: { temperature: 1.0, top_p: 0.9 },
+      workerGenParams: { webAccess: true, reasoning_effort: 8 },
     });
 
     const chatCalls: { model: string; params: any }[] = [];
@@ -770,7 +801,7 @@ describe("GenerationParams forwarding", () => {
     // Worker call should have workerGenParams
     const workerCall = chatCalls.find((c) => c.model.startsWith("worker/"));
     expect(workerCall).toBeDefined();
-    expect(workerCall!.params).toEqual({ temperature: 1.0, top_p: 0.9 });
+    expect(workerCall!.params).toEqual({ webAccess: true, reasoning_effort: 8 });
   });
 
   it("should pass undefined params when genParams are not configured", async () => {
@@ -2175,6 +2206,75 @@ describe("parseConfidence", () => {
   it("should parse 신뢰도 label and ignore non-confidence labels", () => {
     expect(parseConfidence("신뢰도: HIGH. 구체성: HIGH. 방어력: LOW.")).toBe("high");
   });
+
+  // Bolded/emphasized field label (Claude markdown default) — the live-run defect.
+  it("should parse bolded label '**confidence**: HIGH'", () => {
+    expect(parseConfidence("- **confidence**: HIGH")).toBe("high");
+  });
+
+  it("should parse underscore-emphasized label '__confidence__: LOW'", () => {
+    expect(parseConfidence("__confidence__: LOW")).toBe("low");
+  });
+
+  it("should parse decorated value 'confidence: [HIGH]' and 'confidence: **HIGH**'", () => {
+    expect(parseConfidence("confidence: [HIGH]")).toBe("high");
+    expect(parseConfidence("confidence: **HIGH**")).toBe("high");
+  });
+
+  it("should parse single-emphasis label '_confidence_: MEDIUM'", () => {
+    expect(parseConfidence("_confidence_: MEDIUM")).toBe("medium");
+  });
+
+  it("should parse bolded Korean label '**신뢰도**: HIGH'", () => {
+    expect(parseConfidence("**신뢰도**: HIGH")).toBe("high");
+  });
+
+  // adversarial_debate verdict line "verdict: <severity>, <confidence>" — confidence lives ONLY here.
+  // Must read the confidence token and NOT double-count the severity word.
+  it("should parse adversarial verdict line 'verdict: critical, HIGH'", () => {
+    expect(parseConfidence("verdict: critical, HIGH")).toBe("high");
+  });
+
+  it("should read confidence (not severity) from 'verdict: high, MEDIUM'", () => {
+    expect(parseConfidence("verdict: high, MEDIUM")).toBe("medium");
+  });
+
+  it("should parse 'verdict: medium, LOW'", () => {
+    expect(parseConfidence("verdict: medium, LOW")).toBe("low");
+  });
+
+  it("should aggregate verdict confidences across findings (most frequent)", () => {
+    expect(parseConfidence("steelman: a\nverdict: critical, HIGH\n\nsteelman: b\nverdict: high, MEDIUM\n\nverdict: high, MEDIUM")).toBe("medium");
+  });
+
+  // False-positive guards — must NOT match.
+  it("should NOT match 'overconfidence:' / 'nonconfidence:' (word-boundary guard)", () => {
+    expect(parseConfidence("overconfidence: HIGH")).toBeUndefined();
+    expect(parseConfidence("nonconfidence: LOW")).toBeUndefined();
+  });
+
+  it("should NOT match value-substring 'confidence: lower' / 'confidence: mediumship'", () => {
+    expect(parseConfidence("confidence: lower than expected")).toBeUndefined();
+    expect(parseConfidence("confidence: mediumship tier")).toBeUndefined();
+  });
+
+  it("HIGH+LOW tie resolves to low (low-biased tie rule)", () => {
+    expect(parseConfidence("**confidence**: HIGH. **confidence**: LOW.")).toBe("low");
+  });
+
+  it("should NOT match an embedded label even with emphasis (over**confidence**:)", () => {
+    expect(parseConfidence("over**confidence**: HIGH")).toBeUndefined();
+    expect(parseConfidence("a_confidence_: HIGH")).toBeUndefined();
+  });
+
+  it("handles uppercase label and no-space separator", () => {
+    expect(parseConfidence("CONFIDENCE: HIGH")).toBe("high");
+    expect(parseConfidence("confidence:HIGH")).toBe("high");
+  });
+
+  it("triple-emphasis label is not matched (only up to ** supported)", () => {
+    expect(parseConfidence("***confidence***: high")).toBeUndefined();
+  });
 });
 
 // =============================================================================
@@ -2286,6 +2386,38 @@ describe("aggregateEvaluationResults via deliberate", () => {
     expect(output.aggregation!.voteCount).toBe(2);
   });
 
+  it("should parse bolded final labels and skip a '**Verdict**' section header", async () => {
+    // Regression: markdown-bolded final labels ("**score:** 9", "**verdict:** ...") previously dropped
+    // the score and captured "**" as the verdict; a "**Verdict**" body header hijacked the first match.
+    const worker = "**Verdict**\nmid-analysis summary line\n\n**verdict:** The subject is fundamentally sound.\n**score:** 8";
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(worker)),
+    });
+    const team = makeTeam(1);
+    const input = makeInput({ protocol: "evaluation_scoring" });
+    const config = makeConfig({ protocol: "evaluation_scoring" });
+    const output = await deliberate(team, input, deps, config);
+    const result = output.aggregation!.results[0]!;
+    expect(result.score).toBe(8);
+    expect(result.verdict).toBe("The subject is fundamentally sound.");
+  });
+
+  it("should take the final score line, not an earlier per-criterion score", async () => {
+    // Regression: a body line "Per-criterion score: 6.5/10" previously won over the mandated final
+    // "score: 6" line because the score regex used first-match while verdict/confidence use last-match.
+    const worker = "Per-criterion score: 6.5/10\nweighted mean resolves to approximately 6.1\n\njudgment: credible but not compelling.\nverdict: acceptable\nscore: 6";
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(worker)),
+    });
+    const team = makeTeam(1);
+    const input = makeInput({ protocol: "evaluation_scoring" });
+    const config = makeConfig({ protocol: "evaluation_scoring" });
+    const output = await deliberate(team, input, deps, config);
+    const result = output.aggregation!.results[0]!;
+    expect(result.score).toBe(6);
+    expect(result.verdict).toBe("acceptable");
+  });
+
   it("should aggregate with consensus method", async () => {
     const deps = makeDeps({
       chat: mock(async () => chatResult("verdict: PASS\nscore: 9")),
@@ -2330,6 +2462,26 @@ describe("aggregateEvaluationResults via deliberate", () => {
     expect(output.aggregation!.weightedScore).toBeDefined();
     // HIGH(1.0)*9 + LOW(0.3)*5 = 9+1.5 = 10.5, totalWeight = 1.3, avg ≈ 8.08
     expect(output.aggregation!.weightedScore).toBeCloseTo(8.08, 1);
+  });
+
+  it("should take the final confidence: line, not the mode of body markers", async () => {
+    // Worker emits earlier body "LOW confidence" mentions but its mandated final line is
+    // "confidence: HIGH". Mode-counting would return LOW (2 body vs 1 final); the aggregation must
+    // mirror score/verdict last-match and report HIGH.
+    let callIdx = 0;
+    const responses = [
+      "Criterion 1: weak — LOW confidence. Criterion 2: also LOW confidence.\nverdict: broken\nscore: 2\nconfidence: HIGH",
+      "verdict: broken\nscore: 3\nconfidence: HIGH",
+    ];
+    const deps = makeDeps({
+      chat: mock(async () => chatResult(responses[callIdx++] ?? "")),
+    });
+    const team = makeTeam(2);
+    const input = makeInput({ protocol: "evaluation_scoring", aggregation: "confidence_weighted" });
+    const config = makeConfig({ protocol: "evaluation_scoring" });
+    const output = await deliberate(team, input, deps, config);
+    const worker0 = output.aggregation!.results!.find((r: any) => r.model === team.workers[0]!.model);
+    expect((worker0 as any).confidence).toBe("high");
   });
 
   it("should not include aggregation for non-evaluation protocols", async () => {
@@ -2448,6 +2600,38 @@ describe("replenishment with actual replacement workers", () => {
     expect(output.roundsExecuted).toBe(1);
     // Either Phase 4 recovered or replenish filled the gap
     expect(output.rounds![0]!.responses!.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("should NOT replenish for specialized-executor protocols (wrong default prompt)", async () => {
+    // Replenishment calls callWithFallback with the OUTER deps, whose buildR1Messages for
+    // sequential_refinement/evaluation_scoring/host_interrogation is buildSharedConvergenceR1
+    // (wire.ts) — a replenished worker would run the analysis prompt, not the protocol prompt.
+    // These protocols' executors already tolerate a lost worker, so replenishment must be skipped.
+    // Empty-slot setup mirrors the shared_convergence replenishment test: model-0 always fails,
+    // model-1 succeeds for its own slot but fails as the Phase-4 fallback for model-0 → 1 empty slot.
+    let callCount = 0;
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        callCount++;
+        if (model === "prov-a/model-0") throw new LLMClientError(500, "server error");
+        if (model === "prov-b/model-1") {
+          if (callCount <= 2) return chatResult(validWorkerContent("ok"), 10, 20);
+          throw new LLMClientError(500, "overloaded");
+        }
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+    const cooldown = createCooldownManager();
+    const pool = createFallbackPool([], cooldown);
+    const customTeam: TeamComposition = {
+      workers: [
+        { model: "prov-a/model-0", role: "worker" },
+        { model: "prov-b/model-1", role: "worker" },
+      ],
+    };
+    const replenish = mock(() => [{ model: "prov-d/model-3", role: "worker" as const }]);
+    await deliberate(customTeam, makeInput(), deps, makeConfig({ protocol: "sequential_refinement" }), { pool, replenish });
+    expect(replenish).not.toHaveBeenCalled();
   });
 });
 
@@ -2587,6 +2771,40 @@ describe("R1 conformity warning in deliberate output", () => {
     const output = await deliberate(team, input, deps, config);
     const warns = output.warnings ?? [];
     expect(warns.some((w) => w.includes("r1_conformity_suspected"))).toBe(false);
+  });
+});
+
+// =============================================================================
+// host_interrogation questions_dropped warning
+// =============================================================================
+
+describe("host_interrogation question assignment warnings", () => {
+  it("warns when questions outnumber workers (trailing questions never asked)", async () => {
+    // Assignment is 1:1 round-robin over workers, so with 2 workers and 4 questions
+    // the last 2 questions have no worker slot and are silently skipped.
+    const deps = makeDeps();
+    const team = makeTeam(2);
+    const input = makeInput({
+      protocol: "host_interrogation",
+      questions: ["q0", "q1", "q2", "q3"],
+    });
+    const config = makeConfig({ protocol: "host_interrogation" });
+    const output = await deliberate(team, input, deps, config);
+    const warns = output.warnings ?? [];
+    expect(warns.some((w) => w.includes("questions_dropped"))).toBe(true);
+  });
+
+  it("does not warn when workers cover all questions", async () => {
+    const deps = makeDeps();
+    const team = makeTeam(3);
+    const input = makeInput({
+      protocol: "host_interrogation",
+      questions: ["q0", "q1"],
+    });
+    const config = makeConfig({ protocol: "host_interrogation" });
+    const output = await deliberate(team, input, deps, config);
+    const warns = output.warnings ?? [];
+    expect(warns.some((w) => w.includes("questions_dropped"))).toBe(false);
   });
 });
 
@@ -2775,5 +2993,87 @@ describe("minority_dissent warning in deliberate output", () => {
     const output = await deliberate(team, input, deps, config);
     const warns = output.warnings ?? [];
     expect(warns.some((w) => w.includes("minority_dissent"))).toBe(false);
+  });
+});
+
+// =============================================================================
+// transcript recording (config.recordTranscript)
+// =============================================================================
+
+describe("recordTranscript", () => {
+  it("records one entry per successful worker with round/workerIndex/model/messages/output", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const entries: any[] = [];
+    const config = makeConfig({ recordTranscript: (e: any) => entries.push(e) });
+
+    let i = 0;
+    const deps = makeDeps({
+      chat: mock(async (_model: string) => chatResult(validWorkerContent(`out-${++i}`), 10, 20)),
+      buildR1Messages: mock(() => [
+        { role: "system" as const, content: "SYS" },
+        { role: "user" as const, content: "U" },
+      ]),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+    await executeRound(ctx, 1, deps, config, input);
+
+    expect(entries).toHaveLength(2);
+    const e0 = entries.find((e) => e.workerIndex === 0)!;
+    expect(e0.round).toBe(1);
+    expect(e0.model).toBe("worker/model-0");
+    expect(e0.output).toBe("out-1");
+    // messages include the system block (pre-adapter), so interrogate can replay + re-split it.
+    expect(e0.messages[0]).toEqual({ role: "system", content: "SYS" });
+  });
+
+  it("does not record an entry for a failed worker", async () => {
+    const team = makeTeam(2);
+    const input = makeInput();
+    const entries: any[] = [];
+    const config = makeConfig({ recordTranscript: (e: any) => entries.push(e) });
+
+    const deps = makeDeps({
+      chat: mock(async (model: string) => {
+        if (model === "worker/model-0") throw new Error("provider down");
+        return chatResult(validWorkerContent("ok"), 10, 20);
+      }),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+    await executeRound(ctx, 1, deps, config, input);
+
+    // Only the surviving worker is recorded (no fallback pool → model-0 just fails).
+    expect(entries).toHaveLength(1);
+    expect(entries[0].model).toBe("worker/model-1");
+  });
+
+  it("records the captured sessionId and the worker's settings (for resume + replay)", async () => {
+    const team = makeTeam(1);
+    const input = makeInput();
+    const entries: any[] = [];
+    const config = makeConfig({
+      recordTranscript: (e: any) => entries.push(e),
+      workerGenParams: { reasoning_effort: 7, webAccess: true },
+    });
+
+    const deps = makeDeps({
+      chat: mock(async () => ({ content: "ok", inputTokens: 1, outputTokens: 1, sessionId: "sess-abc" })),
+      buildR1Messages: mock(() => [
+        { role: "system" as const, content: "SYS" },
+        { role: "user" as const, content: "U" },
+      ]),
+    });
+
+    const { createSharedContext } = await import("./shared-context");
+    const ctx = createSharedContext(input.task, team);
+    await executeRound(ctx, 1, deps, config, input);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].sessionId).toBe("sess-abc");
+    expect(entries[0].settings).toEqual({ system: "SYS", reasoning_effort: 7, webAccess: true });
   });
 });

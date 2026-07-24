@@ -10,6 +10,7 @@
  */
 
 import type { TaskNature } from "./task-nature";
+import type { Capabilities, FileAccess } from "../llm/types";
 
 // -- Protocol --
 
@@ -33,15 +34,12 @@ export type Protocol =
 
 // -- Generation Parameters --
 
-/**
- * Optional LLM generation parameters passed through to providers.
- * Controls temperature, response length, and sampling.
- */
-export interface GenerationParams {
-  readonly temperature?: number;
-  readonly top_p?: number;
-  readonly fileAccess?: boolean;
-}
+/** Provider-agnostic reasoning effort on a 1–10 scale. Each provider buckets it to its own
+ *  level set (claude/grok: low..max; codex: minimal..xhigh); gemini has no effort knob. */
+export type ReasoningEffort = number;
+
+/** Per-call capabilities. Same shape as the LLM-layer request capabilities — one source of truth. */
+export type GenerationParams = Capabilities;
 
 // -- Team Composition --
 
@@ -188,6 +186,12 @@ export interface DeliberateInput {
   /** Task nature for prompt selection. Artifact = deliverable output, Critique = analysis. */
   readonly taskNature?: TaskNature;
 
+  // -- Affinity (learned routing) — host-authored; when both present, the run is scored + logged --
+  /** Topic path (arbitrary depth) this task belongs to, e.g. ["인증-보안","토큰-캐싱"]. */
+  readonly topicPath?: readonly string[];
+  /** Capability axes to score workers on for this topic (topic-specific, host-authored). */
+  readonly axes?: readonly string[];
+
   // -- Protocol-specific fields --
 
   /** Host interrogation: questions to ask each worker. */
@@ -209,9 +213,15 @@ export interface DeliberateInput {
   readonly workerOrder?: readonly number[];
 
   /** Enable read-only file access for workers during deliberation.
-   * CLI providers: enables file read tools + sets cwd to project directory.
-   * API providers: enables function calling with read-only file tools. */
-  readonly fileAccess?: boolean;
+   * "read" (review files, no writes) or "write" (also edit). Provider maps to its own mechanism. */
+  readonly fileAccess?: FileAccess;
+
+  /** Enable web lookup tools so workers VERIFY citations instead of recalling them.
+   * Claude CLI only. Significant cost/latency — opt-in. */
+  readonly webAccess?: boolean;
+
+  /** Vendor reasoning-effort hint forwarded to each worker LLM. */
+  readonly reasoning_effort?: ReasoningEffort;
 
   /**
    * Optional callback invoked after each round completes.

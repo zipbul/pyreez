@@ -6,9 +6,11 @@
 
 import type { RunLogger } from "./report/run-logger";
 import type { DeliberateInput, DeliberateOutput } from "./deliberation/types";
+import type { FileAccess, ChatMessage } from "./llm/types";
 import { NoModelsAvailableError } from "./deliberation/team-composer";
 import { TeamDegradedError } from "./deliberation/engine";
 import { buildAcceptanceMessages } from "./deliberation/prompts";
+import { classifyAlignment } from "./quality/alignment-classifier";
 import type { GenerationParams } from "./deliberation/types";
 import type { ModelInfo } from "./model/types";
 
@@ -22,7 +24,7 @@ export interface HandlersConfig {
   };
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
   runLogger?: RunLogger;
-  chatFn?: (model: string, messages: import("./llm/types").ChatMessage[], params?: GenerationParams) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
+  chatFn?: (model: string, messages: ChatMessage[], params?: GenerationParams, opts?: { resumeSessionId?: string }) => Promise<{ content: string; inputTokens: number; outputTokens: number; sessionId?: string }>;
 }
 
 /** Max characters for error messages. */
@@ -91,7 +93,11 @@ export async function handleDeliberate(
     criteria?: string;
     subject?: string;
     aggregation?: string;
-    file_access?: boolean;
+    file_access?: FileAccess;
+    web_access?: boolean;
+    reasoning_effort?: DeliberateInput["reasoning_effort"];
+    topic_path?: readonly string[];
+    axes?: readonly string[];
   },
 ): Promise<HandlerResult> {
   return logRun(config, "deliberate", async () => {
@@ -131,7 +137,11 @@ export async function handleDeliberate(
         ...(args.subject ? { subject: args.subject } : {}),
         ...(args.aggregation ? { aggregation: args.aggregation as DeliberateInput["aggregation"] } : {}),
         ...(args.onRound ? { onRound: args.onRound } : {}),
-        ...(args.file_access ? { fileAccess: true } : {}),
+        ...(args.file_access ? { fileAccess: args.file_access } : {}),
+        ...(args.web_access != null ? { webAccess: args.web_access } : {}),
+        ...(args.reasoning_effort ? { reasoning_effort: args.reasoning_effort } : {}),
+        ...(args.topic_path?.length ? { topicPath: args.topic_path } : {}),
+        ...(args.axes?.length ? { axes: args.axes } : {}),
       };
 
       const result = await config.deliberateFn(input);
@@ -204,14 +214,13 @@ export async function handleAcceptance(
 
       // Auto-classify alignment for workers that didn't specify one.
       // Defaults to on-task if classification fails (preserves verdict participation).
-      const { classifyAlignment } = await import("./quality/alignment-classifier");
       const classifiedWorkers = await Promise.all(args.workers.map(async (w) => {
         if (w.alignment) return w;
         try {
           const alignment = await classifyAlignment(
             w.model,
             async (model, messages) => {
-              const r = await config.chatFn!(model, messages, { temperature: 0 });
+              const r = await config.chatFn!(model, messages);
               return { content: r.content };
             },
             args.task,
@@ -231,7 +240,7 @@ export async function handleAcceptance(
 
       const judgeWorker = async (w: typeof args.workers[number]) => {
         const messages = buildAcceptanceMessages(args.synthesis, w.original_position, args.task);
-        const result = await config.chatFn!(w.model, messages, { temperature: 0 });
+        const result = await config.chatFn!(w.model, messages);
         totalInput += result.inputTokens;
         totalOutput += result.outputTokens;
 

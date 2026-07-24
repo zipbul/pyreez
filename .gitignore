@@ -42,12 +42,19 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .pyreez/skillcells.json
 .pyreez/reports/
 .pyreez/deliberations/
+.pyreez/debug/
 .pyreez/runs/
 .pyreez/benchmarks/
 .pyreez/learning/
 .pyreez/feedback/
 .pyreez/*.json
+.pyreez/affinity-log.jsonl
 
-# pyreez tracked files (DO NOT ignore):
-# .pyreez/models.jsonc — model definitions + benchmark data
-# .pyreez/config.jsonc — routing config
+# Playwright MCP scratch
+.playwright-mcp/
+
+# multi-model review measurement scratch (captures, judge reports, introspection)
+.advreview/
+
+# stale in-repo memory snapshot (real memory lives in ~/.claude)
+.claude/projects/
