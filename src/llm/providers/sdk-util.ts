@@ -5,33 +5,9 @@
 import { LLMClientError } from "../errors";
 import type { ChatCompletionResponse } from "../types";
 
-export function buildSdkResponse(
-  text: string,
-  originalModel: string,
-  usage?: { input_tokens?: number; output_tokens?: number },
-  sessionId?: string,
-): ChatCompletionResponse {
+export function buildSdkResponse(text: string, sessionId?: string): ChatCompletionResponse {
   return {
-    id: `sdk-${Date.now()}`,
-    object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model: originalModel,
-    choices: [
-      {
-        index: 0,
-        message: { role: "assistant", content: text },
-        finish_reason: "stop",
-      },
-    ],
-    ...(usage
-      ? {
-          usage: {
-            prompt_tokens: usage.input_tokens ?? 0,
-            completion_tokens: usage.output_tokens ?? 0,
-            total_tokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0),
-          },
-        }
-      : {}),
+    content: text,
     ...(sessionId ? { sessionId } : {}),
   };
 }

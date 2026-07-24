@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { filterModelsByProviders } from "./index";
-import { ModelRegistry } from "./model/registry";
+import type { RegistryLike } from "./model/discovered-registry";
 import type { ModelInfo } from "./model/types";
 import type { LLMProvider, ChatCompletionRequest, ChatCompletionResponse } from "./llm/types";
 
@@ -18,21 +18,24 @@ function fakeProvider(name: string): LLMProvider {
   };
 }
 
-function model(id: string, provider: ModelInfo["provider"], available = true): ModelInfo {
-  return { id, name: id, provider, contextWindow: 128000, cost: { inputPer1M: 1, outputPer1M: 1 }, supportsToolCalling: true, available };
+function model(id: string, provider: ModelInfo["provider"]): ModelInfo {
+  return { id, provider };
 }
 
-// Representative multi-provider set, with one unavailable model, so filtering/availability
-// behavior is exercised (the registry is injected — no on-disk catalog to seed from).
-function fixtureRegistry(): ModelRegistry {
-  return new ModelRegistry([
+// Representative multi-provider set (the registry is injected — no on-disk catalog to seed from).
+function fixtureRegistry(): RegistryLike {
+  const models = [
     model("anthropic/opus", "anthropic"),
     model("anthropic/haiku", "anthropic"),
     model("google/gemini", "google"),
     model("openai/gpt", "openai"),
     model("xai/grok", "xai"),
-    model("xai/grok-unavailable", "xai", false),
-  ]);
+  ];
+  return {
+    getById: (id: string) => models.find((m) => m.id === id),
+    getAvailable: () => models,
+    buildProviderMap: () => new Map(models.map((m) => [m.id, m.provider])),
+  };
 }
 
 describe("filterModelsByProviders", () => {
@@ -53,14 +56,6 @@ describe("filterModelsByProviders", () => {
     for (const id of modelIds) {
       expect(id.startsWith("anthropic/")).toBe(true);
     }
-  });
-
-  it("excludes unavailable models even when their provider is configured", () => {
-    const registry = fixtureRegistry();
-    const { modelIds } = filterModelsByProviders(registry, [fakeProvider("xai")]);
-
-    expect(modelIds).toContain("xai/grok");
-    expect(modelIds).not.toContain("xai/grok-unavailable");
   });
 
   it("warns when no configured provider matches any model", () => {

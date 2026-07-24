@@ -12,11 +12,9 @@
 import { LLMClientError } from "./errors";
 import type { CapabilitySet, ChatCompletionRequest } from "./types";
 
-export interface GateResult {
+interface GateResult {
   /** The request to dispatch — soft, unsupported capabilities stripped out. */
   readonly request: ChatCompletionRequest;
-  /** Names of soft capabilities stripped (for run-log observability). */
-  readonly stripped: readonly string[];
 }
 
 export function gateCapabilities(
@@ -38,13 +36,11 @@ export function gateCapabilities(
     );
   }
 
-  const stripped: string[] = [];
   let req = request;
   if (request.reasoning_effort && !caps.effort) {
     const { reasoning_effort: _dropped, ...rest } = request;
     req = rest;
-    stripped.push("reasoning_effort");
   }
 
-  return { request: req, stripped };
+  return { request: req };
 }

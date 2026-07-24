@@ -149,7 +149,7 @@ describe("GrokCliProvider", () => {
     spawnMod.spawnWithIdleTimeout.mockImplementation(() =>
       Promise.resolve({ stdout: "  answer  ", stderr: "", exitCode: 0 }));
     const res = await provider().chat(baseReq());
-    expect(res.choices[0]!.message.content).toBe("answer");
+    expect(res.content).toBe("answer");
   });
 
   it("throws 500 cli_error on non-zero exit", async () => {

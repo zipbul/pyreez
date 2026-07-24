@@ -26,7 +26,6 @@ import type {
   SharedContext,
   TeamComposition,
   TeamMember,
-  TokenUsage,
   WorkerResponse,
 } from "./types";
 // No role assignment — diversity comes from heterogeneous models
@@ -66,10 +65,8 @@ export class TeamDegradedError extends Error {
     public readonly originalSize: number,
     public readonly activeSize: number,
     public readonly lostSlots: readonly { model: string; reason: string }[],
-    public readonly tokensConsumed?: TokenUsage,
     public readonly modelSwaps?: readonly ModelSwap[],
     /** Partial round with successful responses — not discarded despite degradation. */
-    public readonly partialRound?: Round,
   ) {
     super(`Team degraded below minimum viable size (${activeSize}/${originalSize}, min ${minViableTeamSize(originalSize)})`);
     this.name = "TeamDegradedError";
@@ -83,16 +80,14 @@ export class TeamDegradedError extends Error {
  */
 export class RoundExecutionError extends Error {
   constructor(
-    public readonly role: "worker",
     public readonly modelId: string,
     public override readonly cause: unknown,
     /** Tokens consumed before the error occurred. */
-    public readonly tokensConsumed?: TokenUsage,
     /** Model swaps attempted before total failure. */
     public readonly modelSwaps?: readonly ModelSwap[],
   ) {
     super(
-      `${role} (${modelId}) failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `worker (${modelId}) failed: ${cause instanceof Error ? cause.message : String(cause)}`,
     );
     this.name = "RoundExecutionError";
   }
@@ -178,10 +173,6 @@ export interface EngineConfig {
 /** Default convergence threshold for early termination. */
 const CONVERGENCE_THRESHOLD = 0.15;
 
-const DEFAULT_CONFIG: EngineConfig = {
-  maxRounds: 1,
-  protocol: "shared_convergence",
-};
 
 // -- Confidence Parsing --
 
@@ -281,92 +272,6 @@ export function computeR1Diversity(round: Round): number | null {
   return sum / pairs;
 }
 
-/**
- * Detect minority dissent — when N-1 workers cluster on the same answer and
- * one outlier disagrees with HIGH confidence, surface the outlier so the host
- * doesn't auto-trust the majority.
- *
- * Heuristic: requires N≥3. Compute each response's average distance to peers.
- * If exactly one response has avg distance > 0.50 AND all the rest cluster
- * (avg pairwise distance < 0.30) AND the outlier reports HIGH confidence,
- * emit a warning naming the dissenter.
- */
-export function detectMinorityDissent(round: Round): string | null {
-  const responses = round.responses;
-  if (responses.length < 3) return null;
-
-  const avgDistTo = (i: number): number => {
-    let sum = 0;
-    let count = 0;
-    for (let j = 0; j < responses.length; j++) {
-      if (i === j) continue;
-      const a = responses[i]!.content;
-      const b = responses[j]!.content;
-      const maxLen = Math.max(a.length, b.length);
-      if (maxLen === 0) continue;
-      sum += levenshteinDistance(a, b) / maxLen;
-      count++;
-    }
-    return count === 0 ? 0 : sum / count;
-  };
-
-  const distances = responses.map((_, i) => avgDistTo(i));
-  // Find the response with the highest avg distance to peers
-  let outlierIdx = 0;
-  for (let i = 1; i < distances.length; i++) {
-    if (distances[i]! > distances[outlierIdx]!) outlierIdx = i;
-  }
-  if (distances[outlierIdx]! < 0.50) return null;
-
-  // Check the rest cluster tightly
-  const rest = responses.filter((_, i) => i !== outlierIdx);
-  for (let i = 0; i < rest.length; i++) {
-    for (let j = i + 1; j < rest.length; j++) {
-      const a = rest[i]!.content;
-      const b = rest[j]!.content;
-      const maxLen = Math.max(a.length, b.length);
-      if (maxLen === 0) continue;
-      const rate = levenshteinDistance(a, b) / maxLen;
-      if (rate >= 0.30) return null; // rest don't cluster
-    }
-  }
-
-  const outlier = responses[outlierIdx]!;
-  if (outlier.confidence !== "high") return null;
-
-  return `minority_dissent: worker ${outlier.model} (HIGH confidence) disagrees with the majority cluster — review the dissent before adopting the majority position. Majority pressure can suppress correct minority answers.`;
-}
-
-/**
- * Detect R1 conformity — all workers report HIGH confidence AND their responses
- * are textually similar (Levenshtein change rate < 0.30 between every pair).
- *
- * Signal that when most agents agree confidently in R1, debate may be locked
- * in even if the consensus is wrong. Returns a warning string for the host, or
- * null when the signal is absent.
- */
-export function detectConformity(round: Round): string | null {
-  const responses = round.responses;
-  if (responses.length < 2) return null;
-  if (!responses.every((r) => r.confidence === "high")) return null;
-
-  const CONFORMITY_THRESHOLD = 0.30;
-  let pairs = 0;
-  for (let i = 0; i < responses.length; i++) {
-    for (let j = i + 1; j < responses.length; j++) {
-      const a = responses[i]!.content;
-      const b = responses[j]!.content;
-      const maxLen = Math.max(a.length, b.length);
-      if (maxLen === 0) continue;
-      const rate = levenshteinDistance(a, b) / maxLen;
-      if (rate >= CONFORMITY_THRESHOLD) return null;
-      pairs++;
-    }
-  }
-  if (pairs === 0) return null;
-  return `r1_conformity_suspected: all ${responses.length} workers reported HIGH confidence with textually similar answers — verify minority dissent was not suppressed.`;
-}
-
 function checkConvergence(
   currentRound: Round,
   previousRound: Round,
@@ -445,7 +350,6 @@ interface WorkerCallResult {
   response?: WorkerResponse;
   failed: boolean;
   swaps: ModelSwap[];
-  tokens: TokenUsage;
   /** Full message history (sent messages + assistant response) for session continuation. */
   history?: ChatMessage[];
 }
@@ -513,8 +417,6 @@ async function callWithFallback(
   const roundInfo: RoundInfo = { current: roundNumber, max: config.maxRounds };
   const isR2Plus = roundNumber > 1;
   const swaps: ModelSwap[] = [];
-  let totalInput = 0;
-  let totalOutput = 0;
   // Session history — invalidated when model changes (replacement can't continue another model's session)
   let activeHistory = previousHistory;
 
@@ -566,7 +468,7 @@ async function callWithFallback(
     });
 
     if (!next) {
-      return { failed: true, swaps, tokens: { input: totalInput, output: totalOutput } };
+      return { failed: true, swaps };
     }
 
     currentModel = next.id;
@@ -577,8 +479,6 @@ async function callWithFallback(
     try {
       const messages = buildMessages();
       const result = await deps.chat(currentModel, messages, config.workerGenParams);
-      totalInput += result.inputTokens;
-      totalOutput += result.outputTokens;
 
       // Empty response = model returned nothing useful. Treat as failure for fallback.
       if (!result.content.trim()) {
@@ -603,7 +503,6 @@ async function callWithFallback(
         output: result.content,
         ...(result.sessionId ? { sessionId: result.sessionId } : {}),
         ...(Object.keys(settings).length ? { settings } : {}),
-        ...(result.truncated ? { truncated: true } : {}),
       });
 
       // Build conversation history for session continuation in next round
@@ -614,11 +513,9 @@ async function callWithFallback(
           model: currentModel,
           content: result.content,
           workerIndex,
-          ...(result.truncated ? { truncated: true } : {}),
         },
         failed: false,
         swaps,
-        tokens: { input: totalInput, output: totalOutput },
         history: fullHistory,
       };
     } catch (error) {
@@ -638,7 +535,7 @@ async function callWithFallback(
           retryable,
           ...(llmError ? { httpStatus: llmError.status } : {}),
         });
-        return { failed: true, swaps, tokens: { input: totalInput, output: totalOutput } };
+        return { failed: true, swaps };
       }
 
       // Scope cooldown by error type.
@@ -662,7 +559,7 @@ async function callWithFallback(
 
       if (!next) {
         // Pool exhausted — empty slot
-        return { failed: true, swaps, tokens: { input: totalInput, output: totalOutput } };
+        return { failed: true, swaps };
       }
 
       // Swap to next model — invalidate session, cold join via debate builder
@@ -674,7 +571,7 @@ async function callWithFallback(
 
 // -- Protocol-Specific Round Execution --
 
-type RoundResult = { round: Round; tokens: TokenUsage; modelSwaps: ModelSwap[]; histories: Map<number, ChatMessage[]> };
+type RoundResult = { round: Round; modelSwaps: ModelSwap[]; histories?: Map<number, ChatMessage[]> };
 
 /**
  * Execute sequential refinement: workers run one at a time, each building on the previous.
@@ -689,14 +586,15 @@ async function executeSequentialRound(
   pool?: FallbackPool,
 ): Promise<RoundResult> {
   const participants = [...ctx.team.workers];
-  const order = input.workerOrder ?? participants.map((_, i) => i);
+  const order = participants.map((_, i) => i);
   const responses: WorkerResponse[] = [];
   const failedWorkers: FailedWorker[] = [];
   const allSwaps: ModelSwap[] = [];
-  const histories = new Map<number, ChatMessage[]>();
-  let totalInput = 0;
-  let totalOutput = 0;
-  let previousOutput: string | undefined;
+  // Round 2+ resumes the chain on the artifact the previous round finished with — the last worker
+  // to answer holds it. Starting from undefined would send the first worker back to a blank page
+  // and silently discard everything the earlier round produced.
+  const priorRound = ctx.rounds[ctx.rounds.length - 1];
+  let previousOutput: string | undefined = priorRound?.responses[priorRound.responses.length - 1]?.content;
 
 
   for (const workerIdx of order) {
@@ -713,11 +611,7 @@ async function executeSequentialRound(
     const wr = await callWithFallback(
       participant, workerIdx, ctx, roundNumber, seqDeps, config, input, pool,
     );
-
-    totalInput += wr.tokens.input;
-    totalOutput += wr.tokens.output;
     allSwaps.push(...wr.swaps);
-    if (wr.history) histories.set(workerIdx, wr.history);
 
     if (wr.response) {
       responses.push(wr.response);
@@ -736,19 +630,15 @@ async function executeSequentialRound(
 
   if (responses.length === 0 && participants.length > 0) {
     throw new RoundExecutionError(
-      "worker",
       failedWorkers[0]?.model ?? participants[0]!.model,
       new Error(`All ${participants.length} worker(s) failed in sequential refinement`),
-      { input: totalInput, output: totalOutput },
       allSwaps,
     );
   }
 
   return {
     round: { number: roundNumber, responses, ...(failedWorkers.length > 0 ? { failedWorkers } : {}) },
-    tokens: { input: totalInput, output: totalOutput },
     modelSwaps: allSwaps,
-    histories,
   };
 }
 
@@ -770,12 +660,11 @@ async function executeInterrogationRound(
   const results = await Promise.allSettled(
     participants.map((participant, index) => {
       const question = questions[index % Math.max(questions.length, 1)] ?? input.task;
-      const prevExchanges = input.previousExchanges?.[index];
 
       // Override deps to inject interrogation messages
       const interrogDeps: EngineDeps = {
         ...deps,
-        buildR1Messages: () => buildHostInterrogationMessages(ctx.task, question, prevExchanges),
+        buildR1Messages: () => buildHostInterrogationMessages(ctx.task, question),
       };
 
       return callWithFallback(participant, index, ctx, roundNumber, interrogDeps, config, input, pool);
@@ -826,10 +715,8 @@ async function executeRedTeamRound(
   pool?: FallbackPool,
 ): Promise<RoundResult> {
   const participants = [...ctx.team.workers];
-  const roles = input.roles;
 
   const getRole = (idx: number): "generator" | "attacker" => {
-    if (roles?.[idx]) return roles[idx]!;
     return idx < Math.ceil(participants.length / 2) ? "generator" : "attacker";
   };
 
@@ -1050,18 +937,12 @@ function collectRoundResults(
   const responses: WorkerResponse[] = [];
   const failedWorkers: FailedWorker[] = [];
   const allSwaps: ModelSwap[] = [];
-  const histories = new Map<number, ChatMessage[]>();
-  let totalInput = 0;
-  let totalOutput = 0;
 
   for (let idx = 0; idx < results.length; idx++) {
     const result = results[idx]!;
     if (result.status === "fulfilled") {
       const wr = result.value;
-      totalInput += wr.tokens.input;
-      totalOutput += wr.tokens.output;
       allSwaps.push(...wr.swaps);
-      if (wr.history) histories.set(idx, wr.history);
       if (wr.response) {
         responses.push(wr.response);
       } else if (wr.failed) {
@@ -1083,19 +964,15 @@ function collectRoundResults(
 
   if (responses.length === 0 && participants.length > 0) {
     throw new RoundExecutionError(
-      "worker",
       failedWorkers[0]?.model ?? participants[0]!.model,
       new Error(`All ${participants.length} worker(s) failed in round ${roundNumber}`),
-      { input: totalInput, output: totalOutput },
       allSwaps,
     );
   }
 
   return {
     round: { number: roundNumber, responses, ...(failedWorkers.length > 0 ? { failedWorkers } : {}) },
-    tokens: { input: totalInput, output: totalOutput },
     modelSwaps: allSwaps,
-    histories,
   };
 }
 
@@ -1115,7 +992,7 @@ export async function executeRound(
   pool?: FallbackPool,
   /** Per-worker message histories from previous rounds for session continuation. */
   workerHistories?: ReadonlyMap<number, ChatMessage[]>,
-): Promise<{ round: Round; tokens: TokenUsage; modelSwaps: ModelSwap[]; histories: Map<number, ChatMessage[]> }> {
+): Promise<RoundResult> {
   const divergeParticipants = [...ctx.team.workers];
 
   // All workers run in parallel, each with its own fallback chain
@@ -1131,15 +1008,11 @@ export async function executeRound(
   const failedWorkers: FailedWorker[] = [];
   const allSwaps: ModelSwap[] = [];
   const histories = new Map<number, ChatMessage[]>();
-  let totalInput = 0;
-  let totalOutput = 0;
 
   for (let idx = 0; idx < results.length; idx++) {
     const result = results[idx]!;
     if (result.status === "fulfilled") {
       const wr = result.value;
-      totalInput += wr.tokens.input;
-      totalOutput += wr.tokens.output;
       allSwaps.push(...wr.swaps);
       if (wr.history) histories.set(idx, wr.history);
       if (wr.response) {
@@ -1165,10 +1038,8 @@ export async function executeRound(
   // Guard: all workers produced no responses
   if (responses.length === 0 && divergeParticipants.length > 0) {
     throw new RoundExecutionError(
-      "worker",
       failedWorkers[0]?.model ?? divergeParticipants[0]!.model,
       new Error(`All ${divergeParticipants.length} worker(s) failed after fallback exhaustion`),
-      { input: totalInput, output: totalOutput },
       allSwaps,
     );
   }
@@ -1179,7 +1050,6 @@ export async function executeRound(
       responses,
       ...(failedWorkers.length > 0 ? { failedWorkers } : {}),
     },
-    tokens: { input: totalInput, output: totalOutput },
     modelSwaps: allSwaps,
     histories,
   };
@@ -1200,13 +1070,12 @@ export async function deliberate(
   team: TeamComposition,
   input: DeliberateInput,
   deps: EngineDeps,
-  config?: EngineConfig,
+  config: EngineConfig,
   fallbackDeps?: FallbackDeps,
 ): Promise<DeliberateOutput> {
-  const cfg = config ?? DEFAULT_CONFIG;
+  const cfg = config;
   let currentTeam = team;
-  let ctx = createSharedContext(input.task, currentTeam, input.taskNature);
-  let accTokens: TokenUsage = { input: 0, output: 0 };
+  let ctx = createSharedContext(input.task, currentTeam);
   const allRounds: Round[] = [];
   const allModels = new Set<string>();
   const allModelSwaps: ModelSwap[] = [];
@@ -1241,11 +1110,6 @@ export async function deliberate(
     }
     // Update worker histories for session continuation in next round
     workerHistories = roundResult.histories;
-
-    accTokens = {
-      input: accTokens.input + roundResult.tokens.input,
-      output: accTokens.output + roundResult.tokens.output,
-    };
     allModelSwaps.push(...roundResult.modelSwaps);
 
     // Replenishment: if slots are empty and replenish callback exists, fill from alive providers.
@@ -1280,10 +1144,6 @@ export async function deliberate(
         for (const repResult of replenishResults) {
           if (repResult.status === "fulfilled" && repResult.value.response) {
             replenishedResponses.push(repResult.value.response);
-            accTokens = {
-              input: accTokens.input + repResult.value.tokens.input,
-              output: accTokens.output + repResult.value.tokens.output,
-            };
             allModelSwaps.push(...repResult.value.swaps);
             // Store replenishment history for session continuation in R2+
             if (repResult.value.history && workerHistories) {
@@ -1315,8 +1175,7 @@ export async function deliberate(
         reason: fw.error,
       }));
       throw new TeamDegradedError(
-        originalTeamSize, finalActiveCount, lostSlots, accTokens, allModelSwaps,
-        roundResult.round,
+        originalTeamSize, finalActiveCount, lostSlots, allModelSwaps,
       );
     }
 
@@ -1330,21 +1189,21 @@ export async function deliberate(
         const resp = roundResult.round.responses.find((r) => r.workerIndex === idx);
         if (resp && resp.model !== w.model) {
           teamChanged = true;
-          return { model: resp.model, role: "worker" as const };
+          return { model: resp.model };
         }
         return w;
       });
 
       // Add replenished workers to team (workerIndex >= originalTeamSize)
       for (const resp of replenishedResponses) {
-        updatedWorkers.push({ model: resp.model, role: "worker" as const });
+        updatedWorkers.push({ model: resp.model });
         teamChanged = true;
       }
 
       if (teamChanged) {
         currentTeam = { workers: updatedWorkers };
         const prevRounds = [...ctx.rounds];
-        ctx = createSharedContext(input.task, currentTeam, input.taskNature);
+        ctx = createSharedContext(input.task, currentTeam);
         for (const prevRound of prevRounds) {
           ctx = addRound(ctx, prevRound);
         }
@@ -1367,7 +1226,6 @@ export async function deliberate(
     if (input.onRound) {
       input.onRound({
         number: i,
-        protocol: cfg.protocol,
         responses: roundWithConfidence.responses.map((resp) => ({
           model: resp.model,
           content: resp.content,
@@ -1397,11 +1255,14 @@ export async function deliberate(
   const roundsSummary = allRounds.map((r, idx) => ({
     number: idx + 1,
     protocol: cfg.protocol,
+    // workerIndex, not just model: a team can hold the same model in two slots (wire round-robins
+    // when count exceeds the model list), and consumers that key responses by model alone would
+    // collapse those two workers into one.
     responses: r.responses.map((resp) => ({
       model: resp.model,
       content: resp.content,
+      workerIndex: resp.workerIndex,
       ...(resp.confidence ? { confidence: resp.confidence } : {}),
-      ...(resp.truncated ? { truncated: true } : {}),
     })),
     ...(r.failedWorkers?.length ? { failedWorkers: r.failedWorkers } : {}),
   }));
@@ -1461,7 +1322,6 @@ export async function deliberate(
 
   return {
     roundsExecuted: allRounds.length,
-    totalTokens: accTokens,
     totalLLMCalls: allLLMCalls,
     modelsUsed: usedModelsList,
     protocol: cfg.protocol,

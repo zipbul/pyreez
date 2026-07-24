@@ -4,9 +4,8 @@
  * Used by the deliberation engine to exclude failed models
  * during per-worker fallback after LLM provider errors.
  *
- * Features:
- *   - Session-level permanent exclusion (no TTL — failed models stay excluded)
- *   - Provider-level propagation (failure affects all models from same provider)
+ * A failed model stays excluded for the rest of the run; a rate-limited one takes its whole
+ * provider down with it. Exclusion is per-run only — nothing persists it across invocations.
  *
  * Pure in-memory, no I/O.
  * @module Cooldown Manager
@@ -29,49 +28,25 @@ export type CooldownErrorType =
 export interface CooldownEntry {
   readonly modelId: string;
   readonly reason: string;
-  readonly cooldownUntil: number;
-  readonly failCount: number;
   readonly errorType: CooldownErrorType;
 }
 
 /**
  * Manages per-model cooldown state.
  */
-/** Serializable cooldown state for persistence across sessions. */
-export interface CooldownState {
-  readonly entries: readonly { modelId: string; reason: string; errorType: CooldownErrorType; failCount: number }[];
-  readonly providers: readonly string[];
-  readonly savedAt: number;
-}
-
 export interface CooldownManager {
-  /** Add a model to cooldown (session-level permanent). */
-  add(modelId: string, reason: string, errorType?: CooldownErrorType, ttlMs?: number): void;
-  /** Add all models from the same provider to cooldown. */
-  addProvider(modelId: string, reason: string, ttlMs?: number): void;
-  /** Check if a model is currently on cooldown. */
+  /** Exclude a model for the rest of the run. */
+  add(modelId: string, reason: string, errorType?: CooldownErrorType): void;
+  /** Exclude every model from the same provider (rate limits are provider-wide). */
+  addProvider(modelId: string, reason: string): void;
   isOnCooldown(modelId: string): boolean;
-  /** Get all currently-cooled-down model IDs. */
-  getCooledDownIds(): ReadonlySet<string>;
-  /** Get the cooldown entry for a model (undefined if not on cooldown). */
+  /** The entry for a model, or undefined if it is not excluded. */
   getEntry(modelId: string): CooldownEntry | undefined;
-  /** Clear all cooldown entries. */
-  clear(): void;
-  /** Serialize state for persistence. */
-  serialize(): CooldownState;
-  /** Restore state from a previous session. Only loads entries saved within maxAgeMs. */
-  restore(state: CooldownState, maxAgeMs?: number): void;
 }
 
 import { extractProvider } from "./provider-util";
 
-/**
- * Create a CooldownManager instance.
- * Session-level: once added, models stay excluded until clear() is called.
- */
-export function createCooldownManager(
-  _defaultTtlMs?: number,
-): CooldownManager {
+export function createCooldownManager(): CooldownManager {
   const cooledModels = new Set<string>();
   const cooledProviders = new Set<string>();
   const entries = new Map<string, CooldownEntry>();
@@ -79,13 +54,7 @@ export function createCooldownManager(
   return {
     add(modelId: string, reason: string, errorType?: CooldownErrorType): void {
       cooledModels.add(modelId);
-      entries.set(modelId, {
-        modelId,
-        reason,
-        cooldownUntil: Infinity,
-        failCount: (entries.get(modelId)?.failCount ?? 0) + 1,
-        errorType: errorType ?? "unknown",
-      });
+      entries.set(modelId, { modelId, reason, errorType: errorType ?? "unknown" });
     },
 
     addProvider(modelId: string, reason: string): void {
@@ -100,62 +69,15 @@ export function createCooldownManager(
       return cooledProviders.has(provider);
     },
 
-    getCooledDownIds(): ReadonlySet<string> {
-      return cooledModels;
-    },
-
     getEntry(modelId: string): CooldownEntry | undefined {
       const entry = entries.get(modelId);
       if (entry) return entry;
       // Synthesize entry for provider-level cooldown
       const provider = extractProvider(modelId);
       if (cooledProviders.has(provider)) {
-        return {
-          modelId,
-          reason: `provider cooldown (${provider})`,
-          cooldownUntil: Infinity,
-          failCount: 1,
-          errorType: "rate_limit",
-        };
+        return { modelId, reason: `provider cooldown (${provider})`, errorType: "rate_limit" };
       }
       return undefined;
-    },
-
-    clear(): void {
-      cooledModels.clear();
-      cooledProviders.clear();
-      entries.clear();
-    },
-
-    serialize(): CooldownState {
-      return {
-        entries: [...entries.values()].map((e) => ({
-          modelId: e.modelId,
-          reason: e.reason,
-          errorType: e.errorType,
-          failCount: e.failCount,
-        })),
-        providers: [...cooledProviders],
-        savedAt: Date.now(),
-      };
-    },
-
-    restore(state: CooldownState, maxAgeMs = 3_600_000): void {
-      const age = Date.now() - state.savedAt;
-      if (age > maxAgeMs) return; // expired, ignore
-      for (const entry of state.entries) {
-        cooledModels.add(entry.modelId);
-        entries.set(entry.modelId, {
-          modelId: entry.modelId,
-          reason: entry.reason,
-          cooldownUntil: Infinity,
-          failCount: entry.failCount,
-          errorType: entry.errorType,
-        });
-      }
-      for (const provider of state.providers) {
-        cooledProviders.add(provider);
-      }
     },
   };
 }

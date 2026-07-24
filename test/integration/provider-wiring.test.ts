@@ -21,13 +21,7 @@ import { createChatAdapter } from "../../src/deliberation/wire";
 import type { ChatCompletionRequest, ChatCompletionResponse, ProviderName } from "../../src/llm/types";
 
 function completion(content: string): ChatCompletionResponse {
-  return {
-    id: "cmpl-test",
-    object: "chat.completion",
-    created: Date.now(),
-    model: "test",
-    choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
-    usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+  return { content,
   };
 }
 

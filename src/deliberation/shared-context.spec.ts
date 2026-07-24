@@ -1,7 +1,7 @@
 /**
  * Unit tests for shared-context.ts — SharedContext factory and query utilities.
  *
- * SUT: createSharedContext, addRound, latestRound,
+ * SUT: createSharedContext, addRound,
  *      totalLLMCalls, modelsUsed
  *
  * Workers only (no leader/synthesis in test scope).
@@ -11,9 +11,6 @@ import { describe, expect, it } from "bun:test";
 import {
   addRound,
   createSharedContext,
-  latestRound,
-  modelsUsed,
-  totalLLMCalls,
 } from "./shared-context";
 import type {
   Round,
@@ -25,7 +22,7 @@ import type {
 // -- Fixtures --
 
 function makeWorker(model: string): TeamMember {
-  return { model, role: "worker" };
+  return { model};
 }
 
 function makeTeam(overrides?: Partial<TeamComposition>): TeamComposition {
@@ -184,176 +181,6 @@ describe("addRound", () => {
   });
 });
 
-// -- latestRound --
-
-describe("latestRound", () => {
-  it("should return undefined when no rounds exist", () => {
-    // Arrange
-    const ctx = createSharedContext("task", makeTeam());
-
-    // Act / Assert
-    expect(latestRound(ctx)).toBeUndefined();
-  });
-
-  it("should return the most recent round", () => {
-    // Arrange
-    let ctx = createSharedContext("task", makeTeam());
-    const r1 = makeRound(1);
-    const r2 = makeRound(2);
-    ctx = addRound(ctx, r1);
-    ctx = addRound(ctx, r2);
-
-    // Act / Assert
-    expect(latestRound(ctx)).toBe(r2);
-  });
-});
-
 // -- totalLLMCalls --
-
-describe("totalLLMCalls", () => {
-  it("should return 0 when no rounds exist", () => {
-    // Arrange
-    const ctx = createSharedContext("task", makeTeam());
-
-    // Act / Assert
-    expect(totalLLMCalls(ctx)).toBe(0);
-  });
-
-  it("should count responses correctly for a single round", () => {
-    // Arrange
-    let ctx = createSharedContext("task", makeTeam());
-    // 2 worker responses = 2
-    ctx = addRound(ctx, makeRound(1));
-
-    // Act / Assert
-    expect(totalLLMCalls(ctx)).toBe(2);
-  });
-
-  it("should count across multiple rounds", () => {
-    // Arrange
-    let ctx = createSharedContext("task", makeTeam());
-    // Round 1: 2 responses = 2
-    ctx = addRound(ctx, makeRound(1));
-    // Round 2: 2 responses = 2
-    ctx = addRound(ctx, makeRound(2));
-
-    // Act / Assert
-    expect(totalLLMCalls(ctx)).toBe(4);
-  });
-
-  it("should count failed workers as LLM calls", () => {
-    // Arrange
-    let ctx = createSharedContext("task", makeTeam());
-    // 1 successful response + 1 failed worker = 2
-    ctx = addRound(ctx, {
-      number: 1,
-      responses: [makeResponse("openai/gpt-4.1")],
-      failedWorkers: [{ model: "deepseek/deepseek-r1", error: "degenerate response" }],
-    });
-
-    // Act / Assert
-    expect(totalLLMCalls(ctx)).toBe(2);
-  });
-
-  it("should handle mixed rounds", () => {
-    // Arrange
-    let ctx = createSharedContext("task", makeTeam());
-    // Round 1: 2 responses = 2
-    ctx = addRound(ctx, makeRound(1));
-    // Round 2: 2 responses = 2
-    ctx = addRound(ctx, makeRound(2));
-    // Round 3: 1 response = 1
-    ctx = addRound(ctx, makeRound(3, {
-      responses: [makeResponse("openai/gpt-4.1")],
-    }));
-
-    // Act / Assert
-    expect(totalLLMCalls(ctx)).toBe(5);
-  });
-});
-
 // -- modelsUsed --
-
-describe("modelsUsed", () => {
-  it("should return empty array when no rounds exist", () => {
-    // Arrange
-    const ctx = createSharedContext("task", makeTeam());
-
-    // Act / Assert
-    expect(modelsUsed(ctx)).toEqual([]);
-  });
-
-  it("should collect unique models from responses", () => {
-    // Arrange
-    let ctx = createSharedContext("task", makeTeam());
-    ctx = addRound(ctx, makeRound(1));
-
-    // Act
-    const models = modelsUsed(ctx);
-
-    // Assert
-    expect(models).toContain("openai/gpt-4.1"); // worker response
-    expect(models).toContain("deepseek/deepseek-r1"); // worker response
-    expect(models).toHaveLength(2);
-  });
-
-  it("should deduplicate when same model appears multiple times", () => {
-    // Arrange
-    const sameModel = "openai/gpt-4.1";
-    let ctx = createSharedContext("task", makeTeam());
-    ctx = addRound(ctx, makeRound(1, {
-      responses: [makeResponse(sameModel), makeResponse(sameModel)],
-    }));
-
-    // Act / Assert
-    expect(modelsUsed(ctx)).toEqual([sameModel]);
-  });
-
-  it("should collect across multiple rounds", () => {
-    // Arrange
-    let ctx = createSharedContext("task", makeTeam());
-    ctx = addRound(ctx, makeRound(1, {
-      responses: [makeResponse("model/a")],
-    }));
-    ctx = addRound(ctx, makeRound(2, {
-      responses: [makeResponse("model/c")],
-    }));
-
-    // Act
-    const models = modelsUsed(ctx);
-
-    // Assert
-    expect(models).toContain("model/a");
-    expect(models).toContain("model/c");
-    expect(models).toHaveLength(2);
-  });
-});
-
 // -- State Transition (lifecycle) --
-
-describe("SharedContext lifecycle", () => {
-  it("should track rounds across lifecycle", () => {
-    // Arrange
-    let ctx = createSharedContext("Implement a TypeScript lexer", makeTeam());
-
-    // Assert — initial state
-    expect(latestRound(ctx)).toBeUndefined();
-    expect(totalLLMCalls(ctx)).toBe(0);
-    expect(modelsUsed(ctx)).toEqual([]);
-
-    // Act — round 1
-    ctx = addRound(ctx, makeRound(1));
-
-    // Assert — after round 1
-    expect(latestRound(ctx)?.number).toBe(1);
-    expect(totalLLMCalls(ctx)).toBe(2); // 2 responses
-    expect(modelsUsed(ctx)).toHaveLength(2);
-
-    // Act — round 2
-    ctx = addRound(ctx, makeRound(2));
-
-    // Assert — after round 2
-    expect(latestRound(ctx)?.number).toBe(2);
-    expect(totalLLMCalls(ctx)).toBe(4); // 2*(2 responses)
-  });
-});

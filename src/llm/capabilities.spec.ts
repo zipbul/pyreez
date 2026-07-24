@@ -22,20 +22,18 @@ describe("gateCapabilities", () => {
     );
   });
 
-  it("strips and records reasoning_effort when unsupported (soft)", () => {
-    const { request, stripped } = gateCapabilities(req({ reasoning_effort: 7 }), {
+  it("strips reasoning_effort when unsupported (soft)", () => {
+    const { request } = gateCapabilities(req({ reasoning_effort: 7 }), {
       ...ALL,
       effort: false,
     });
     expect(request.reasoning_effort).toBeUndefined();
-    expect(stripped).toEqual(["reasoning_effort"]);
   });
 
   it("passes supported capabilities through unchanged", () => {
     const r = req({ webAccess: true, reasoning_effort: 7, fileAccess: "read" });
-    const { request, stripped } = gateCapabilities(r, ALL);
+    const { request } = gateCapabilities(r, ALL);
     expect(request).toBe(r);
-    expect(stripped).toEqual([]);
   });
 
   it("does not error when a correctness capability is unsupported but NOT requested", () => {

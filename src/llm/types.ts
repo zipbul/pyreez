@@ -31,13 +31,11 @@ export interface LLMProvider {
 
 // --- Request Types ---
 
-export type ChatRole = "system" | "user" | "assistant" | "tool";
+type ChatRole = "system" | "user" | "assistant";
 
 export interface ChatMessage {
   role: ChatRole;
   content: string | null;
-  tool_calls?: ToolCall[];
-  tool_call_id?: string;
 }
 
 /** File access level for a request (undefined = none). Provider maps to its own mechanism. */
@@ -71,47 +69,14 @@ export interface ChatCompletionRequest extends Capabilities {
 
 // --- Response Types ---
 
-export interface ToolCall {
-  id: string;
-  type: "function";
-  function: {
-    name: string;
-    arguments: string;
-  };
-}
-
-export interface ChatCompletionChoice {
-  index: number;
-  message: ChatMessage;
-  finish_reason: "stop" | "tool_calls" | "length" | "content_filter" | null;
-}
-
-export interface ChatCompletionUsage {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  /** Number of input tokens served from provider cache (observation/reporting only). */
-  cached_tokens?: number;
-  /** Reasoning-only output tokens (OpenAI reasoning models). Already included in completion_tokens; surfaced separately for cost attribution. */
-  reasoning_tokens?: number;
-}
-
+/**
+ * What a provider gives back. Deliberately not the OpenAI envelope: every provider here talks to a
+ * CLI or an SDK, so an id / object / created / choices[] wrapper would be invented ceremony that
+ * nothing reads.
+ */
 export interface ChatCompletionResponse {
-  id: string;
-  object: string;
-  created: number;
-  model: string;
-  choices: ChatCompletionChoice[];
-  usage?: ChatCompletionUsage;
+  content: string;
   /** Provider session id for this call, captured so the session can be resumed later (interrogate).
    * undefined when the provider exposes none. */
   sessionId?: string;
-}
-
-// --- Error Types ---
-
-export interface LLMError {
-  status: number;
-  message: string;
-  type?: string;
 }

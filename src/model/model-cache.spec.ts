@@ -21,7 +21,7 @@ import type { FileIO } from "../report/types";
 function mockFileIO(over: Partial<FileIO> = {}): FileIO {
   return {
     appendFile: mock(async () => {}), readFile: mock(async () => ""), writeFile: mock(async () => {}),
-    mkdir: mock(async () => {}), glob: mock(async () => []), removeGlob: mock(async () => {}),
+    mkdir: mock(async () => {}), glob: mock(async () => []),
     rename: mock(async () => {}), ...over,
   };
 }

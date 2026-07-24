@@ -13,6 +13,7 @@
 
 import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { LLMClientError } from "../llm/errors";
+import { NoModelsAvailableError } from "./team-composer";
 import { createChatAdapter, createDeliberateFn, stripThinkTags } from "./wire";
 import type {
   DeliberateInput,
@@ -53,14 +54,13 @@ const fakeCreateFallbackPool = () => ({
 
 const STUB_TEAM: TeamComposition = {
   workers: [
-    { model: "openai/gpt-4.1", role: "worker" },
-    { model: "deepseek/deepseek-r1", role: "worker" },
+    { model: "openai/gpt-4.1"},
+    { model: "deepseek/deepseek-r1"},
   ],
 };
 
 const STUB_DELIBERATE_OUTPUT: DeliberateOutput = {
   roundsExecuted: 1,
-  totalTokens: { input: 100, output: 200 },
   totalLLMCalls: 2,
   modelsUsed: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
   protocol: "shared_convergence",
@@ -69,32 +69,13 @@ const STUB_DELIBERATE_OUTPUT: DeliberateOutput = {
 function makeModelInfo(id: string): ModelInfo {
   return {
     id,
-    name: id.split("/")[1] ?? id,
     provider: id.split("/")[0] as any,
-    contextWindow: 128_000,
-    cost: { inputPer1M: 2, outputPer1M: 8 },
-    supportsToolCalling: true,
   };
 }
 
-function makeChatResponse(content: string, promptTokens = 50, completionTokens = 100) {
+function makeChatResponse(content: string) {
   return {
-    id: "chatcmpl-test",
-    object: "chat.completion",
-    created: Date.now(),
-    model: "test-model",
-    choices: [
-      {
-        index: 0,
-        message: { role: "assistant" as const, content },
-        finish_reason: "stop" as const,
-      },
-    ],
-    usage: {
-      prompt_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      total_tokens: promptTokens + completionTokens,
-    },
+    content,
   };
 }
 
@@ -141,7 +122,7 @@ describe("stripThinkTags", () => {
 describe("createChatAdapter", () => {
   it("should return ChatResult with content and token usage on success", async () => {
     const rawChat = mock(() =>
-      Promise.resolve(makeChatResponse("Hello world", 30, 60)),
+      Promise.resolve(makeChatResponse("Hello world")),
     );
     const adapter = createChatAdapter(rawChat);
 
@@ -150,8 +131,6 @@ describe("createChatAdapter", () => {
     ]);
 
     expect(result.content).toBe("Hello world");
-    expect(result.inputTokens).toBe(30);
-    expect(result.outputTokens).toBe(60);
   });
 
   it("should throw immediately on any error without retrying", async () => {
@@ -171,7 +150,7 @@ describe("createChatAdapter", () => {
   it("should strip think tags from response content", async () => {
     const rawChat = mock(() =>
       Promise.resolve(
-        makeChatResponse("<think>reasoning</think>Clean answer", 10, 20),
+        makeChatResponse("<think>reasoning</think>Clean answer"),
       ),
     );
     const adapter = createChatAdapter(rawChat);
@@ -185,7 +164,7 @@ describe("createChatAdapter", () => {
 
   it("should forward GenerationParams to rawChatFn when provided", async () => {
     const rawChat = mock((_req: any) =>
-      Promise.resolve(makeChatResponse("ok", 10, 20)),
+      Promise.resolve(makeChatResponse("ok")),
     );
     const adapter = createChatAdapter(rawChat);
 
@@ -205,7 +184,7 @@ describe("createChatAdapter", () => {
     // webAccess is tri-state: undefined = provider default (xai defaults web ON), false = forced
     // no-lookup. Dropping the false here would silently re-enable web for grok workers.
     const rawChat = mock((_req: any) =>
-      Promise.resolve(makeChatResponse("ok", 10, 20)),
+      Promise.resolve(makeChatResponse("ok")),
     );
     const adapter = createChatAdapter(rawChat);
 
@@ -221,7 +200,7 @@ describe("createChatAdapter", () => {
 
   it("forwards opts.resumeSessionId into the request and surfaces response.sessionId", async () => {
     const rawChat = mock((_req: any) =>
-      Promise.resolve({ ...makeChatResponse("ok", 10, 20), sessionId: "S1" }),
+      Promise.resolve({ ...makeChatResponse("ok"), sessionId: "S1" }),
     );
     const adapter = createChatAdapter(rawChat);
 
@@ -238,7 +217,7 @@ describe("createChatAdapter", () => {
   });
 
   it("omits resumeSessionId from the request when no opts are given", async () => {
-    const rawChat = mock((_req: any) => Promise.resolve(makeChatResponse("ok", 10, 20)));
+    const rawChat = mock((_req: any) => Promise.resolve(makeChatResponse("ok")));
     const adapter = createChatAdapter(rawChat);
     await adapter("openai/gpt-4.1", [{ role: "user", content: "x" }]);
     const req = rawChat.mock.calls[0]![0] as any;
@@ -246,7 +225,7 @@ describe("createChatAdapter", () => {
   });
 
   it("hoists the system message out of the list into request.system (incl. multi-turn history)", async () => {
-    const rawChat = mock((_req: any) => Promise.resolve(makeChatResponse("ok", 10, 20)));
+    const rawChat = mock((_req: any) => Promise.resolve(makeChatResponse("ok")));
     const adapter = createChatAdapter(rawChat);
 
     // Mirrors session-continuation: history carries [system, user, assistant, user].
@@ -266,45 +245,9 @@ describe("createChatAdapter", () => {
     ]);
   });
 
-  it("should set truncated=true when finish_reason is 'length'", async () => {
-    const rawChat = mock(() =>
-      Promise.resolve({
-        ...makeChatResponse("partial content", 30, 60),
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant" as const, content: "partial content" },
-            finish_reason: "length" as const,
-          },
-        ],
-      }),
-    );
-    const adapter = createChatAdapter(rawChat);
-
-    const result = await adapter("openai/gpt-4.1", [
-      { role: "user", content: "Generate a long essay" },
-    ]);
-
-    expect(result.truncated).toBe(true);
-    expect(result.content).toBe("partial content");
-  });
-
-  it("should not set truncated when finish_reason is 'stop'", async () => {
-    const rawChat = mock(() =>
-      Promise.resolve(makeChatResponse("complete content", 30, 60)),
-    );
-    const adapter = createChatAdapter(rawChat);
-
-    const result = await adapter("openai/gpt-4.1", [
-      { role: "user", content: "Say hello" },
-    ]);
-
-    expect(result.truncated).toBeUndefined();
-  });
-
   it("should NOT include generation params keys when params is undefined", async () => {
     const rawChat = mock((_req: any) =>
-      Promise.resolve(makeChatResponse("ok", 10, 20)),
+      Promise.resolve(makeChatResponse("ok")),
     );
     const adapter = createChatAdapter(rawChat);
 
@@ -335,12 +278,11 @@ describe("createDeliberateFn", () => {
   function makeWireDeps(overrides?: { store?: any }) {
     return {
       registry: {
-        getAll: () => STUB_MODELS,
         getAvailable: () => STUB_MODELS,
         getById: (id: string) => STUB_MODELS.find((m) => m.id === id),
       },
       chat: mock(() =>
-        Promise.resolve({ content: "response", inputTokens: 10, outputTokens: 20 }),
+        Promise.resolve({ content: "response" }),
       ),
       composeTeam: mockComposeTeam,
       scoreModel: fakeScoreModel,
@@ -413,7 +355,13 @@ describe("createDeliberateFn", () => {
     expect("recordTranscript" in config).toBe(false);
   });
 
-  // -- affinity scoring hook --
+  // -- scoring hook wiring --
+  //
+  // scoreDeliberation itself (protocol gate, classify, panel, quorum, ratings write) is unit-tested
+  // in src/quality/scoring/hook.spec.ts against real logic. Here we only verify wire.ts's own
+  // responsibility: does it call the hook with the right deps, and only when it should. The hook is
+  // injected via the WireDeps test seam (see the comment on WireDeps) instead of mock.module()'ing
+  // "../quality/scoring".
 
   const OUTPUT_WITH_ROUNDS = {
     ...STUB_DELIBERATE_OUTPUT,
@@ -421,83 +369,104 @@ describe("createDeliberateFn", () => {
       number: 1,
       protocol: "adversarial_debate" as const,
       responses: [
-        { model: "anthropic/claude-opus", content: "answer A" },
-        { model: "xai/grok-build", content: "answer B" },
+        { model: "anthropic/claude-opus", content: "answer A", workerIndex: 0 },
+        { model: "xai/grok-build", content: "answer B", workerIndex: 1 },
       ],
     }],
   };
 
-  function affinityDeps(recordAffinity: (r: any) => void, chatContent = '{"정확성": 80, "창의력": 60}') {
+  function mockScoreDeliberation() {
+    return mock(async (_input: any, _result: any, _deps: any) => {});
+  }
+
+  function scoringDeps(scoreDeliberation: ReturnType<typeof mockScoreDeliberation>) {
     return {
       ...makeWireDeps(),
-      judge: { model: "judge/model", chat: mock(async () => ({ content: chatContent })) },
-      recordAffinity,
+      scoring: { fileIO: {} as any, enabled: true },
+      scoreDeliberation,
     };
   }
 
-  it("scores each final-round worker and records an affinity entry when topicPath+axes are given", async () => {
+  it("calls the scoring hook with the deliberation input/result and constructed deps when enabled", async () => {
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => OUTPUT_WITH_ROUNDS);
-    const records: any[] = [];
-    const deliberateFn = createDeliberateFn(affinityDeps((r) => records.push(r)));
+    const scoreDeliberation = mockScoreDeliberation();
+    const fileIO = {} as any;
+    const deliberateFn = createDeliberateFn({ ...makeWireDeps(), scoring: { fileIO, enabled: true }, scoreDeliberation });
 
     await deliberateFn({
       task: "eval JWT caching", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
-      protocol: "adversarial_debate", topicPath: ["인증-보안", "토큰-캐싱"], axes: ["정확성", "창의력"],
+      protocol: "adversarial_debate", topicPath: ["인증-보안", "토큰-캐싱"],
     });
 
-    expect(records).toHaveLength(2);
-    expect(records[0]).toMatchObject({
-      protocol: "adversarial_debate", path: ["인증-보안", "토큰-캐싱"],
-      model: "anthropic/claude-opus", axes: { "정확성": 80, "창의력": 60 },
-    });
-    expect(records[1]!.model).toBe("xai/grok-build");
+    expect(scoreDeliberation).toHaveBeenCalledTimes(1);
+    const [input, result, deps] = scoreDeliberation.mock.calls[0]!;
+    expect(input.task).toBe("eval JWT caching");
+    expect(result).toEqual(OUTPUT_WITH_ROUNDS);
+    expect(deps.fileIO).toBe(fileIO);
+    expect(deps.hostTopicPath).toEqual(["인증-보안", "토큰-캐싱"]);
+    expect(typeof deps.chat).toBe("function");
+    expect(typeof deps.now).toBe("function");
+    expect(typeof deps.rng).toBe("function");
+    expect(deps.scoreEvalEnabled).toBe(false);
   });
 
-  it("does NOT let the judge score its own worker output (self-scoring skip)", async () => {
+  it("omits hostTopicPath when the input has no topicPath", async () => {
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => OUTPUT_WITH_ROUNDS);
-    const records: any[] = [];
-    const deps = { ...affinityDeps((r) => records.push(r)), judge: { model: "anthropic/claude-opus", chat: mock(async () => ({ content: '{"정확성": 70}' })) } };
+    const scoreDeliberation = mockScoreDeliberation();
+    const deliberateFn = createDeliberateFn(scoringDeps(scoreDeliberation));
+
+    await deliberateFn({ task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "adversarial_debate" });
+
+    const [, , deps] = scoreDeliberation.mock.calls[0]!;
+    expect("hostTopicPath" in deps).toBe(false);
+  });
+
+  it("forwards scoreEvalEnabled from the scoring wiring", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => OUTPUT_WITH_ROUNDS);
+    const scoreDeliberation = mockScoreDeliberation();
+    const deps = { ...makeWireDeps(), scoring: { fileIO: {} as any, enabled: true, scoreEvalEnabled: true }, scoreDeliberation };
     const deliberateFn = createDeliberateFn(deps);
 
-    await deliberateFn({
-      task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
-      protocol: "adversarial_debate", topicPath: ["보안"], axes: ["정확성"],
-    });
+    await deliberateFn({ task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "adversarial_debate" });
 
-    // anthropic/claude-opus is the judge AND a worker → skipped; only xai/grok-build scored.
-    expect(records.map((r) => r.model)).toEqual(["xai/grok-build"]);
+    const [, , scoringCallDeps] = scoreDeliberation.mock.calls[0]!;
+    expect(scoringCallDeps.scoreEvalEnabled).toBe(true);
   });
 
-  it("does NOT score when axes are absent (zero cost)", async () => {
+  it("does not call the scoring hook when scoring is absent", async () => {
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => OUTPUT_WITH_ROUNDS);
-    const records: any[] = [];
-    const deps = affinityDeps((r) => records.push(r));
+    const scoreDeliberation = mockScoreDeliberation();
+    const deliberateFn = createDeliberateFn({ ...makeWireDeps(), scoreDeliberation });
+
+    await deliberateFn({ task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "adversarial_debate" });
+
+    expect(scoreDeliberation).not.toHaveBeenCalled();
+  });
+
+  it("does not call the scoring hook when scoring.enabled is false (--no-scoring)", async () => {
+    mockComposeTeam.mockImplementation(() => STUB_TEAM);
+    mockDeliberate.mockImplementation(async () => OUTPUT_WITH_ROUNDS);
+    const scoreDeliberation = mockScoreDeliberation();
+    const deps = { ...makeWireDeps(), scoring: { fileIO: {} as any, enabled: false }, scoreDeliberation };
     const deliberateFn = createDeliberateFn(deps);
 
-    await deliberateFn({
-      task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
-      protocol: "adversarial_debate", topicPath: ["인증-보안"],
-    }); // no axes
+    await deliberateFn({ task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "adversarial_debate" });
 
-    expect(records).toHaveLength(0);
-    expect(deps.judge.chat).not.toHaveBeenCalled();
+    expect(scoreDeliberation).not.toHaveBeenCalled();
   });
 
-  it("skips a worker whose judge output has no parseable scores; never throws", async () => {
+  it("never throws even when the scoring hook rejects (best-effort)", async () => {
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async () => OUTPUT_WITH_ROUNDS);
-    const records: any[] = [];
-    const deliberateFn = createDeliberateFn(affinityDeps((r) => records.push(r), "no json here"));
+    const scoreDeliberation = mock(async (_input: any, _result: any, _deps: any) => { throw new Error("scoring blew up"); });
+    const deliberateFn = createDeliberateFn(scoringDeps(scoreDeliberation));
 
-    const result = await deliberateFn({
-      task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"],
-      protocol: "adversarial_debate", topicPath: ["보안"], axes: ["정확성"],
-    });
+    const result = await deliberateFn({ task: "t", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "adversarial_debate" });
 
-    expect(records).toHaveLength(0);
     expect(result).toEqual(OUTPUT_WITH_ROUNDS); // deliberation result unaffected
   });
 
@@ -510,7 +479,6 @@ describe("createDeliberateFn", () => {
     const result = await deliberateFn({ task: "Build something", models: ["openai/gpt-4.1"], protocol: "shared_convergence" });
 
     expect(result.roundsExecuted).toBe(1);
-    expect(result.totalTokens).toEqual({ input: 100, output: 200 });
     expect(result.totalLLMCalls).toBe(2);
     expect(result.modelsUsed).toEqual([
       "openai/gpt-4.1",
@@ -518,39 +486,9 @@ describe("createDeliberateFn", () => {
     ]);
   });
 
-  it("should auto-save to store when store is provided", async () => {
-    mockComposeTeam.mockImplementation(() => STUB_TEAM);
-    mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
-    const mockSave = mock((_record: any) => Promise.resolve());
-    const store = { save: mockSave, query: mock(), getById: mock() };
-    const deps = makeWireDeps({ store });
-    const deliberateFn = createDeliberateFn(deps);
-
-    await deliberateFn({
-      task: "Test task",
-      models: ["openai/gpt-4.1"],
-      protocol: "shared_convergence",
-      workerInstructions: "worker instructions",
-    });
-
-    expect(mockSave).toHaveBeenCalledTimes(1);
-    const savedRecord = mockSave.mock.calls[0]![0] as any;
-    expect(savedRecord.task).toBe("Test task");
-    expect(savedRecord.roundsExecuted).toBe(1);
-    expect(savedRecord.modelsUsed).toEqual([
-      "openai/gpt-4.1",
-      "deepseek/deepseek-r1",
-    ]);
-    expect(savedRecord.totalLLMCalls).toBe(2);
-    expect(savedRecord.totalTokens).toEqual({ input: 100, output: 200 });
-    expect(savedRecord.workerInstructions).toBe("worker instructions");
-    expect(savedRecord.id).toBeDefined();
-    expect(savedRecord.timestamp).toBeGreaterThan(0);
-  });
-
   it("should duplicate models round-robin when count > models.length", async () => {
     mockComposeTeam.mockImplementation((opts: any) => ({
-      workers: opts.modelIds.map((id: string) => ({ model: id, role: "worker" })),
+      workers: opts.modelIds.map((id: string) => ({ model: id})),
     }));
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
     const deps = makeWireDeps();
@@ -564,7 +502,7 @@ describe("createDeliberateFn", () => {
 
   it("should cap count at 7", async () => {
     mockComposeTeam.mockImplementation((opts: any) => ({
-      workers: opts.modelIds.map((id: string) => ({ model: id, role: "worker" })),
+      workers: opts.modelIds.map((id: string) => ({ model: id})),
     }));
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
     const deps = makeWireDeps();
@@ -578,7 +516,7 @@ describe("createDeliberateFn", () => {
 
   it("should use count models from front when count < models.length", async () => {
     mockComposeTeam.mockImplementation((opts: any) => ({
-      workers: opts.modelIds.map((id: string) => ({ model: id, role: "worker" })),
+      workers: opts.modelIds.map((id: string) => ({ model: id})),
     }));
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
     const deps = makeWireDeps();
@@ -606,7 +544,7 @@ describe("createDeliberateFn", () => {
 
   it("should default count to models.length when not specified", async () => {
     mockComposeTeam.mockImplementation((opts: any) => ({
-      workers: opts.modelIds.map((id: string) => ({ model: id, role: "worker" })),
+      workers: opts.modelIds.map((id: string) => ({ model: id})),
     }));
     mockDeliberate.mockImplementation(async () => STUB_DELIBERATE_OUTPUT);
     const deps = makeWireDeps();
@@ -622,13 +560,13 @@ describe("createDeliberateFn", () => {
     expect(composeOpts.modelIds).toEqual(["openai/gpt-4.1", "deepseek/deepseek-r1"]);
   });
 
-  it("should throw when models is empty array", async () => {
+  it("should throw NoModelsAvailableError when models is an empty array", async () => {
     const deps = makeWireDeps();
     const deliberateFn = createDeliberateFn(deps);
 
     await expect(
       deliberateFn({ task: "task", models: [], protocol: "shared_convergence" }),
-    ).rejects.toThrow("models is required");
+    ).rejects.toThrow(NoModelsAvailableError);
   });
 
   // -- Protocol-specific deps wiring --
@@ -770,7 +708,7 @@ describe("createDeliberateFn", () => {
   it("should return replacement members from replenish when candidates exist", async () => {
     // Team uses only 2 of 3 available models — the 3rd is available for replenishment
     const smallTeam: TeamComposition = {
-      workers: [{ model: "openai/gpt-4.1", role: "worker" }],
+      workers: [{ model: "openai/gpt-4.1"}],
     };
     mockComposeTeam.mockImplementation(() => smallTeam);
     mockDeliberate.mockImplementation(async (_team, _input, _deps, _config, fallbackDeps) => {
@@ -782,7 +720,6 @@ describe("createDeliberateFn", () => {
       );
       // anthropic/claude-sonnet-4.6 should be a candidate (alive provider, not on team, not responded)
       expect(result.length).toBeGreaterThan(0);
-      expect(result[0].role).toBe("worker");
       return STUB_DELIBERATE_OUTPUT;
     });
     const deps = makeWireDeps();
@@ -802,7 +739,7 @@ describe("createDeliberateFn", () => {
           { model: "deepseek/deepseek-r1", content: "position B", workerIndex: 1 },
         ],
       };
-      const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [fakeRound], taskNature: "critique" as const };
+      const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [fakeRound] };
       const fakeResponses = [{ model: "m", content: "c", workerIndex: 0 }];
       // R1
       const msgs1 = engineDeps.buildR1Messages!(fakeCtx as any, "instructions", { current: 1, max: 3 }, 0);
@@ -816,7 +753,6 @@ describe("createDeliberateFn", () => {
       if (engineDeps.buildFollowUp) {
         const msg3 = engineDeps.buildFollowUp(fakeCtx as any, fakeResponses, "instructions", { current: 2, max: 3 }, 0);
         expect(msg3).toBeDefined();
-        expect(typeof msg3.role).toBe("string");
       }
       return STUB_DELIBERATE_OUTPUT;
     });
@@ -825,13 +761,16 @@ describe("createDeliberateFn", () => {
     await deliberateFn({ task: "Task", models: ["openai/gpt-4.1", "deepseek/deepseek-r1"], protocol: "adversarial_debate" });
   });
 
-  it("should produce callable buildR1Messages for specialized protocols", async () => {
+  it("refuses to build worker prompts at protocol level for the specialized protocols", async () => {
+    // Each of these builds its prompts inside its own round executor. The protocol-level builder
+    // used to fall back to shared_convergence's analysis prompt, so anything reaching it would have
+    // silently asked the wrong question; it must now fail loudly instead.
     for (const protocol of ["host_interrogation", "sequential_refinement", "evaluation_scoring", "red_team"] as const) {
       mockComposeTeam.mockImplementation(() => STUB_TEAM);
       mockDeliberate.mockImplementation(async (_team, _input, engineDeps) => {
-        const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [], taskNature: "critique" as const };
-        const msgs = engineDeps.buildR1Messages!(fakeCtx as any, "instructions", { current: 1, max: 1 });
-        expect(Array.isArray(msgs)).toBe(true);
+        const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [] };
+        expect(() => engineDeps.buildR1Messages!(fakeCtx as any, "instructions", { current: 1, max: 1 }))
+          .toThrow(/own round executor/);
         return STUB_DELIBERATE_OUTPUT;
       });
       const deps = makeWireDeps();
@@ -843,7 +782,7 @@ describe("createDeliberateFn", () => {
   it("should produce callable buildR1Messages for default (unknown) protocol path", async () => {
     mockComposeTeam.mockImplementation(() => STUB_TEAM);
     mockDeliberate.mockImplementation(async (_team, _input, engineDeps) => {
-      const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [], taskNature: "critique" as const };
+      const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [] };
       const msgs = engineDeps.buildR1Messages!(fakeCtx as any, "instructions", { current: 1, max: 1 });
       expect(Array.isArray(msgs)).toBe(true);
       return STUB_DELIBERATE_OUTPUT;
@@ -864,7 +803,7 @@ describe("createDeliberateFn", () => {
           { model: "deepseek/deepseek-r1", content: "position B", workerIndex: 1 },
         ],
       };
-      const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [fakeRound], taskNature: "critique" as const };
+      const fakeCtx = { task: "t", team: STUB_TEAM, rounds: [fakeRound] };
       const fakeResponses = [{ model: "m", content: "c", workerIndex: 0 }];
       if (engineDeps.buildR2Messages) {
         const msgs = engineDeps.buildR2Messages(fakeCtx as any, fakeResponses, fakeResponses[0], "instructions", { current: 2, max: 3 }, 0);

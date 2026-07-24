@@ -1,5 +1,5 @@
 /**
- * SharedContext factory and query utilities.
+ * SharedContext factory and round accumulation.
  *
  * All mutations are immutable — return new objects.
  * Workers only, Host handles synthesis.
@@ -10,20 +10,17 @@ import type {
   SharedContext,
   TeamComposition,
 } from "./types";
-import type { TaskNature } from "./task-nature";
 
 /**
  * Create a new empty SharedContext.
  *
  * @param task - Task description (non-empty string required).
  * @param team - Team composition (must have ≥1 worker).
- * @param taskNature - Optional task nature for prompt selection.
  * @throws {Error} If task is empty or team is invalid.
  */
 export function createSharedContext(
   task: string,
   team: TeamComposition,
-  taskNature?: TaskNature,
 ): SharedContext {
   if (!task || task.trim().length === 0) {
     throw new Error("Task description must be a non-empty string");
@@ -33,7 +30,6 @@ export function createSharedContext(
   }
   return {
     task: task.trim(), team, rounds: [],
-    ...(taskNature ? { taskNature } : {}),
   };
 }
 
@@ -55,45 +51,3 @@ export function addRound(ctx: SharedContext, round: Round): SharedContext {
   return { ...ctx, rounds: [...ctx.rounds, round] };
 }
 
-/**
- * Get the latest (most recent) round.
- *
- * @returns The last round, or undefined if no rounds exist.
- */
-export function latestRound(ctx: SharedContext): Round | undefined {
-  if (ctx.rounds.length === 0) {
-    return undefined;
-  }
-  return ctx.rounds[ctx.rounds.length - 1];
-}
-
-/**
- * Count total LLM calls across all rounds.
- * Includes successful responses and failed workers (API calls were still made).
- */
-export function totalLLMCalls(ctx: SharedContext): number {
-  let count = 0;
-  for (const round of ctx.rounds) {
-    count += round.responses.length;
-    if (round.failedWorkers?.length) {
-      count += round.failedWorkers.length;
-    }
-  }
-  return count;
-}
-
-/**
- * Get all unique models that contributed to the deliberation result.
- * Only includes models with successful responses.
- * Failed workers are excluded — they did not contribute
- * to the output. Use totalLLMCalls() for API cost tracking including failed attempts.
- */
-export function modelsUsed(ctx: SharedContext): string[] {
-  const models = new Set<string>();
-  for (const round of ctx.rounds) {
-    for (const response of round.responses) {
-      models.add(response.model);
-    }
-  }
-  return [...models];
-}

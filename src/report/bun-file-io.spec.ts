@@ -11,7 +11,6 @@ const mockAppendFile = mock(() => Promise.resolve());
 const mockReadFile = mock(() => Promise.resolve(""));
 const mockMkdir = mock(() => Promise.resolve());
 const mockReaddir = mock(() => Promise.resolve([] as string[]));
-const mockUnlink = mock(() => Promise.resolve());
 const mockWriteFile = mock(() => Promise.resolve());
 const mockRename = mock(() => Promise.resolve());
 
@@ -20,7 +19,6 @@ mock.module("node:fs/promises", () => ({
   readFile: mockReadFile,
   mkdir: mockMkdir,
   readdir: mockReaddir,
-  unlink: mockUnlink,
   writeFile: mockWriteFile,
   rename: mockRename,
 }));
@@ -36,7 +34,6 @@ describe("BunFileIO", () => {
     mockReadFile.mockClear();
     mockMkdir.mockClear();
     mockReaddir.mockClear();
-    mockUnlink.mockClear();
     mockWriteFile.mockClear();
 
     // Reset to defaults
@@ -44,7 +41,6 @@ describe("BunFileIO", () => {
     mockReadFile.mockImplementation(() => Promise.resolve(""));
     mockMkdir.mockImplementation(() => Promise.resolve());
     mockReaddir.mockImplementation(() => Promise.resolve([]));
-    mockUnlink.mockImplementation(() => Promise.resolve());
     mockWriteFile.mockImplementation(() => Promise.resolve());
 
     io = new BunFileIO();
@@ -117,18 +113,6 @@ describe("BunFileIO", () => {
     expect(result).toEqual(["dir/r2_w1_xai-grok-build.json"]);
   });
 
-  it("should delete all matching files via removeGlob", async () => {
-    mockReaddir.mockImplementation(() =>
-      Promise.resolve(["a.jsonl", "b.jsonl"]),
-    );
-
-    await io.removeGlob("data/*.jsonl");
-
-    expect(mockUnlink).toHaveBeenCalledTimes(2);
-    expect(mockUnlink).toHaveBeenCalledWith("data/a.jsonl");
-    expect(mockUnlink).toHaveBeenCalledWith("data/b.jsonl");
-  });
-
   // === NE ===
 
   it("should propagate readFile error", async () => {
@@ -175,17 +159,6 @@ describe("BunFileIO", () => {
     expect(mockReaddir).toHaveBeenCalledWith("nonexistent");
   });
 
-  it("should propagate unlink error in removeGlob", async () => {
-    mockReaddir.mockImplementation(() => Promise.resolve(["file.jsonl"]));
-    mockUnlink.mockImplementation(() =>
-      Promise.reject(new Error("EPERM: operation not permitted")),
-    );
-
-    await expect(io.removeGlob("dir/*.jsonl")).rejects.toThrow(
-      "EPERM: operation not permitted",
-    );
-  });
-
   // === ED ===
 
   it("should handle appendFile with empty data", async () => {
@@ -225,16 +198,6 @@ describe("BunFileIO", () => {
     expect(result).toEqual(["data/a.txt", "data/b.jsonl", "data/c.md"]);
   });
 
-  // === CO ===
-
-  it("should handle removeGlob when glob returns empty", async () => {
-    mockReaddir.mockImplementation(() => Promise.resolve([]));
-
-    await io.removeGlob("empty/*.jsonl");
-
-    expect(mockUnlink).not.toHaveBeenCalled();
-  });
-
   // === ID ===
 
   it("should succeed when mkdir called on existing directory", async () => {
@@ -244,22 +207,6 @@ describe("BunFileIO", () => {
     await io.mkdir("/existing/dir");
 
     expect(mockMkdir).toHaveBeenCalledTimes(2);
-  });
-
-  it("should succeed when removeGlob called twice", async () => {
-    let callCount = 0;
-    mockReaddir.mockImplementation(() => {
-      callCount++;
-      return callCount === 1
-        ? Promise.resolve(["file.jsonl"])
-        : Promise.resolve([]);
-    });
-
-    await io.removeGlob("dir/*.jsonl");
-    expect(mockUnlink).toHaveBeenCalledTimes(1);
-
-    await io.removeGlob("dir/*.jsonl");
-    expect(mockUnlink).toHaveBeenCalledTimes(1); // no additional unlink
   });
 
   // === writeFile ===

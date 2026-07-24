@@ -28,7 +28,7 @@ import type {
 // -- Fixtures --
 
 function makeWorker(model: string): TeamMember {
-  return { model, role: "worker" };
+  return { model };
 }
 
 function makeTeam(): TeamComposition {
@@ -37,13 +37,11 @@ function makeTeam(): TeamComposition {
 
 function makeCtx(
   rounds: readonly Round[] = [],
-  taskNature?: "artifact" | "critique",
 ): SharedContext {
   return {
     task: "Write a sorting function",
     team: makeTeam(),
     rounds,
-    ...(taskNature ? { taskNature } : {}),
   };
 }
 
@@ -944,36 +942,6 @@ describe("buildHostInterrogationMessages", () => {
     expect(sys).toContain("false premise");
   });
 
-  it("should handle no previous exchanges", () => {
-    const user = buildHostInterrogationMessages("task", "q")[1]!.content!;
-    expect(user).not.toContain("<previous-exchange>");
-  });
-
-  it("should include previous exchanges when provided", () => {
-    const exchanges = [
-      { question: "Why Redis?", answer: "Because fast" },
-      { question: "Cost?", answer: "Free" },
-    ];
-    const user = buildHostInterrogationMessages("task", "Next Q?", exchanges)[1]!.content!;
-    expect(user).toContain("<previous-exchange>");
-    expect(user).toContain("<question>Why Redis?</question>");
-    expect(user).toContain("<your-answer>Because fast</your-answer>");
-    expect(user).toContain("<question>Cost?</question>");
-    expect(user).toContain("<your-answer>Free</your-answer>");
-  });
-
-  it("should place previous exchanges before current question", () => {
-    const exchanges = [{ question: "First?", answer: "Yes" }];
-    const user = buildHostInterrogationMessages("task", "Second?", exchanges)[1]!.content!;
-    const prevIdx = user.indexOf("<previous-exchange>");
-    const questionIdx = user.indexOf("<question>Second?</question>");
-    expect(prevIdx).toBeLessThan(questionIdx);
-  });
-
-  it("should handle empty previous exchanges array", () => {
-    const user = buildHostInterrogationMessages("task", "q", [])[1]!.content!;
-    expect(user).not.toContain("<previous-exchange>");
-  });
 });
 
 // ================================================================
@@ -1441,9 +1409,7 @@ describe("cross-protocol design principles", () => {
 
     // host_interrogation
     assertEscaped(
-      buildHostInterrogationMessages(dirty, dirty, [
-        { question: dirty, answer: dirty },
-      ])[1]!.content!,
+      buildHostInterrogationMessages(dirty, dirty)[1]!.content!,
       "hostInterrogation",
     );
 

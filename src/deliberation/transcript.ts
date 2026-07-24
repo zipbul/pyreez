@@ -16,7 +16,7 @@ import type { ChatMessage, FileAccess } from "../llm/types";
 import type { FileIO } from "../report/types";
 
 /** The exact knobs a worker ran under, re-applied verbatim when debugging it (interrogate). */
-export interface WorkerSettings {
+interface WorkerSettings {
   readonly system?: string;
   readonly reasoning_effort?: number;
   readonly webAccess?: boolean;
@@ -36,7 +36,6 @@ export interface TranscriptEntry {
   /** Exact messages sent to the worker, including the system block (pre-adapter form). */
   readonly messages: ChatMessage[];
   readonly output: string;
-  readonly truncated?: boolean;
 }
 
 /** Sink invoked by the engine after each successful worker call. Synchronous (accumulate, don't I/O). */

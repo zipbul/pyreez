@@ -11,7 +11,7 @@
  */
 
 import type { ChatMessage } from "../llm/types";
-import type { InterrogationExchange, SharedContext, WorkerResponse } from "./types";
+import type { SharedContext, WorkerResponse } from "./types";
 
 // -- Types --
 
@@ -508,16 +508,8 @@ If the question contains a false premise, identify it before answering.
 export function buildHostInterrogationMessages(
   task: string,
   question: string,
-  previousExchanges?: readonly InterrogationExchange[],
 ): ChatMessage[] {
   const userParts: string[] = [];
-
-  if (previousExchanges && previousExchanges.length > 0) {
-    const exchanges = previousExchanges.map((ex) =>
-      `<question>${escapeXmlContent(ex.question)}</question>\n<your-answer>${escapeXmlContent(ex.answer)}</your-answer>`
-    ).join("\n\n");
-    userParts.push(`<previous-exchange>\n${exchanges}\n</previous-exchange>`);
-  }
 
   userParts.push(`<question>${escapeXmlContent(question)}</question>`);
   userParts.push(`<context>${escapeXmlContent(task)}</context>`);

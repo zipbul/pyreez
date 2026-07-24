@@ -89,7 +89,7 @@ export class GeminiCliProvider implements LLMProvider {
         );
       }
 
-      return this.parseResponse(stdout, request.model);
+      return this.parseResponse(stdout);
     } catch (error) {
       if (error instanceof LLMClientError) throw error;
       if (error instanceof IdleTimeoutError) {
@@ -105,89 +105,31 @@ export class GeminiCliProvider implements LLMProvider {
 
   private parseResponse(
     stdout: string,
-    originalModel: string,
   ): ChatCompletionResponse {
     let parsed: GeminiCliJsonOutput;
     try {
       parsed = JSON.parse(stdout);
     } catch {
-      return this.buildResponse(stdout.trim(), originalModel);
+      return this.buildResponse(stdout.trim());
     }
 
     const text = parsed.response ?? "";
-    const stats = parsed.stats?.models;
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let cachedTokens = 0;
-    let sawCached = false;
-
-    if (stats) {
-      for (const model of Object.values(stats)) {
-        const tokens = (model as any)?.tokens;
-        inputTokens += tokens?.input ?? 0;
-        outputTokens += tokens?.candidates ?? 0;
-        if (tokens?.cached != null) {
-          cachedTokens += tokens.cached;
-          sawCached = true;
-        }
-      }
-    }
-
-    return this.buildResponse(
-      text,
-      originalModel,
-      inputTokens,
-      outputTokens,
-      sawCached ? cachedTokens : undefined,
-      parsed.session_id,
-    );
+    return this.buildResponse(text, parsed.session_id);
   }
 
   private buildResponse(
     text: string,
-    originalModel: string,
-    inputTokens = 0,
-    outputTokens = 0,
-    cachedTokens?: number,
     sessionId?: string,
   ): ChatCompletionResponse {
     return {
-      id: `gemini-cli-${Date.now()}`,
-      object: "chat.completion",
-      created: Math.floor(Date.now() / 1000),
-      model: originalModel,
-      choices: [
-        {
-          index: 0,
-          message: { role: "assistant", content: text },
-          finish_reason: "stop",
-        },
-      ],
+      content: text,
       ...(sessionId ? { sessionId } : {}),
-      ...(inputTokens || outputTokens ? {
-        usage: {
-          prompt_tokens: inputTokens,
-          completion_tokens: outputTokens,
-          total_tokens: inputTokens + outputTokens,
-          ...(cachedTokens != null ? { cached_tokens: cachedTokens } : {}),
-        },
-      } : {}),
     };
   }
 }
 
-/** Shape of `gemini -p -o json` output. */
+/** Shape of `gemini -p -o json` output — only the fields this provider reads. */
 interface GeminiCliJsonOutput {
   session_id?: string;
   response?: string;
-  stats?: {
-    models?: Record<string, {
-      tokens?: {
-        input?: number;
-        candidates?: number;
-        total?: number;
-        cached?: number;
-      };
-    }>;
-  };
 }

@@ -1,15 +1,13 @@
 /**
  * Unit tests for team-composer.ts — Team Composer.
  *
- * SUT: extractProvider, scoreModel, selectDiverseModels, composeTeam
+ * SUT: extractProvider, composeTeam
  * @module Team Composer Tests
  */
 
 import { describe, it, expect } from "bun:test";
 import {
   extractProvider,
-  scoreModel,
-  selectDiverseModels,
   composeTeam,
   type ComposeTeamDeps,
 } from "./team-composer";
@@ -19,11 +17,7 @@ import type { ModelInfo } from "../model/types";
 
 function makeModel(overrides: Partial<ModelInfo> & { id: string }): ModelInfo {
   return {
-    name: overrides.id.split("/")[1] ?? overrides.id,
     provider: "anthropic",
-    contextWindow: 128_000,
-    cost: { inputPer1M: 2, outputPer1M: 8 },
-    supportsToolCalling: true,
     ...overrides,
   };
 }
@@ -43,94 +37,10 @@ describe("extractProvider", () => {
 
 // -- scoreModel --
 
-describe("scoreModel", () => {
-  it("should average benchmark scores when available", () => {
-    const model = makeModel({
-      id: "test/model",
-      benchmark: { coding: 80, reasoning: 60, math: 100 },
-    });
-    expect(scoreModel(model)).toBe(80);
-  });
-
-  it("should fallback to cost proxy when no benchmark", () => {
-    const model = makeModel({
-      id: "test/model",
-      cost: { inputPer1M: 5, outputPer1M: 25 },
-    });
-    // outputPer1M=25, cap=25 → 25/25*100 = 100
-    expect(scoreModel(model)).toBe(100);
-  });
-
-  it("should cap cost proxy at 100", () => {
-    const model = makeModel({
-      id: "test/model",
-      cost: { inputPer1M: 10, outputPer1M: 50 },
-    });
-    expect(scoreModel(model)).toBe(100);
-  });
-
-  it("should handle empty benchmark object", () => {
-    const model = makeModel({
-      id: "test/model",
-      benchmark: {},
-      cost: { inputPer1M: 1, outputPer1M: 10 },
-    });
-    // Empty benchmark → fallback to cost
-    expect(scoreModel(model)).toBe(40); // 10/25*100
-  });
-});
-
-// -- selectDiverseModels --
-
-describe("selectDiverseModels", () => {
-  it("should pick from different providers round-robin", () => {
-    const models = [
-      makeModel({ id: "anthropic/a", provider: "anthropic", benchmark: { coding: 90 } }),
-      makeModel({ id: "anthropic/b", provider: "anthropic", benchmark: { coding: 80 } }),
-      makeModel({ id: "openai/c", provider: "openai", benchmark: { coding: 85 } }),
-      makeModel({ id: "xai/d", provider: "xai", benchmark: { coding: 70 } }),
-    ];
-
-    const selected = selectDiverseModels(models, 3);
-    expect(selected).toHaveLength(3);
-
-    const providers = new Set(selected.map((m) => m.provider));
-    expect(providers.size).toBe(3);
-  });
-
-  it("should pick best model per provider", () => {
-    const models = [
-      makeModel({ id: "anthropic/weak", provider: "anthropic", benchmark: { coding: 50 } }),
-      makeModel({ id: "anthropic/strong", provider: "anthropic", benchmark: { coding: 90 } }),
-      makeModel({ id: "openai/mid", provider: "openai", benchmark: { coding: 70 } }),
-    ];
-
-    const selected = selectDiverseModels(models, 2);
-    expect(selected.map((m) => m.id)).toContain("anthropic/strong");
-    expect(selected.map((m) => m.id)).toContain("openai/mid");
-  });
-
-  it("should return all models if count >= models.length", () => {
-    const models = [
-      makeModel({ id: "anthropic/1", provider: "anthropic" }),
-      makeModel({ id: "openai/2", provider: "openai" }),
-    ];
-
-    const selected = selectDiverseModels(models, 5);
-    expect(selected).toHaveLength(2);
-  });
-
-  it("should handle single model", () => {
-    const models = [makeModel({ id: "a/1" })];
-    expect(selectDiverseModels(models, 3)).toHaveLength(1);
-  });
-});
-
 // -- composeTeam --
 
 describe("composeTeam", () => {
   const makeDeps = (models: ModelInfo[]): ComposeTeamDeps => ({
-    getModels: () => models,
     getById: (id) => models.find((m) => m.id === id),
   });
 
@@ -154,12 +64,6 @@ describe("composeTeam", () => {
     ).toThrow("Task description must be a non-empty string");
   });
 
-  it("should throw NoModelsAvailableError on empty modelIds", () => {
-    expect(() =>
-      composeTeam({ task: "test", modelIds: [] }, makeDeps([])),
-    ).toThrow("No models available");
-  });
-
   it("should throw on unknown model ID", () => {
     const models = [makeModel({ id: "a/1" })];
     expect(() =>
@@ -169,7 +73,7 @@ describe("composeTeam", () => {
 
   it("should resolve models via getModels fallback when getById is not provided", () => {
     const models = [makeModel({ id: "a/1" }), makeModel({ id: "b/2" })];
-    const deps: ComposeTeamDeps = { getModels: () => models };
+    const deps: ComposeTeamDeps = { getById: (id: string) => (models).find((m) => m.id === id) };
     const team = composeTeam({ task: "test", modelIds: ["a/1"] }, deps);
     expect(team.workers).toHaveLength(1);
     expect(team.workers[0]!.model).toBe("a/1");

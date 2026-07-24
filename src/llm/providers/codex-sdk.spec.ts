@@ -43,9 +43,8 @@ describe("CodexSdkProvider.chat", () => {
     const response = await provider.chat(baseRequest());
 
     expect(startThreadSpy).toHaveBeenCalledTimes(1);
-    expect(response.choices[0]!.message.content).toBe("hello");
+    expect(response.content).toBe("hello");
     expect(response.sessionId).toBe("thread-abc");
-    expect(response.usage).toEqual({ prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 });
   });
 
   it("resumes a thread (not startThread) when resumeSessionId is provided", async () => {

@@ -107,7 +107,7 @@ export class GrokCliProvider implements LLMProvider {
         );
       }
 
-      return this.buildResponse(stdout.trim(), request.model, sessionId);
+      return this.buildResponse(stdout.trim(), sessionId);
     } catch (error) {
       if (error instanceof LLMClientError) throw error;
       if (error instanceof IdleTimeoutError) {
@@ -123,21 +123,10 @@ export class GrokCliProvider implements LLMProvider {
 
   private buildResponse(
     text: string,
-    originalModel: string,
     sessionId?: string,
   ): ChatCompletionResponse {
     return {
-      id: `cli-${Date.now()}`,
-      object: "chat.completion",
-      created: Math.floor(Date.now() / 1000),
-      model: originalModel,
-      choices: [
-        {
-          index: 0,
-          message: { role: "assistant", content: text },
-          finish_reason: "stop",
-        },
-      ],
+      content: text,
       ...(sessionId ? { sessionId } : {}),
     };
   }
