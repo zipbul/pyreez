@@ -89,7 +89,7 @@ export interface InspectInput {
   skipConvergence?: boolean;
 }
 
-export interface InspectResult {
+interface InspectResult {
   skipped?: boolean;
   convergence?: { level: ConvergenceLevel; dissenterId?: string; reasoning?: string };
   /** Aragora-style multi-component convergence score (synaptent/aragora CONVERGENCE.md). */
@@ -104,8 +104,6 @@ export interface InspectResult {
 }
 
 const RANK_MIN_WORKERS = 4;
-const BORDERLINE_DIVERSITY_LO = 0.20;
-const BORDERLINE_DIVERSITY_HI = 0.50;
 
 export async function runInspection(input: InspectInput): Promise<InspectResult> {
   const r1 = input.deliberate.rounds?.[0];
@@ -122,11 +120,6 @@ export async function runInspection(input: InspectInput): Promise<InspectResult>
   const candidates = responses.map((r) => ({ id: r.model, content: r.content }));
 
   // 1. Convergence check — when text-distance signals fired or diversity is borderline
-  const conformitySuspected = warnings.some((w) => w.includes("r1_conformity_suspected"));
-  const dissentSuspected = warnings.some((w) => w.includes("minority_dissent"));
-  const diversityLow = warnings.some((w) => w.includes("r1_diversity_low"));
-  const borderline = diversity !== null && diversity >= BORDERLINE_DIVERSITY_LO && diversity < BORDERLINE_DIVERSITY_HI;
-
   // Convergence-check via LLM judge. Default on; opt-out via skipConvergence
   // for cost-sensitive runs where the caller knows convergence is irrelevant.
   // Text-distance signals are dead in practice (measured), so the LLM judge
@@ -149,7 +142,7 @@ export async function runInspection(input: InspectInput): Promise<InspectResult>
       stability: computeRoundStability(input.deliberate.rounds ?? []),
     };
     const overall = computeConvergenceScore(components);
-    const status = classifyStatus(overall, /* consecutive */ 1, /* needed */ 1);
+    const status = classifyStatus(overall);
     result.convergenceScore = { overall, status, components };
     actions.push(`convergence_score=${overall.toFixed(2)} status=${status}`);
 
@@ -163,8 +156,6 @@ export async function runInspection(input: InspectInput): Promise<InspectResult>
       actions.push("convergence is DIVERSE — proceed to synthesis with full diversity");
     }
   }
-  // Suppress unused-variable warnings for dead signals (kept in code for documentation)
-  void conformitySuspected; void dissentSuspected; void diversityLow; void borderline;
 
   // 2. Ranking — only worth the LLM cost for N≥4 workers. Use eager position-bias
   // mitigation: research consensus (Lin Shi et al., Dartmouth — "Judging the

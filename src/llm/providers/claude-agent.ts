@@ -33,6 +33,15 @@ export type ClaudeQueryFn = (params: { prompt: string | AsyncIterable<unknown>; 
 const READ_FILE_TOOLS = ["Read", "Glob", "Grep"];
 const WRITE_FILE_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"];
 
+/** Shape of the SDK messages this provider reads. */
+interface ClaudeSdkMessage {
+  readonly type?: string;
+  readonly session_id?: string;
+  readonly message?: { content?: { type?: string; text?: string }[] };
+}
+
+
+
 export class ClaudeAgentProvider implements LLMProvider {
   readonly name = "anthropic" as const;
   readonly capabilities = { web: true, effort: true, fileAccess: true } as const;
@@ -75,7 +84,7 @@ export class ClaudeAgentProvider implements LLMProvider {
       let text = "";
       let sessionId: string | undefined;
       for await (const message of this.queryFn({ prompt, options })) {
-        const msg = message as any;
+        const msg = message as ClaudeSdkMessage;
         // Every SDK message carries the session_id; capture it so the session can be resumed later.
         if (typeof msg.session_id === "string") sessionId = msg.session_id;
         if (msg.type === "assistant") {
@@ -84,7 +93,7 @@ export class ClaudeAgentProvider implements LLMProvider {
           }
         }
       }
-      return buildSdkResponse(text, request.model, undefined, sessionId);
+      return buildSdkResponse(text, sessionId);
     } catch (error) {
       throw toSdkError(error, "claude");
     }

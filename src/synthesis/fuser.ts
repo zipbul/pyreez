@@ -13,22 +13,22 @@
 
 import type { ChatMessage } from "../llm/types";
 
-export interface FuserCandidate {
+interface FuserCandidate {
   readonly id: string;
   readonly content: string;
 }
 
-export interface RankInfo {
+interface RankInfo {
   readonly id: string;
   readonly wins: number;
   readonly losses: number;
 }
 
-export interface FuseOptions {
+interface FuseOptions {
   readonly ranking?: readonly RankInfo[];
 }
 
-export interface FuseResult {
+interface FuseResult {
   readonly fused: string;
 }
 

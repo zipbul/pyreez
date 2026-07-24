@@ -10,8 +10,8 @@ function makeDeliberateOutput(overrides?: Partial<any>): any {
     rounds: [{
       number: 1,
       responses: [
-        { model: "a", content: "A says yes" },
-        { model: "b", content: "B says yes" },
+        { model: "a", content: "A says yes", workerIndex: 0  },
+        { model: "b", content: "B says yes", workerIndex: 1  },
       ],
     }],
     warnings: [],

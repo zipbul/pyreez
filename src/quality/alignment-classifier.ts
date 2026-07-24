@@ -10,7 +10,7 @@
 
 import type { ChatMessage } from "../llm/types";
 
-export type Alignment = "on-task" | "meta-critique";
+type Alignment = "on-task" | "meta-critique";
 
 export interface ChatFn {
   (model: string, messages: ChatMessage[]): Promise<{ content: string }>;

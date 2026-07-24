@@ -22,8 +22,6 @@ export interface DiscoveredModel {
   /** Canonical pyreez id: `provider/slug`. */
   readonly id: string;
   readonly provider: ProviderName;
-  readonly displayName?: string;
-  readonly description?: string;
 }
 
 /** Run an async probe with a timeout; any throw or timeout yields `fallback` (never rejects). */
@@ -56,8 +54,6 @@ export function parseCodexModels(jsonText: string): DiscoveredModel[] {
     .map((m) => ({
       id: `openai/${m.slug}`,
       provider: "openai" as const,
-      ...(m.display_name ? { displayName: m.display_name } : {}),
-      ...(m.description ? { description: m.description } : {}),
     }));
 }
 
@@ -77,7 +73,7 @@ export function parseGrokModels(text: string): DiscoveredModel[] {
   return out;
 }
 
-export type ProviderStatus = "ok" | "empty" | "failed";
+type ProviderStatus = "ok" | "empty" | "failed";
 
 /**
  * A probe result that PRESERVES the failure mode. Probes must not collapse a failure into an empty list
@@ -129,8 +125,6 @@ export function discoverClaude(
       .map((m) => ({
         id: `anthropic/${m.value}`,
         provider: "anthropic" as const,
-        ...(m.displayName ? { displayName: m.displayName } : {}),
-        ...(m.description ? { description: m.description } : {}),
       }));
     return ok(models);
   }, PROBE_MS, PROBE_FAILED);

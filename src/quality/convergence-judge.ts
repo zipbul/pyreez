@@ -18,14 +18,14 @@
 
 import type { ChatMessage } from "../llm/types";
 
-export interface ConvergenceCandidate {
+interface ConvergenceCandidate {
   readonly id: string;
   readonly content: string;
 }
 
 export type ConvergenceLevel = "high" | "moderate" | "diverse" | "unknown" | "insufficient";
 
-export interface ConvergenceResult {
+interface ConvergenceResult {
   readonly level: ConvergenceLevel;
   readonly dissenterId?: string;
   readonly reasoning?: string;

@@ -11,8 +11,12 @@ import type { HandlersConfig, HandlerResult } from "./handlers";
 import type { FileAccess } from "./llm/types";
 import type { FileIO } from "./report/types";
 import { handleDeliberate, handleAcceptance } from "./handlers";
-import { CooldownStateSchema, AcceptanceWorkersArraySchema, parseWithSchema } from "./validation/schemas";
+import { AcceptanceWorkersArraySchema, parseWithSchema } from "./validation/schemas";
 import { createChatAdapter, createDeliberateFn } from "./deliberation/wire";
+import { selectAutoTeam } from "./deliberation/auto-team";
+import { ModelLabeler, anonymizeModelFields } from "./cli-anonymize";
+import { loadRatings, parseCellKey, topicPathFromSegments } from "./model/ratings";
+import { classifyTopic, RATINGS_PATH } from "./quality/scoring";
 import {
   writeTranscript,
   loadTranscriptEntry,
@@ -20,12 +24,10 @@ import {
   type TranscriptEntry,
   type TranscriptRecorder,
 } from "./deliberation/transcript";
-import { appendAffinityLog, compactAffinity, loadAffinityTree } from "./model/affinity";
 import { discoverCodex, discoverGrok, discoverClaude, type DiscoveredModel } from "./model/discovery";
 import { refreshModelCache, availableModels } from "./model/model-cache";
 import { discoveredRegistry, type RegistryLike } from "./model/discovered-registry";
 import { claudeSupportedModels } from "./llm/providers/claude-agent";
-import { FileDeliberationStore } from "./deliberation/file-store";
 import { ProviderRegistry } from "./llm/registry";
 import { buildProviders } from "./llm/providers";
 import { BunFileIO } from "./report/bun-file-io";
@@ -117,12 +119,32 @@ Commands:
   inspect       Integrated post-deliberate inspection: convergence + (rank if N≥4) + quality (opt-in)
   fuse          Fuse ranked candidates into a single synthesis draft (LLM-Blender GenFuser)
   interrogate   Re-question a captured worker (--run <id> | --transcript <dir>) --round N --worker I --question "..."
-  affinity      Print the learned per-topic model-affinity tree (readonly, for host model selection)
-  affinity-compact  Fold the affinity log into the tree (offline maintenance)
+  ratings       Print .pyreez/ratings.json as (model, protocol, topic, axis) -> mean/n (internal
+                diagnostic; real model names -- not part of the documented host interface below)
 
 Debug capture: "deliberate" ALWAYS records each worker's prompt+output+sessionId+settings to
 .pyreez/debug/<id> (printed at the end) so any run is debuggable. interrogate re-enters the worker's
 provider session by id (or reconstructs if the session is gone). Disable with --no-debug-capture.
+
+Run log: every deliberate/acceptance invocation appends one line (tool, duration, success) to
+.pyreez/runs/<date>.jsonl.
+
+Scoring: "deliberate" (shared_convergence/adversarial_debate) scores R1 with a 3-judge panel and
+folds per-model/topic/axis medians into .pyreez/ratings.json (raw judge output in
+.pyreez/ratings-log.jsonl). ON by default; disable with --no-scoring. evaluation_scoring is scored
+only when --score-eval is also given (1-round protocol overhead makes it opt-in).
+
+Auto-team: "deliberate --auto-team N" selects N models from .pyreez/ratings.json (Thompson sampling,
+provider diversity >= 2 enforced) instead of --models — mutually exclusive with --models. Only
+scored protocols (shared_convergence/adversarial_debate/evaluation_scoring) are supported; others
+must use --models. --topic sets the topic path directly; otherwise one classification call is made
+first. stderr reports only the selected count, never model names.
+
+Anonymity: "deliberate" and "interrogate" output never carries real model/provider identity. Team
+workers are labeled worker-0, worker-1, ... (by team position); any fallback model swapped in from
+outside the team is labeled fallback-0, fallback-1, ... in first-seen order. Labels are stable within
+one run. This mapping is NOT persisted anywhere except .pyreez/debug/<id> (real names, when debug
+capture is on); a run with --no-debug-capture loses the label -> real-model mapping entirely.
 
 Run "bun run src/cli.ts <command> --help" for command-specific help.`;
 }
@@ -140,10 +162,11 @@ async function buildConfig(
   recordTranscript?: TranscriptRecorder,
   forceRefresh = false,
   needsDiscovery = true,
+  noScoring = false,
+  scoreEval = false,
 ): Promise<HandlersConfig> {
 
   const fileIO = new BunFileIO();
-  const deliberationStore = new FileDeliberationStore(".pyreez/deliberations", fileIO);
   const runLogger = new FileRunLogger(".pyreez/runs", fileIO);
 
   // Build providers (single registration point)
@@ -176,7 +199,7 @@ async function buildConfig(
 
   const chatAdapter = createChatAdapter((req) => providerRegistry.chat(req));
 
-  // Only the model-selecting commands need a populated registry. The rest (affinity, interrogate,
+  // Only the model-selecting commands need a populated registry. The rest (ratings, interrogate,
   // rank, fuse, …) route by the model id they are given, or touch no model at all — with discovery
   // skipped their registry is empty by construction, so gating them on it would kill them outright.
   const { modelIds, warnings } = filterModelsByProviders(registry, providers);
@@ -189,40 +212,19 @@ async function buildConfig(
 
   const sharedCooldown = createCooldownManager();
 
-  // Restore cooldown state
-  const COOLDOWN_PATH = ".pyreez/cooldown.json";
-  try {
-    const raw = await fileIO.readFile(COOLDOWN_PATH);
-    const result = parseWithSchema(raw, CooldownStateSchema, "cooldown.json");
-    if (result.success) {
-      sharedCooldown.restore(result.data);
-    } else {
-      console.error(`[pyreez] ${result.error}`);
-    }
-  } catch {
-    // No persisted state
-  }
 
   const configuredModelIds = new Set(modelIds);
   const filteredRegistry = {
-    getAll: () => registry.getAll().filter((m) => configuredModelIds.has(m.id)),
     getAvailable: () => registry.getAvailable().filter((m) => configuredModelIds.has(m.id)),
     getById: (id: string) => configuredModelIds.has(id) ? registry.getById(id) : undefined,
   };
 
-  // Affinity: accumulate learned per-topic/axis scores. Judge = a fixed neutral model (env override,
-  // else the first configured model). Scoring only fires when a run supplies topicPath + axes.
-  const judgeModel = process.env.PYREEZ_JUDGE_MODEL || modelIds[0];
-  const affinityLogPath = ".pyreez/affinity-log.jsonl";
-
   const deliberateFn = createDeliberateFn({
     registry: filteredRegistry,
     chat: (model, messages, params) => chatAdapter(model, messages, params),
-    store: deliberationStore,
     cooldown: sharedCooldown,
     ...(recordTranscript ? { recordTranscript } : {}),
-    ...(judgeModel ? { judge: { model: judgeModel, chat: (m, msgs) => chatAdapter(m, msgs).then((r) => ({ content: r.content })) } } : {}),
-    recordAffinity: (rec) => appendAffinityLog(fileIO, affinityLogPath, rec),
+    scoring: { fileIO, enabled: !noScoring, scoreEvalEnabled: scoreEval },
   });
 
   return {
@@ -253,16 +255,19 @@ export interface CliDeps {
    *  because real code past a call to it is unreachable; a no-op stub would let execution fall
    *  through into code that assumes the process already stopped. */
   exit?: (code: number) => never;
-  /** Defaults to a real BunFileIO. Used by interrogate/affinity/affinity-compact/transcript-write —
-   *  the only main()-body paths that touch the file system directly (buildConfig()'s own file IO
-   *  is bypassed entirely by `config` and isn't affected by this). */
+  /** Defaults to a real BunFileIO. Used by interrogate/ratings/transcript-write/deliberate's
+   *  --auto-team (ratings.json load + classify) — the main()-body paths that touch the file system
+   *  directly (buildConfig()'s own file IO is bypassed entirely by `config` and isn't affected by this). */
   fileIO?: FileIO;
+  /** Defaults to Math.random. Used by --auto-team's Thompson sampling + team-order shuffle. */
+  rng?: () => number;
 }
 
 export async function main(argv: string[] = process.argv, deps: CliDeps = {}): Promise<void> {
   const stdout = deps.stdout ?? ((text: string) => console.log(text));
   const stderr = deps.stderr ?? ((text: string) => console.error(text));
   const fileIO = deps.fileIO ?? new BunFileIO();
+  const rng = deps.rng ?? Math.random;
   const exit = deps.exit ?? ((code: number): never => process.exit(code));
   // Function declarations (not const arrow values) so TS's control-flow analysis narrows types
   // after `if (!x) die(...)` the same way it did for the module-level `die` this replaces.
@@ -292,23 +297,24 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}): P
     transcriptDir ? (e) => { transcriptEntries.push(e); } : undefined,
     flags["refresh"] === "true",
     needsDiscovery,
+    flags["no-scoring"] === "true",
+    flags["score-eval"] === "true",
   );
 
   let result: HandlerResult;
+  // Set only by "deliberate" — applied after debug-transcript capture so the transcript keeps real
+  // model names while the value that reaches stdout/stderr is relabeled (v5 §1.5).
+  let anonymizeOutput: ((r: HandlerResult) => HandlerResult) | undefined;
 
   switch (command) {
     case "models": {
       const reg = config.filteredRegistry;
       if (!reg) die("Registry not available");
+      // id + provider is everything discovery gives us. The old output also carried
+      // contextWindow/cost/benchmark, but nothing ever filled them in, so every model reported a
+      // context window of 0 and a price of 0 — worse than saying nothing.
       const available = reg.getAvailable();
-      const models = available.map((m) => ({
-        id: m.id,
-        provider: m.provider,
-        family: m.family,
-        contextWindow: m.contextWindow,
-        cost: m.cost,
-        ...(m.benchmark ? { benchmark: m.benchmark } : {}),
-      }));
+      const models = available.map((m) => ({ id: m.id, provider: m.provider }));
       result = { data: { models, total: models.length } };
       break;
     }
@@ -317,8 +323,13 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}): P
       const task = flags["task"];
       if (!task) die("--task is required for deliberate");
       const modelsRaw = flags["models"];
-      if (!modelsRaw) die("--models is required for deliberate");
-      const models = modelsRaw!.split(",").map((s) => s.trim());
+      const autoTeamRaw = flags["auto-team"];
+      if (autoTeamRaw !== undefined && modelsRaw !== undefined) {
+        die("--auto-team and --models are mutually exclusive — pass one or the other");
+      }
+      if (autoTeamRaw === undefined && !modelsRaw) {
+        die("--models is required for deliberate");
+      }
       const workerInstructions = flags["worker-instructions"];
       // criteria/subject/questions are user content and must support stdin ("-") like task does.
       const criteria = flags["criteria"];
@@ -340,6 +351,49 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}): P
       // Affinity (learned routing): host-authored topic path ("a/b/c") + axes ("x,y"). Both → run scored.
       const topicPath = flags["topic"]?.split("/").map((s) => s.trim()).filter(Boolean);
       const axes = flags["axes"]?.split(",").map((s) => s.trim()).filter(Boolean);
+      const protocolFlag = flags["protocol"];
+
+      // --auto-team N: score-based selection (P4) replaces --models entirely. Never prints real
+      // model names to stderr — only the selected count (v5 §1.5 anonymity principle).
+      let models: string[];
+      if (autoTeamRaw !== undefined) {
+        const requestedN = Number(autoTeamRaw);
+        if (!Number.isInteger(requestedN)) die(`--auto-team must be an integer, got "${autoTeamRaw}"`);
+        if (!config.filteredRegistry) die("[pyreez] auto-team: registry not available");
+
+        try {
+          const ratingsFile = await loadRatings(fileIO, RATINGS_PATH);
+          const candidates = config.filteredRegistry.getAvailable();
+          let segments: string[];
+          if (topicPath?.length) {
+            segments = topicPath;
+          } else {
+            if (!config.chatFn) die("[pyreez] auto-team: chat function not available for topic classification");
+            segments = await classifyTopic({ chat: config.chatFn, fileIO, now: Date.now, rng }, task!);
+          }
+          const resolvedTopicPath = topicPathFromSegments(segments);
+
+          const selection = selectAutoTeam({
+            candidates,
+            ratingsFile,
+            protocol: protocolFlag ?? "shared_convergence",
+            topicPath: resolvedTopicPath,
+            n: requestedN,
+            rng,
+          });
+          models = [...selection.models];
+          stderr(`[pyreez] auto-team: ${models.length} workers selected`);
+        } catch (error) {
+          die(`[pyreez] auto-team failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      } else {
+        models = modelsRaw!.split(",").map((s) => s.trim());
+      }
+
+      // Anonymization boundary (v5 §1.5): the documented host interface never carries real model
+      // names. One labeler instance spans the whole invocation so a model's label stays the same
+      // whether it first appears mid-stream (onRound) or only in the final payload/error JSON.
+      const labeler = new ModelLabeler(models);
 
       result = await handleDeliberate(config, {
         task: task!,
@@ -347,7 +401,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}): P
         count: flags["count"] !== undefined ? Number(flags["count"]) : undefined,
         worker_instructions: workerInstructions,
         max_rounds: flags["max-rounds"] !== undefined ? Number(flags["max-rounds"]) : undefined,
-        protocol: flags["protocol"],
+        protocol: protocolFlag,
         questions: questionsRaw?.split(",").map((s) => s.trim()),
         criteria,
         subject,
@@ -358,11 +412,32 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}): P
         topic_path: topicPath,
         axes,
         onRound: (round) => {
-          const models = round.responses.map((r) => r.model).join(", ");
+          const labeledModels = round.responses.map((r) => labeler.labelOf(r.model)).join(", ");
           const failed = round.failedWorkers?.length ?? 0;
-          stderr(`[pyreez] round ${round.number}: ${round.responses.length} responses (${models})${failed ? `, ${failed} failed` : ""}`);
+          stderr(`[pyreez] round ${round.number}: ${round.responses.length} responses (${labeledModels})${failed ? `, ${failed} failed` : ""}`);
         },
       });
+
+      // Deferred, not applied here: debug capture (writeTranscript, below, after the switch) must see
+      // the REAL result (DeliberateOutput itself is never mutated) — only the value that ultimately
+      // reaches stdout/stderr gets relabeled. anonymizeOutput runs once, after transcript capture.
+      anonymizeOutput = (r) => {
+        if (r.error !== undefined) {
+          // handlers.ts's error paths are either a plain message (generic catch-all) or a JSON object
+          // carrying modelSwaps/lostSlots — only the latter needs relabeling. A parse failure means
+          // it's the plain-message case, which never carries a structured model field anyway.
+          try {
+            const parsed: unknown = JSON.parse(r.error);
+            if (parsed !== null && typeof parsed === "object") {
+              return { error: JSON.stringify(anonymizeModelFields(parsed as Record<string, unknown>, (m) => labeler.labelOf(m))) };
+            }
+          } catch {
+            // not JSON -- leave the plain message as-is
+          }
+          return r;
+        }
+        return { data: anonymizeModelFields(r.data as Record<string, unknown>, (m) => labeler.labelOf(m)) };
+      };
       break;
     }
 
@@ -603,22 +678,23 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}): P
         const r = await config.chatFn(entry.model, buildInterrogationMessages(entry, question!), params);
         answer = r.content;
       }
-      result = { data: { mode, model: entry.model, round: entry.round, workerIndex: entry.workerIndex, ...(mode === "resumed" ? { sessionId: entry.sessionId } : {}), answer } };
+      // No `model` field in the output (v5 §1.5 anonymity) -- the host already identified this
+      // worker by its --round/--worker coordinate, which is all the documented interface exposes.
+      result = { data: { mode, round: entry.round, workerIndex: entry.workerIndex, ...(mode === "resumed" ? { sessionId: entry.sessionId } : {}), answer } };
       break;
     }
 
-    case "affinity": {
-      // Read-only: print the compacted affinity tree so a host agent can see per-topic model strengths.
-      const tree = await loadAffinityTree(fileIO, ".pyreez/affinity.json");
-      result = { data: tree };
-      break;
-    }
-
-    case "affinity-compact": {
-      // Fold the append-only log into the tree (atomic swap). Offline maintenance.
-      const tree = await compactAffinity(fileIO, ".pyreez/affinity-log.jsonl", ".pyreez/affinity.json");
-      const protocols = Object.keys(tree);
-      result = { data: { compacted: true, protocols } };
+    case "ratings": {
+      // Internal diagnostic, real model names -- NOT part of the documented host interface (v5
+      // §1.5); the anonymous deliberate/interrogate/auto-team surface never routes through here.
+      const file = await loadRatings(fileIO, RATINGS_PATH);
+      const cells = Object.entries(file.cells).map(([key, cell]) => {
+        const parsed = parseCellKey(key);
+        return parsed
+          ? { model: parsed.model, protocol: parsed.protocol, topicPath: parsed.topicPath, axis: parsed.axis, mean: cell.mean, n: cell.n }
+          : { key, mean: cell.mean, n: cell.n }; // malformed/foreign key -- still surface its raw data
+      });
+      result = { data: { updatedAt: file.updatedAt, cells } };
       break;
     }
 
@@ -629,6 +705,10 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}): P
   if (transcriptDir && result!.data) {
     await writeTranscript(transcriptDir, transcriptEntries, result!.data, fileIO);
     stderr(`[pyreez] transcript: ${transcriptEntries.length} entries → ${transcriptDir}`);
+  }
+
+  if (anonymizeOutput) {
+    result = anonymizeOutput(result!);
   }
 
   if (result!.error) {

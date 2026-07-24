@@ -15,7 +15,7 @@ argument-hint: "[protocol name or the symptom you saw]"
 
 Target: the protocol prompts in `src/deliberation/prompts.ts`.
 
-Never fix by guessing. Primary evidence is the workers' testimony, checked against the full sent prompt. Workers are heterogeneous models (anthropic / openai / xai / google): a failure several share is a clear defect; a single-worker failure can still be real prompt ambiguity — judge, don't assume.
+Never fix by guessing. Primary evidence is the workers' testimony, checked against the full sent prompt. Workers are heterogeneous models from multiple providers: a failure several share is a clear defect; a single-worker failure can still be real prompt ambiguity — judge, don't assume.
 
 ## Cycle
 
@@ -23,9 +23,9 @@ Never fix by guessing. Primary evidence is the workers' testimony, checked again
 
 **1. Run + capture.**
 ```
-bun run src/cli.ts deliberate --protocol <P> --task "<task>" --models "<≥2 providers>" [--max-rounds ≥2]
+bun run src/cli.ts deliberate --protocol <P> --task "<task>" --models "<≥2 providers>" [--max-rounds ≥2] --no-scoring
 ```
-Always writes `.pyreez/debug/<id>/` — never `--no-debug-capture`. Required: `host_interrogation`→`--questions`; `evaluation_scoring`→`--criteria` + `--subject`. Scratch in /tmp.
+Always writes `.pyreez/debug/<id>/` — never `--no-debug-capture`. Always pass `--no-scoring` — these are debugging runs, not real deliberations, and scoring is ON by default; without the flag every test task's score pollutes `.pyreez/ratings.json`. Required: `host_interrogation`→`--questions`; `evaluation_scoring`→`--criteria` + `--subject`. Scratch in /tmp.
 
 **2. Read full context.** From the debug dir, read every message in order — the whole worker-visible prompt (system, host text, task / criteria / subject / questions), then `output` and `result.json`. Quote sent text verbatim, not the assembly code.
 

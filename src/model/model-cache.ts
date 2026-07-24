@@ -1,7 +1,7 @@
 /**
  * Model availability cache — a periodically-refreshed snapshot of live discovery, so routing/selection
  * read a fast local file instead of probing every command. A vanished model is kept as `deprecated`
- * (its affinity history stays meaningful) until TTL-pruned.
+ * (its ratings history stays meaningful) until TTL-pruned.
  *
  * The safety rule (from review): a cached model is deprecated ONLY when its provider returned a clean
  * `ok` (ran, non-empty) list that omits it. A provider that returned `empty` or `failed` (outage,
@@ -13,9 +13,9 @@ import { discoverAll, type DiscoveredModel, type DiscoveryResult, type ProbeResu
 import type { ProviderName } from "../llm/types";
 import type { FileIO } from "../report/types";
 
-export type ModelStatus = "available" | "deprecated";
+type ModelStatus = "available" | "deprecated";
 
-export interface CachedModel extends DiscoveredModel {
+interface CachedModel extends DiscoveredModel {
   readonly status: ModelStatus;
   readonly lastSeen: number;
 }
@@ -108,7 +108,7 @@ export async function writeModelCache(fileIO: FileIO, path: string, cache: Model
   await fileIO.rename(tmp, path);
 }
 
-export interface RefreshOptions {
+interface RefreshOptions {
   readonly now: number;
   /** Refresh when the cache is older than this. */
   readonly ttlMs: number;

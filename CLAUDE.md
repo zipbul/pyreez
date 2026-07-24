@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**pyreez** is a heterogeneous multi-model deliberation infrastructure exposed as a command-line tool (`src/cli.ts`). Routes tasks to optimal models, orchestrates multi-model deliberation, calibrates ratings via Bradley-Terry scoring.
+**pyreez** is a heterogeneous multi-model deliberation infrastructure exposed as a command-line tool (`src/cli.ts`). Orchestrates multi-model deliberation and learns per-topic model strengths by judging deliberation outputs: a 3-judge panel scores each run, whose medians fold into per-(model, protocol, topic, axis) cells (`.pyreez/ratings.json`); Thompson sampling over those cells powers `--auto-team` selection.
 
 Runtime: **Bun** (v1.3+). Language: **TypeScript** (strict mode).
 
@@ -15,6 +15,10 @@ bun test src/axis/       # Run tests in a directory
 bun run typecheck        # tsc --noEmit
 bun run src/cli.ts       # Run the CLI (see `src/cli.ts` for subcommands)
 ```
+
+Agent usage flow: `deliberate --task "..." --auto-team N` picks N workers itself via score-based
+selection — no model names to specify. Follow up on a specific worker with `interrogate --run <id>
+--round N --worker I --question "..."`. Before presenting a synthesis, verify it with `acceptance`.
 
 ## Communication
 

@@ -28,7 +28,6 @@ import { LLMClientError } from "../llm/errors";
 function makeTeam(workerCount = 2): TeamComposition {
   const workers = Array.from({ length: workerCount }, (_, i) => ({
     model: `worker/model-${i}`,
-    role: "worker" as const,
   }));
   return { workers };
 }
@@ -46,8 +45,8 @@ function validWorkerContent(label: string): string {
   return label;
 }
 
-function chatResult(content: string, inputTokens = 10, outputTokens = 20): ChatResult {
-  return { content, inputTokens, outputTokens };
+function chatResult(content: string): ChatResult {
+  return { content };
 }
 
 function makeDeps(overrides?: Partial<EngineDeps>): EngineDeps {
@@ -67,11 +66,7 @@ function makeConfig(overrides?: Partial<EngineConfig>): EngineConfig {
 function makeModelInfo(id: string): ModelInfo {
   return {
     id,
-    name: id,
     provider: "openai",
-    contextWindow: 128000,
-    cost: { inputPer1M: 5, outputPer1M: 15 },
-    supportsToolCalling: true,
   };
 }
 
@@ -79,41 +74,7 @@ function makeModelInfo(id: string): ModelInfo {
 // executeRound
 // =============================================================================
 
-describe("executeRound", () => {
-  it("should execute a successful round with 2 workers, assigning roles", async () => {
-    const team = makeTeam(2);
-    const input = makeInput();
-    const config = makeConfig();
-
-    let callIndex = 0;
-    const deps = makeDeps({
-      chat: mock(async (_model: string) => {
-        callIndex++;
-        return chatResult(validWorkerContent(`worker-response-${callIndex}`), 10, 20);
-      }),
-    });
-
-    const { createSharedContext } = await import("./shared-context");
-    const ctx = createSharedContext(input.task, team);
-
-    const { round, tokens } = await executeRound(ctx, 1, deps, config, input);
-
-    // Round structure
-    expect(round.number).toBe(1);
-    expect(round.responses).toHaveLength(2);
-    expect(round.responses[0]!.model).toBe("worker/model-0");
-    expect(round.responses[1]!.model).toBe("worker/model-1");
-
-    // Token accumulation: 2 workers (10+10=20 input, 20+20=40 output)
-    expect(tokens.input).toBe(20);
-    expect(tokens.output).toBe(40);
-
-    // buildR1Messages called per-worker (not shared)
-    expect(deps.buildR1Messages).toHaveBeenCalledTimes(2);
-    expect(deps.chat).toHaveBeenCalledTimes(2); // 2 workers
-  });
-
-  it("should drop partial worker failures and continue with successful ones", async () => {
+describe("executeRound", () => {  it("should drop partial worker failures and continue with successful ones", async () => {
     const team = makeTeam(2);
     const input = makeInput();
     const config = makeConfig();
@@ -123,22 +84,18 @@ describe("executeRound", () => {
         if (model === "worker/model-0") {
           throw new Error("provider timeout");
         }
-        return chatResult(validWorkerContent("worker-1-ok"), 10, 20);
+        return chatResult(validWorkerContent("worker-1-ok"));
       }),
     });
 
     const { createSharedContext } = await import("./shared-context");
     const ctx = createSharedContext(input.task, team);
 
-    const { round, tokens } = await executeRound(ctx, 1, deps, config, input);
+    const { round } = await executeRound(ctx, 1, deps, config, input);
 
     // Only worker-1 succeeded
     expect(round.responses).toHaveLength(1);
     expect(round.responses[0]!.model).toBe("worker/model-1");
-
-    // Tokens: 1 successful worker (10 input, 20 output)
-    expect(tokens.input).toBe(10);
-    expect(tokens.output).toBe(20);
   });
 
   it("should throw RoundExecutionError with role 'worker' when all workers fail", async () => {
@@ -161,30 +118,8 @@ describe("executeRound", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(RoundExecutionError);
       const re = error as RoundExecutionError;
-      expect(re.role).toBe("worker");
       expect(re.modelId).toBe("worker/model-0");
     }
-  });
-
-  it("should accumulate tokens from all workers", async () => {
-    const team = makeTeam(3);
-    const input = makeInput();
-    const config = makeConfig();
-
-    const deps = makeDeps({
-      chat: mock(async (_model: string) => {
-        return chatResult(validWorkerContent("w"), 100, 200);
-      }),
-    });
-
-    const { createSharedContext } = await import("./shared-context");
-    const ctx = createSharedContext(input.task, team);
-
-    const { tokens } = await executeRound(ctx, 1, deps, config, input);
-
-    // 3 workers * (100 + 200)
-    expect(tokens.input).toBe(300);
-    expect(tokens.output).toBe(600);
   });
 
   it("should pass workerIndex to buildR1Messages for each worker", async () => {
@@ -215,8 +150,8 @@ describe("executeRound", () => {
     // and must NOT receive a webAccess argument — a prompt that restated capability could desync from the wiring.
     const team: TeamComposition = {
       workers: [
-        { model: "anthropic/claude-sonnet-4.6", role: "worker" },
-        { model: "openai/gpt-5.4", role: "worker" },
+        { model: "anthropic/claude-sonnet-4.6"},
+        { model: "openai/gpt-5.4"},
       ],
     };
     const input = makeInput({ webAccess: true });
@@ -253,7 +188,7 @@ describe("deliberate", () => {
 
     const deps = makeDeps({
       chat: mock(async (_model: string) => {
-        return chatResult(validWorkerContent("worker-response"), 10, 20);
+        return chatResult(validWorkerContent("worker-response"));
       }),
     });
 
@@ -263,8 +198,6 @@ describe("deliberate", () => {
     expect(output.totalLLMCalls).toBe(2); // 2 workers
     expect(output.modelsUsed).toContain("worker/model-0");
     expect(output.modelsUsed).toContain("worker/model-1");
-    expect(output.totalTokens.input).toBe(20);  // 10 + 10
-    expect(output.totalTokens.output).toBe(40);  // 20 + 20
   });
 
   it("should run all rounds when maxRounds > 1", async () => {
@@ -276,7 +209,7 @@ describe("deliberate", () => {
     const deps = makeDeps({
       chat: mock(async (_model: string) => {
         // Content must differ substantially between rounds to avoid convergence detection
-        return chatResult(`Round ${++callCount} unique content: ${"x".repeat(callCount * 50)}`, 5, 10);
+        return chatResult(`Round ${++callCount} unique content: ${"x".repeat(callCount * 50)}`);
       }),
     });
 
@@ -285,29 +218,6 @@ describe("deliberate", () => {
     expect(output.roundsExecuted).toBe(3);
     expect(output.totalLLMCalls).toBe(3); // 3 rounds * 1 worker
   });
-
-  it("should accumulate tokens across multiple rounds", async () => {
-    const team = makeTeam(2);
-    const input = makeInput();
-    const config = makeConfig({ maxRounds: 3 });
-
-    let callCount = 0;
-    const deps = makeDeps({
-      chat: mock(async (_model: string) => {
-        return chatResult(`Call ${++callCount} unique content: ${"y".repeat(callCount * 50)}`, 100, 200);
-      }),
-    });
-
-    const output = await deliberate(team, input, deps, config);
-
-    // Per round: 2 workers * (100 in, 200 out) = 200 in, 400 out
-    // 3 rounds: 600 in, 1200 out
-    expect(output.totalTokens.input).toBe(600);
-    expect(output.totalTokens.output).toBe(1200);
-    expect(output.roundsExecuted).toBe(3);
-    expect(output.totalLLMCalls).toBe(6); // 3 * 2
-  });
-
   it("should include rounds summary in output", async () => {
     const team = makeTeam(1);
     const input = makeInput();
@@ -315,7 +225,7 @@ describe("deliberate", () => {
 
     const deps = makeDeps({
       chat: mock(async (_model: string) => {
-        return chatResult(validWorkerContent("worker-response"), 5, 10);
+        return chatResult(validWorkerContent("worker-response"));
       }),
     });
 
@@ -325,21 +235,6 @@ describe("deliberate", () => {
     expect(output.rounds).toHaveLength(2);
     expect(output.rounds![0]!.number).toBe(1);
     expect(output.rounds![1]!.number).toBe(2);
-  });
-
-  it("should use default config (maxRounds=1) when config is omitted", async () => {
-    const team = makeTeam(1);
-    const input = makeInput();
-
-    const deps = makeDeps({
-      chat: mock(async (_model: string) => {
-        return chatResult(validWorkerContent("worker"));
-      }),
-    });
-
-    const output = await deliberate(team, input, deps); // no config
-
-    expect(output.roundsExecuted).toBe(1);
   });
 
   // -- Retry with RoundExecutionError --
@@ -354,7 +249,7 @@ describe("deliberate", () => {
         if (model === "worker/model-0") {
           throw new Error("worker down");
         }
-        return chatResult(validWorkerContent("ok-from-fallback"), 10, 20);
+        return chatResult(validWorkerContent("ok-from-fallback"));
       }),
     });
 
@@ -389,7 +284,6 @@ describe("deliberate", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(RoundExecutionError);
       const re = error as RoundExecutionError;
-      expect(re.role).toBe("worker");
       // Should include modelSwaps in the error
       expect(re.modelSwaps).toBeDefined();
     }
@@ -433,7 +327,7 @@ describe("deliberate", () => {
         if (model === "worker/model-0" || model === "prov-x/fallback-a") {
           throw new Error("down");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -456,9 +350,9 @@ describe("deliberate", () => {
     // rather than leaving an empty slot.
     const team: TeamComposition = {
       workers: [
-        { model: "prov-a/model-a", role: "worker" },
-        { model: "prov-b/model-b", role: "worker" },
-        { model: "prov-c/model-c", role: "worker" },
+        { model: "prov-a/model-a"},
+        { model: "prov-b/model-b"},
+        { model: "prov-c/model-c"},
       ],
     };
     const input = makeInput();
@@ -470,7 +364,7 @@ describe("deliberate", () => {
         if (model.startsWith("prov-b/") || model.startsWith("prov-c/")) {
           throw new Error("provider down");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -493,8 +387,8 @@ describe("deliberate", () => {
     // When both unique and duplicate candidates exist, prefer unique
     const team: TeamComposition = {
       workers: [
-        { model: "prov-a/model-a", role: "worker" },
-        { model: "prov-b/model-b", role: "worker" },
+        { model: "prov-a/model-a"},
+        { model: "prov-b/model-b"},
       ],
     };
     const input = makeInput();
@@ -507,7 +401,7 @@ describe("deliberate", () => {
         if (model === "prov-b/model-b") {
           throw new Error("down");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -534,7 +428,7 @@ describe("deliberate", () => {
         if (model.startsWith("worker/")) {
           throw new Error("down");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -557,6 +451,25 @@ describe("deliberate", () => {
 // failedWorkers propagation
 // =============================================================================
 
+describe("worker identity in deliberate output", () => {
+  it("carries workerIndex so two workers on the same model stay distinguishable", async () => {
+    // A team can hold the same model twice (wire round-robins when count > models.length), and
+    // inspect keys round-over-round stability by workerIndex, falling back to the model id. Without
+    // workerIndex on the output, both workers collapse onto one key and one response is silently
+    // dropped from the comparison.
+    const team: TeamComposition = {
+      workers: [{ model: "worker/dup" }, { model: "worker/dup" }],
+    };
+    const deps = makeDeps({ chat: mock(async () => chatResult(validWorkerContent("ok"))) });
+
+    const output = await deliberate(team, makeInput(), deps, makeConfig());
+
+    const responses = output.rounds![0]!.responses!;
+    expect(responses).toHaveLength(2);
+    expect(responses.map((r) => r.workerIndex)).toEqual([0, 1]);
+  });
+});
+
 describe("failedWorkers propagation in deliberate output", () => {
   it("should throw TeamDegradedError when 3-worker team loses 1 (below min viable)", async () => {
     const team = makeTeam(3);
@@ -568,7 +481,7 @@ describe("failedWorkers propagation in deliberate output", () => {
         if (model === "worker/model-0") {
           throw new Error("o3 rate limit");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -595,7 +508,7 @@ describe("failedWorkers propagation in deliberate output", () => {
         if (model === "worker/model-0") {
           throw new Error("o3 rate limit");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -614,55 +527,13 @@ describe("failedWorkers propagation in deliberate output", () => {
     const input = makeInput();
     const config = makeConfig();
     const deps = makeDeps({
-      chat: mock(async () => chatResult(validWorkerContent("ok"), 10, 20)),
+      chat: mock(async () => chatResult(validWorkerContent("ok"))),
     });
 
     const output = await deliberate(team, input, deps, config);
 
     expect(output.rounds).toBeDefined();
     expect(output.rounds![0]!.failedWorkers).toBeUndefined();
-  });
-});
-
-// =============================================================================
-// truncated response propagation
-// =============================================================================
-
-describe("truncated response propagation", () => {
-  it("should propagate truncated flag to output rounds when finish_reason is length", async () => {
-    const team = makeTeam(2);
-    const input = makeInput();
-    const config = makeConfig();
-    const deps = makeDeps({
-      chat: mock(async () => ({
-        content: validWorkerContent("partial"),
-        inputTokens: 10,
-        outputTokens: 20,
-        truncated: true,
-      })),
-    });
-
-    const output = await deliberate(team, input, deps, config);
-
-    expect(output.rounds).toBeDefined();
-    const responses = output.rounds![0]!.responses!;
-    expect(responses.length).toBeGreaterThan(0);
-    expect(responses[0]!.truncated).toBe(true);
-  });
-
-  it("should NOT include truncated when response is complete", async () => {
-    const team = makeTeam(2);
-    const input = makeInput();
-    const config = makeConfig();
-    const deps = makeDeps({
-      chat: mock(async () => chatResult(validWorkerContent("ok"), 10, 20)),
-    });
-
-    const output = await deliberate(team, input, deps, config);
-
-    expect(output.rounds).toBeDefined();
-    const responses = output.rounds![0]!.responses!;
-    expect(responses[0]!.truncated).toBeUndefined();
   });
 });
 
@@ -708,7 +579,7 @@ describe("adversarial_debate protocol", () => {
     let callCount = 0;
     const deps = makeDeps({
       chat: mock(async (_model: string) => {
-        return chatResult(`Response ${++callCount} unique: ${"z".repeat(callCount * 50)}`, 10, 20);
+        return chatResult(`Response ${++callCount} unique: ${"z".repeat(callCount * 50)}`);
       }),
       buildR2Messages: mock((ctx: any, _others?: any, _own?: any, _instructions?: any, _roundInfo?: any, _idx?: any) => {
         // Capture the number of previous rounds visible to R2 builder
@@ -752,11 +623,9 @@ describe("adversarial_debate protocol", () => {
 // =============================================================================
 
 describe("RoundExecutionError", () => {
-  it("should store role, modelId, and cause", () => {
+  it("should store modelId and cause", () => {
     const cause = new Error("upstream failure");
-    const error = new RoundExecutionError("worker", "worker/model-0", cause);
-
-    expect(error.role).toBe("worker");
+    const error = new RoundExecutionError("worker/model-0", cause);
     expect(error.modelId).toBe("worker/model-0");
     expect(error.cause).toBe(cause);
     expect(error.name).toBe("RoundExecutionError");
@@ -766,9 +635,7 @@ describe("RoundExecutionError", () => {
   });
 
   it("should handle non-Error cause values", () => {
-    const error = new RoundExecutionError("worker", "worker/model", "string cause");
-
-    expect(error.role).toBe("worker");
+    const error = new RoundExecutionError("worker/model", "string cause");
     expect(error.message).toContain("string cause");
   });
 });
@@ -1211,41 +1078,7 @@ describe("createFallbackPool", () => {
 // Multi-hop token accumulation
 // =============================================================================
 
-describe("multi-hop token accumulation", () => {
-  it("should only include tokens from successful call, not failed attempts", async () => {
-    // Team of 1. model-0 fails (no tokens counted), fallback/a fails (no tokens),
-    // fallback/b succeeds with 20 input, 40 output.
-    const team = makeTeam(1);
-    const input = makeInput();
-    const config = makeConfig({ maxRounds: 1 });
-
-    const deps = makeDeps({
-      chat: mock(async (model: string) => {
-        if (model === "worker/model-0") {
-          throw new Error("timeout");
-        }
-        if (model === "prov-x/fallback-a") {
-          throw new Error("rate limit");
-        }
-        // fallback/b succeeds
-        return chatResult(validWorkerContent("success"), 20, 40);
-      }),
-    });
-
-    const cooldown = createCooldownManager();
-    const pool = createFallbackPool(
-      [makeModelInfo("prov-x/fallback-a"), makeModelInfo("prov-y/fallback-b")],
-      cooldown,
-    );
-
-    const output = await deliberate(team, input, deps, config, { pool });
-
-    // Failed attempts throw before tokens are accumulated (line 231-232 only reached on success).
-    // Only the successful call's tokens should be counted.
-    expect(output.totalTokens.input).toBe(20);
-    expect(output.totalTokens.output).toBe(40);
-  });
-});
+describe("multi-hop token accumulation", () => {});
 
 // =============================================================================
 // Fallback uses R1 builder for single-round protocols
@@ -1431,7 +1264,7 @@ describe("normalized error output", () => {
         if (model === "worker/model-0") {
           throw new LLMClientError(429, "Rate limit exceeded", "rate_limit_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1450,7 +1283,7 @@ describe("normalized error output", () => {
         if (model === "worker/model-0") {
           throw new LLMClientError(404, "Model not found");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1458,7 +1291,7 @@ describe("normalized error output", () => {
     const pool = createFallbackPool([makeModelInfo("prov-b/fallback")], cooldown);
 
     const customTeam: TeamComposition = {
-      workers: [{ model: "worker/model-0", role: "worker" }],
+      workers: [{ model: "worker/model-0"}],
     };
 
     const output = await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
@@ -1476,7 +1309,7 @@ describe("normalized error output", () => {
         if (model === "worker/model-0") {
           throw new Error('{"error":{"message":"spending cap exceeded","code":429}}');
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1492,7 +1325,7 @@ describe("normalized error output", () => {
         if (model === "worker/model-0") {
           throw new LLMClientError(408, "Request timeout", "timeout_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1509,7 +1342,7 @@ describe("normalized error output", () => {
         if (model === "worker/model-0") {
           throw new LLMClientError(401, "Invalid API key", "authentication_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1534,7 +1367,7 @@ describe("error-scoped cooldown in fallback", () => {
         if (model === "prov-a/model-0") {
           throw new LLMClientError(404, "Model not found");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1545,7 +1378,7 @@ describe("error-scoped cooldown in fallback", () => {
     );
 
     const customTeam: TeamComposition = {
-      workers: [{ model: "prov-a/model-0", role: "worker" }],
+      workers: [{ model: "prov-a/model-0"}],
     };
 
     const output = await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
@@ -1563,7 +1396,7 @@ describe("error-scoped cooldown in fallback", () => {
         if (model === "prov-a/model-0") {
           throw new LLMClientError(429, "Rate limit", "rate_limit_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1574,7 +1407,7 @@ describe("error-scoped cooldown in fallback", () => {
     );
 
     const customTeam: TeamComposition = {
-      workers: [{ model: "prov-a/model-0", role: "worker" }],
+      workers: [{ model: "prov-a/model-0"}],
     };
 
     await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
@@ -1589,7 +1422,7 @@ describe("error-scoped cooldown in fallback", () => {
         if (model === "prov-a/model-0") {
           throw new LLMClientError(401, "Unauthorized", "authentication_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1597,7 +1430,7 @@ describe("error-scoped cooldown in fallback", () => {
     const pool = createFallbackPool([makeModelInfo("prov-b/fallback")], cooldown);
 
     const customTeam: TeamComposition = {
-      workers: [{ model: "prov-a/model-0", role: "worker" }],
+      workers: [{ model: "prov-a/model-0"}],
     };
 
     await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
@@ -1611,7 +1444,7 @@ describe("error-scoped cooldown in fallback", () => {
         if (model === "prov-a/model-0") {
           throw new LLMClientError(500, "Internal Server Error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1619,7 +1452,7 @@ describe("error-scoped cooldown in fallback", () => {
     const pool = createFallbackPool([makeModelInfo("prov-b/fallback")], cooldown);
 
     const customTeam: TeamComposition = {
-      workers: [{ model: "prov-a/model-0", role: "worker" }],
+      workers: [{ model: "prov-a/model-0"}],
     };
 
     await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
@@ -1635,7 +1468,7 @@ describe("error-scoped cooldown in fallback", () => {
         if (model === "prov-a/model-0") {
           throw new LLMClientError(408, "Timeout", "timeout_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1643,7 +1476,7 @@ describe("error-scoped cooldown in fallback", () => {
     const pool = createFallbackPool([makeModelInfo("prov-a/fallback")], cooldown);
 
     const customTeam: TeamComposition = {
-      workers: [{ model: "prov-a/model-0", role: "worker" }],
+      workers: [{ model: "prov-a/model-0"}],
     };
 
     await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
@@ -1660,7 +1493,7 @@ describe("error-scoped cooldown in fallback", () => {
         if (model === "prov-a/model-0") {
           throw new LLMClientError(429, "Rate limit", "rate_limit_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1668,7 +1501,7 @@ describe("error-scoped cooldown in fallback", () => {
     const pool = createFallbackPool([makeModelInfo("prov-b/fallback")], cooldown);
 
     const customTeam: TeamComposition = {
-      workers: [{ model: "prov-a/model-0", role: "worker" }],
+      workers: [{ model: "prov-a/model-0"}],
     };
 
     await deliberate(customTeam, makeInput(), deps, makeConfig(), { pool });
@@ -1690,7 +1523,7 @@ describe("cooldown check before team worker call", () => {
         if (model === "prov-a/model-0" || model === "prov-c/fallback-1") {
           throw new LLMClientError(429, "Rate limit", "rate_limit_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1701,8 +1534,8 @@ describe("cooldown check before team worker call", () => {
 
     const customTeam: TeamComposition = {
       workers: [
-        { model: "prov-a/model-0", role: "worker" },
-        { model: "prov-b/model-1", role: "worker" },
+        { model: "prov-a/model-0"},
+        { model: "prov-b/model-1"},
       ],
     };
 
@@ -1723,7 +1556,7 @@ describe("cooldown check before team worker call", () => {
         if (model === "prov-a/model-0") {
           throw new LLMClientError(429, "Rate limit", "rate_limit_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1732,8 +1565,8 @@ describe("cooldown check before team worker call", () => {
 
     const customTeam: TeamComposition = {
       workers: [
-        { model: "prov-a/model-0", role: "worker" },
-        { model: "prov-b/model-1", role: "worker" },
+        { model: "prov-a/model-0"},
+        { model: "prov-b/model-1"},
       ],
     };
 
@@ -1776,7 +1609,6 @@ describe("team degradation", () => {
     const team: TeamComposition = {
       workers: Array.from({ length: 5 }, (_, i) => ({
         model: `prov-${i}/model-${i}`,
-        role: "worker" as const,
       })),
     };
 
@@ -1784,7 +1616,7 @@ describe("team degradation", () => {
       chat: mock(async (model: string) => {
         // Only model-0 and model-1 succeed → 2 active, min viable = 3
         if (model === "prov-0/model-0" || model === "prov-1/model-1") {
-          return chatResult(validWorkerContent("ok"), 10, 20);
+          return chatResult(validWorkerContent("ok"));
         }
         throw new LLMClientError(500, "Server error");
       }),
@@ -1799,9 +1631,6 @@ describe("team degradation", () => {
       expect(tde.originalSize).toBe(5);
       expect(tde.activeSize).toBe(2);
       expect(tde.lostSlots).toHaveLength(3);
-      // Partial round preserves successful responses
-      expect(tde.partialRound).toBeDefined();
-      expect(tde.partialRound!.responses.length).toBe(2);
     }
   });
 
@@ -1809,7 +1638,6 @@ describe("team degradation", () => {
     const team: TeamComposition = {
       workers: Array.from({ length: 5 }, (_, i) => ({
         model: `prov-${i}/model-${i}`,
-        role: "worker" as const,
       })),
     };
 
@@ -1817,7 +1645,7 @@ describe("team degradation", () => {
       chat: mock(async (model: string) => {
         // 3 succeed, 2 fail → viable (min 3) but degraded
         if (model.startsWith("prov-0") || model.startsWith("prov-1") || model.startsWith("prov-2")) {
-          return chatResult(validWorkerContent("ok"), 10, 20);
+          return chatResult(validWorkerContent("ok"));
         }
         throw new LLMClientError(500, "Server error");
       }),
@@ -1845,14 +1673,13 @@ describe("team degradation", () => {
     const team: TeamComposition = {
       workers: Array.from({ length: 5 }, (_, i) => ({
         model: `prov-${i}/model-${i}`,
-        role: "worker" as const,
       })),
     };
 
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model === "prov-0/model-0" || model === "prov-1/model-1") {
-          return chatResult(validWorkerContent("ok"), 15, 25);
+          return chatResult(validWorkerContent("ok"));
         }
         throw new LLMClientError(500, "Server error");
       }),
@@ -1864,9 +1691,6 @@ describe("team degradation", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(TeamDegradedError);
       const tde = error as InstanceType<typeof TeamDegradedError>;
-      expect(tde.tokensConsumed).toBeDefined();
-      expect(tde.tokensConsumed!.input).toBeGreaterThan(0);
-      expect(tde.tokensConsumed!.output).toBeGreaterThan(0);
       expect(tde.modelSwaps).toBeDefined();
     }
   });
@@ -1875,7 +1699,6 @@ describe("team degradation", () => {
     const team: TeamComposition = {
       workers: Array.from({ length: 5 }, (_, i) => ({
         model: `prov-${i}/model-${i}`,
-        role: "worker" as const,
       })),
     };
 
@@ -1890,7 +1713,7 @@ describe("team degradation", () => {
         if (round === 2 && model === "prov-3/model-3") {
           throw new LLMClientError(500, "R2 fail");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1928,7 +1751,7 @@ describe("cooldown pre-check success path", () => {
         if (round === 1 && model === "prov-a/model-0") {
           throw new LLMClientError(429, "Rate limit", "rate_limit_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1948,8 +1771,8 @@ describe("cooldown pre-check success path", () => {
 
     const customTeam: TeamComposition = {
       workers: [
-        { model: "prov-a/model-0", role: "worker" },
-        { model: "prov-b/model-1", role: "worker" },
+        { model: "prov-a/model-0"},
+        { model: "prov-b/model-1"},
       ],
     };
 
@@ -1977,7 +1800,7 @@ describe("replenishment after R1 failures", () => {
         if (model === "prov-a/model-0" || model === "prov-b/model-1") {
           throw new LLMClientError(429, "Rate limit", "rate_limit_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -1986,9 +1809,9 @@ describe("replenishment after R1 failures", () => {
 
     const customTeam: TeamComposition = {
       workers: [
-        { model: "prov-a/model-0", role: "worker" },
-        { model: "prov-b/model-1", role: "worker" },
-        { model: "prov-c/model-2", role: "worker" },
+        { model: "prov-a/model-0"},
+        { model: "prov-b/model-1"},
+        { model: "prov-c/model-2"},
       ],
     };
 
@@ -2028,7 +1851,7 @@ describe("replenishment after R1 failures", () => {
         if (round === 1 && (model === "prov-a/model-0" || model === "prov-b/model-1")) {
           throw new LLMClientError(429, "Rate limit", "rate_limit_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -2046,9 +1869,9 @@ describe("replenishment after R1 failures", () => {
 
     const customTeam: TeamComposition = {
       workers: [
-        { model: "prov-a/model-0", role: "worker" },
-        { model: "prov-b/model-1", role: "worker" },
-        { model: "prov-c/model-2", role: "worker" },
+        { model: "prov-a/model-0"},
+        { model: "prov-b/model-1"},
+        { model: "prov-c/model-2"},
       ],
     };
 
@@ -2068,7 +1891,7 @@ describe("replenishment after R1 failures", () => {
         if (model === "prov-a/model-0") {
           throw new LLMClientError(429, "Rate limit", "rate_limit_error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -2078,8 +1901,8 @@ describe("replenishment after R1 failures", () => {
 
     const customTeam: TeamComposition = {
       workers: [
-        { model: "prov-a/model-0", role: "worker" },
-        { model: "prov-b/model-1", role: "worker" },
+        { model: "prov-a/model-0"},
+        { model: "prov-b/model-1"},
       ],
     };
 
@@ -2102,7 +1925,7 @@ describe("replenishment after R1 failures", () => {
         if (model === "prov-a/model-0") {
           throw new LLMClientError(500, "Server error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -2111,8 +1934,8 @@ describe("replenishment after R1 failures", () => {
 
     const customTeam: TeamComposition = {
       workers: [
-        { model: "prov-a/model-0", role: "worker" },
-        { model: "prov-b/model-1", role: "worker" },
+        { model: "prov-a/model-0"},
+        { model: "prov-b/model-1"},
       ],
     };
 
@@ -2130,7 +1953,7 @@ describe("replenishment after R1 failures", () => {
         if (!model.includes("model-0")) {
           throw new LLMClientError(500, "Server error");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -2140,7 +1963,6 @@ describe("replenishment after R1 failures", () => {
     const team: TeamComposition = {
       workers: Array.from({ length: 5 }, (_, i) => ({
         model: `prov-${i}/model-${i}`,
-        role: "worker" as const,
       })),
     };
 
@@ -2513,7 +2335,6 @@ describe("onRound callback", () => {
     expect(onRoundCalls).toHaveLength(1);
     const round = onRoundCalls[0] as any;
     expect(round.number).toBe(1);
-    expect(round.protocol).toBe("shared_convergence");
     expect(round.responses).toHaveLength(2);
     expect(round.responses[0].confidence).toBe("high");
   });
@@ -2568,14 +2389,14 @@ describe("replenishment with actual replacement workers", () => {
         }
         // model-1: succeeds first call (own slot), fails on Phase 4 duplicate attempt
         if (model === "prov-b/model-1") {
-          if (callCount <= 2) return chatResult(validWorkerContent("ok"), 10, 20);
+          if (callCount <= 2) return chatResult(validWorkerContent("ok"));
           throw new LLMClientError(500, "overloaded");
         }
         // model-3 (replenished): succeeds
         if (model === "prov-d/model-3") {
-          return chatResult(validWorkerContent("replenished"), 10, 20);
+          return chatResult(validWorkerContent("replenished"));
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -2584,15 +2405,14 @@ describe("replenishment with actual replacement workers", () => {
 
     const customTeam: TeamComposition = {
       workers: [
-        { model: "prov-a/model-0", role: "worker" },
-        { model: "prov-b/model-1", role: "worker" },
+        { model: "prov-a/model-0"},
+        { model: "prov-b/model-1"},
       ],
     };
 
     const replenish = mock((_aliveProviders: ReadonlySet<string>, emptySlots: number, _respondedModels: ReadonlySet<string>) => {
       return Array.from({ length: emptySlots }, () => ({
         model: "prov-d/model-3",
-        role: "worker" as const,
       }));
     });
 
@@ -2615,21 +2435,21 @@ describe("replenishment with actual replacement workers", () => {
         callCount++;
         if (model === "prov-a/model-0") throw new LLMClientError(500, "server error");
         if (model === "prov-b/model-1") {
-          if (callCount <= 2) return chatResult(validWorkerContent("ok"), 10, 20);
+          if (callCount <= 2) return chatResult(validWorkerContent("ok"));
           throw new LLMClientError(500, "overloaded");
         }
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
     const cooldown = createCooldownManager();
     const pool = createFallbackPool([], cooldown);
     const customTeam: TeamComposition = {
       workers: [
-        { model: "prov-a/model-0", role: "worker" },
-        { model: "prov-b/model-1", role: "worker" },
+        { model: "prov-a/model-0"},
+        { model: "prov-b/model-1"},
       ],
     };
-    const replenish = mock(() => [{ model: "prov-d/model-3", role: "worker" as const }]);
+    const replenish = mock(() => [{ model: "prov-d/model-3"}]);
     await deliberate(customTeam, makeInput(), deps, makeConfig({ protocol: "sequential_refinement" }), { pool, replenish });
     expect(replenish).not.toHaveBeenCalled();
   });
@@ -2656,74 +2476,6 @@ describe("aggregation confidence_weighted fallback", () => {
 });
 
 // =============================================================================
-// detectConformity
-// =============================================================================
-
-describe("detectConformity", () => {
-  it("returns null for fewer than 2 responses", async () => {
-    const { detectConformity } = await import("./engine");
-    const round = {
-      number: 1,
-      responses: [{ model: "a", content: "x", workerIndex: 0, confidence: "high" as const }],
-    };
-    expect(detectConformity(round)).toBeNull();
-  });
-
-  it("returns null when not all workers report HIGH confidence", () => {
-    const { detectConformity } = require("./engine");
-    const round = {
-      number: 1,
-      responses: [
-        { model: "a", content: "Yes use Bun for performance.", workerIndex: 0, confidence: "high" },
-        { model: "b", content: "Yes use Bun for performance.", workerIndex: 1, confidence: "medium" },
-      ],
-    };
-    expect(detectConformity(round)).toBeNull();
-  });
-
-  it("returns null when responses are very different despite all-HIGH", () => {
-    const { detectConformity } = require("./engine");
-    const round = {
-      number: 1,
-      responses: [
-        { model: "a", content: "Bun is faster and has better DX. Choose Bun.", workerIndex: 0, confidence: "high" },
-        { model: "b", content: "Stick with Node. The ecosystem and stability matter more.", workerIndex: 1, confidence: "high" },
-      ],
-    };
-    expect(detectConformity(round)).toBeNull();
-  });
-
-  it("returns warning when all-HIGH and responses textually similar", () => {
-    const { detectConformity } = require("./engine");
-    const sharedAnswer = "Yes use Bun. It is faster and the ecosystem matures fast. Choose Bun.";
-    const round = {
-      number: 1,
-      responses: [
-        { model: "a", content: sharedAnswer, workerIndex: 0, confidence: "high" },
-        { model: "b", content: sharedAnswer + " (slightly different ending)", workerIndex: 1, confidence: "high" },
-        { model: "c", content: sharedAnswer + " (also different)", workerIndex: 2, confidence: "high" },
-      ],
-    };
-    const w = detectConformity(round);
-    expect(w).not.toBeNull();
-    expect(w).toContain("conformity");
-  });
-
-  it("returns null when any worker has no confidence marker", () => {
-    const { detectConformity } = require("./engine");
-    const sharedAnswer = "Same answer here.";
-    const round = {
-      number: 1,
-      responses: [
-        { model: "a", content: sharedAnswer, workerIndex: 0, confidence: "high" },
-        { model: "b", content: sharedAnswer, workerIndex: 1 }, // no confidence
-      ],
-    };
-    expect(detectConformity(round)).toBeNull();
-  });
-});
-
-// =============================================================================
 // R1 conformity warning integration
 // =============================================================================
 
@@ -2739,8 +2491,7 @@ describe("R1 conformity warning in deliberate output", () => {
       chat: mock(async () => {
         call++;
         return {
-          content: sharedAnswer + (call === 2 ? " (slightly different ending)" : ""),
-          inputTokens: 1, outputTokens: 1, finishReason: "stop",
+          content: sharedAnswer + (call === 2 ? " (slightly different ending)" : ""), outputTokens: 1, finishReason: "stop",
         };
       }),
     });
@@ -2762,8 +2513,7 @@ describe("R1 conformity warning in deliberate output", () => {
         return {
           content: call === 1
             ? "Use Bun for performance. confidence: HIGH"
-            : "Stick with Node for ecosystem. confidence: HIGH",
-          inputTokens: 1, outputTokens: 1, finishReason: "stop",
+            : "Stick with Node for ecosystem. confidence: HIGH", outputTokens: 1, finishReason: "stop",
         };
       }),
     });
@@ -2854,8 +2604,7 @@ describe("computeR1Diversity", () => {
       chat: mock(async () => {
         call++;
         return {
-          content: "Same answer here, almost identical." + (call === 2 ? "." : ""),
-          inputTokens: 1, outputTokens: 1, finishReason: "stop",
+          content: "Same answer here, almost identical." + (call === 2 ? "." : ""), outputTokens: 1, finishReason: "stop",
         };
       }),
     });
@@ -2879,8 +2628,7 @@ describe("computeR1Diversity", () => {
         return {
           content: call === 1
             ? "Bun is faster but ecosystem is smaller, prefer Node for production."
-            : "Node has battle-tested libraries; only switch to Bun for prototypes.",
-          inputTokens: 1, outputTokens: 1, finishReason: "stop",
+            : "Node has battle-tested libraries; only switch to Bun for prototypes.", outputTokens: 1, finishReason: "stop",
         };
       }),
     });
@@ -2891,81 +2639,6 @@ describe("computeR1Diversity", () => {
   });
 });
 
-// =============================================================================
-// detectMinorityDissent
-// =============================================================================
-
-describe("detectMinorityDissent", () => {
-  it("returns null for fewer than 3 responses", async () => {
-    const { detectMinorityDissent } = await import("./engine");
-    const round = {
-      number: 1,
-      responses: [
-        { model: "a", content: "x", workerIndex: 0, confidence: "high" as const },
-        { model: "b", content: "y", workerIndex: 1, confidence: "high" as const },
-      ],
-    };
-    expect(detectMinorityDissent(round)).toBeNull();
-  });
-
-  it("identifies the lone dissenter when N-1 agree and 1 disagrees", () => {
-    const { detectMinorityDissent } = require("./engine");
-    const consensus = "Yes use Bun for performance — much faster than Node and the ecosystem is catching up.";
-    const round = {
-      number: 1,
-      responses: [
-        { model: "majority/a", content: consensus, workerIndex: 0, confidence: "high" },
-        { model: "majority/b", content: consensus, workerIndex: 1, confidence: "high" },
-        { model: "outlier/c", content: "Stick with Node — Bun's GC pauses break our latency budget. Different stack, different priorities.", workerIndex: 2, confidence: "high" },
-      ],
-    };
-    const w = detectMinorityDissent(round);
-    expect(w).not.toBeNull();
-    expect(w).toContain("outlier/c");
-    expect(w).toContain("HIGH");
-  });
-
-  it("returns null when all responses cluster (no dissenter)", () => {
-    const { detectMinorityDissent } = require("./engine");
-    const consensus = "Yes use Bun for performance.";
-    const round = {
-      number: 1,
-      responses: [
-        { model: "a", content: consensus, workerIndex: 0, confidence: "high" },
-        { model: "b", content: consensus + " Slightly different.", workerIndex: 1, confidence: "high" },
-        { model: "c", content: consensus + " Also similar.", workerIndex: 2, confidence: "high" },
-      ],
-    };
-    expect(detectMinorityDissent(round)).toBeNull();
-  });
-
-  it("returns null when responses are all different (no majority cluster)", () => {
-    const { detectMinorityDissent } = require("./engine");
-    const round = {
-      number: 1,
-      responses: [
-        { model: "a", content: "AAAAAAAAAAAAAAAAA", workerIndex: 0, confidence: "high" },
-        { model: "b", content: "BBBBBBBBBBBBBBBBB", workerIndex: 1, confidence: "high" },
-        { model: "c", content: "CCCCCCCCCCCCCCCCC", workerIndex: 2, confidence: "high" },
-      ],
-    };
-    expect(detectMinorityDissent(round)).toBeNull();
-  });
-
-  it("does NOT highlight a dissenter that lacks HIGH confidence", () => {
-    const { detectMinorityDissent } = require("./engine");
-    const consensus = "Yes use Bun for performance.";
-    const round = {
-      number: 1,
-      responses: [
-        { model: "a", content: consensus, workerIndex: 0, confidence: "high" },
-        { model: "b", content: consensus + " Same.", workerIndex: 1, confidence: "high" },
-        { model: "c", content: "Stick with Node — Bun's GC pauses break latency.", workerIndex: 2, confidence: "low" },
-      ],
-    };
-    expect(detectMinorityDissent(round)).toBeNull();
-  });
-});
 
 // =============================================================================
 // minority dissent integration
@@ -2984,8 +2657,7 @@ describe("minority_dissent warning in deliberate output", () => {
       chat: mock(async () => {
         call++;
         return {
-          content: call < 3 ? consensus : dissent,
-          inputTokens: 1, outputTokens: 1, finishReason: "stop",
+          content: call < 3 ? consensus : dissent, outputTokens: 1, finishReason: "stop",
         };
       }),
     });
@@ -3009,7 +2681,7 @@ describe("recordTranscript", () => {
 
     let i = 0;
     const deps = makeDeps({
-      chat: mock(async (_model: string) => chatResult(validWorkerContent(`out-${++i}`), 10, 20)),
+      chat: mock(async (_model: string) => chatResult(validWorkerContent(`out-${++i}`))),
       buildR1Messages: mock(() => [
         { role: "system" as const, content: "SYS" },
         { role: "user" as const, content: "U" },
@@ -3038,7 +2710,7 @@ describe("recordTranscript", () => {
     const deps = makeDeps({
       chat: mock(async (model: string) => {
         if (model === "worker/model-0") throw new Error("provider down");
-        return chatResult(validWorkerContent("ok"), 10, 20);
+        return chatResult(validWorkerContent("ok"));
       }),
     });
 
@@ -3061,7 +2733,7 @@ describe("recordTranscript", () => {
     });
 
     const deps = makeDeps({
-      chat: mock(async () => ({ content: "ok", inputTokens: 1, outputTokens: 1, sessionId: "sess-abc" })),
+      chat: mock(async () => ({ content: "ok", sessionId: "sess-abc" })),
       buildR1Messages: mock(() => [
         { role: "system" as const, content: "SYS" },
         { role: "user" as const, content: "U" },
@@ -3075,5 +2747,34 @@ describe("recordTranscript", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0].sessionId).toBe("sess-abc");
     expect(entries[0].settings).toEqual({ system: "SYS", reasoning_effort: 7, webAccess: true });
+  });
+});
+
+describe("sequential_refinement across rounds", () => {
+  it("starts round 2 from the artifact round 1 ended on, not from a blank page", async () => {
+    // The chain refines one artifact: worker 0 drafts, worker 1 improves it. When a second round
+    // runs, its first worker must pick up where the last round left off — otherwise everything
+    // round 1 was paid for is discarded and the round is a fresh start in disguise.
+    const prompts: { round: number; worker: number; user: string }[] = [];
+    let call = 0;
+    const deps = makeDeps({
+      chat: mock(async (_model: string, messages: ChatMessage[]) => {
+        const user = String(messages.find((m) => m.role === "user")?.content ?? "");
+        prompts.push({ round: Math.floor(call / 2) + 1, worker: call % 2, user });
+        call++;
+        return chatResult(validWorkerContent(`draft-${call}`));
+      }),
+    });
+
+    await deliberate(
+      makeTeam(2),
+      makeInput(),
+      deps,
+      makeConfig({ protocol: "sequential_refinement", maxRounds: 2 }),
+    );
+
+    const r2w0 = prompts.find((p) => p.round === 2 && p.worker === 0);
+    expect(r2w0).toBeDefined();
+    expect(r2w0!.user).toContain("<previous-version>");
   });
 });

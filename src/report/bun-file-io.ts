@@ -3,7 +3,7 @@
  * Bun natively implements node:fs as optimized native code.
  *
  * Used by FileReporter for persistent JSONL storage.
- * Bun-first: Bun recommends node:fs for mkdir/readdir. appendFile/readFile/unlink
+ * Bun-first: Bun recommends node:fs for mkdir/readdir. appendFile/readFile
  * also Bun-native. Uniform module enables mock.module() in unit tests.
  */
 
@@ -12,7 +12,6 @@ import {
   readFile,
   mkdir,
   readdir,
-  unlink,
   writeFile,
 } from "node:fs/promises";
 import * as fsp from "node:fs/promises";
@@ -70,12 +69,5 @@ export class BunFileIO implements FileIO {
 
   async rename(from: string, to: string): Promise<void> {
     await fsp.rename(from, to);
-  }
-
-  async removeGlob(pattern: string): Promise<void> {
-    const files = await this.glob(pattern);
-    for (const file of files) {
-      await unlink(file);
-    }
   }
 }

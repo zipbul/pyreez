@@ -3,24 +3,6 @@
  */
 
 /**
- * A single LLM call record for quality/cost tracking.
- */
-export interface CallRecord {
-  /** Model ID used (e.g., "openai/gpt-4.1"). */
-  model: string;
-  /** Task type from classification (e.g., "CODE_WRITE"). */
-  taskType: string;
-  /** Quality score (0-10). */
-  quality: number;
-  /** Latency in milliseconds. */
-  latencyMs: number;
-  /** Token usage. */
-  tokens: { input: number; output: number };
-  /** Team identifier for team-level evaluation. */
-  teamId?: string;
-}
-
-/**
  * Abstraction over file system I/O for testability.
  */
 export interface FileIO {
@@ -34,8 +16,6 @@ export interface FileIO {
   mkdir(path: string): Promise<void>;
   /** Return file paths matching a glob pattern. Sorted ascending. */
   glob(pattern: string): Promise<string[]>;
-  /** Remove all files matching a glob pattern. */
-  removeGlob(pattern: string): Promise<void>;
   /** Rename/move a file (used for atomic write-then-swap). */
   rename(from: string, to: string): Promise<void>;
 }

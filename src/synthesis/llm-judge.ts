@@ -52,7 +52,7 @@ function parseVerdict(text: string): "A" | "B" | "TIE" {
   return "TIE";
 }
 
-export interface LLMJudgeOptions {
+interface LLMJudgeOptions {
   /**
    * Position-bias mitigation strategy.
    * - "eager" (default, research-recommended): always run forward + swap pass.

@@ -16,14 +16,13 @@ import type { DeliberateInput, DeliberateOutput, GenerationParams, Protocol } fr
 import type { ChatResult, EngineDeps, EngineConfig, FallbackDeps } from "./engine";
 import { createFallbackPool } from "./engine";
 import { splitSystemMessages } from "../llm/providers/message-util";
-import type { DeliberationStore } from "./store-types";
-import { composeTeam, scoreModel } from "./team-composer";
+import { composeTeam, NoModelsAvailableError } from "./team-composer";
 import { deliberate } from "./engine";
 import { createCooldownManager } from "./cooldown";
 import type { CooldownManager } from "./cooldown";
 import type { TranscriptRecorder } from "./transcript";
-import { scoreResponse, type RubricChatFn } from "../quality/rubric-judge";
-import type { AffinityLogRecord } from "../model/affinity";
+import type { FileIO } from "../report/types";
+import { scoreDeliberation } from "../quality/scoring";
 import {
   buildSharedConvergenceR1,
   buildSharedConvergenceR2,
@@ -36,24 +35,36 @@ import {
 // -- Public types --
 
 /**
+ * Wiring for the post-run scoring hook (best-effort, off the hot path). `enabled` is the
+ * `--no-scoring` kill switch — protocol-level gating (SC/ADV default-on, eval opt-in) lives inside
+ * the hook itself (scoreDeliberation), since it depends on `input.protocol`, which isn't known yet
+ * at the point these deps are constructed (once, in cli.ts's buildConfig()).
+ */
+export interface ScoringWireDeps {
+  readonly fileIO: FileIO;
+  readonly enabled: boolean;
+  /** eval(evaluation_scoring)은 1R 프로토콜 오버헤드가 커 기본 OFF — --score-eval로만 켠다. */
+  readonly scoreEvalEnabled?: boolean;
+  /** Test seam — default Date.now/Math.random. */
+  readonly now?: () => number;
+  readonly rng?: () => number;
+}
+
+/**
  * Dependencies for creating a deliberate function.
  */
 export interface WireDeps {
   readonly registry: {
-    getAll(): ModelInfo[];
     getAvailable(): ModelInfo[];
     getById(id: string): ModelInfo | undefined;
   };
   readonly chat: (model: string, messages: ChatMessage[], params?: GenerationParams) => Promise<ChatResult>;
-  readonly store?: DeliberationStore;
   /** Shared CooldownManager (process-scoped). When omitted, a per-call instance is created. */
   readonly cooldown?: CooldownManager;
   /** Optional transcript sink, forwarded to the engine to capture per-worker prompt+output. */
   readonly recordTranscript?: TranscriptRecorder;
-  /** Optional affinity scorer: a fixed neutral judge used post-run to rate workers on the topic axes. */
-  readonly judge?: { readonly model: string; readonly chat: RubricChatFn };
-  /** Optional sink for a scored affinity record (one per worker). Best-effort, off the hot path. */
-  readonly recordAffinity?: (record: AffinityLogRecord) => Promise<void> | void;
+  /** Optional post-run scoring hook wiring. Absent = scoring never runs (equivalent to --no-scoring). */
+  readonly scoring?: ScoringWireDeps;
 
   // -- Test seam --
   // Override the team-composition / engine collaborators below. Each defaults to the real
@@ -63,9 +74,9 @@ export interface WireDeps {
   // restored between test files, so a test that mocks these modules leaks its stubs into every
   // other file that imports the real wire.ts afterward in the same `bun test` run.
   readonly composeTeam?: typeof composeTeam;
-  readonly scoreModel?: typeof scoreModel;
   readonly deliberate?: typeof deliberate;
   readonly createFallbackPool?: typeof createFallbackPool;
+  readonly scoreDeliberation?: typeof scoreDeliberation;
 }
 
 // -- Think Tag Stripping --
@@ -124,14 +135,8 @@ export function createChatAdapter(
       ...(params?.reasoning_effort != null ? { reasoning_effort: params.reasoning_effort } : {}),
       ...(opts?.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
     });
-    const choice = response.choices[0];
-    const raw = choice?.message?.content ?? "";
-    const truncated = choice?.finish_reason === "length";
     return {
-      content: stripThinkTags(raw),
-      inputTokens: response.usage?.prompt_tokens ?? 0,
-      outputTokens: response.usage?.completion_tokens ?? 0,
-      ...(truncated ? { truncated } : {}),
+      content: stripThinkTags(response.content),
       ...(response.sessionId ? { sessionId: response.sessionId } : {}),
     };
   };
@@ -174,11 +179,18 @@ function createEngineDepsForProtocol(
     case "sequential_refinement":
     case "evaluation_scoring":
     case "red_team":
-      // These protocols use specialized execution paths — R1 builder as default
+      // Each of these runs its own executor, which overrides buildR1Messages with the prompt its
+      // protocol actually needs. Nothing should ever fall back to this outer builder — a worker that
+      // did would be asked shared_convergence's analysis question instead of, say, attacking a draft.
+      // It used to default to buildSharedConvergenceR1, which produced exactly that wrong prompt in
+      // silence; throwing makes the mistake impossible to miss.
       return {
         chat: chatFn,
-        buildR1Messages: (ctx, instructions, roundInfo) =>
-          buildSharedConvergenceR1(ctx, instructions, roundInfo),
+        buildR1Messages: () => {
+          throw new Error(
+            `${protocol} builds its worker prompts inside its own round executor; the protocol-level R1 builder must not be used`,
+          );
+        },
       };
   }
 }
@@ -214,15 +226,15 @@ export function createDeliberateFn(
   return async (input) => {
     // Test seam (see WireDeps) — real implementations unless a test overrides them.
     const doComposeTeam = deps.composeTeam ?? composeTeam;
-    const doScoreModel = deps.scoreModel ?? scoreModel;
     const doCreateFallbackPool = deps.createFallbackPool ?? createFallbackPool;
     const runDeliberate = deps.deliberate ?? deliberate;
+    const doScoreDeliberation = deps.scoreDeliberation ?? scoreDeliberation;
 
     const cooldown = deps.cooldown ?? createCooldownManager();
 
     // 1. Validate models array non-empty and all IDs exist in registry
     if (!input.models.length) {
-      throw new Error("models is required (min 1)");
+      throw new NoModelsAvailableError("No models given to deliberate on. At least one is required.");
     }
     const invalid = input.models.filter((id) => !deps.registry.getById(id));
     if (invalid.length > 0) {
@@ -254,13 +266,9 @@ export function createDeliberateFn(
     }
 
     // 4. Compose team
-    const specifiedModels = modelIds
-      .map((id) => deps.registry.getById(id)!)
-      .filter(Boolean);
     let team = doComposeTeam(
       { task: input.task, modelIds },
       {
-        getModels: () => specifiedModels,
         getById: (id) => deps.registry.getById(id),
       },
     );
@@ -284,17 +292,17 @@ export function createDeliberateFn(
     };
 
     // 7. Build fallback pool + replenishment
+    // Fallback candidates in discovery order. There is no quality ranking to sort by: discovery
+    // reports only id + provider, so any "best model first" ordering would be invented. What makes
+    // the pick safe is the pool's own logic — same-provider first, cooldown-excluded, no duplicates.
     const allAvailable = deps.registry.getAvailable();
-    const sortedByScore = [...allAvailable].sort(
-      (a, b) => doScoreModel(b) - doScoreModel(a) || b.cost.outputPer1M - a.cost.outputPer1M,
-    );
-    const pool = doCreateFallbackPool(sortedByScore, cooldown);
+    const pool = doCreateFallbackPool(allAvailable, cooldown);
     const teamModelIds = new Set(team.workers.map((w) => w.model));
 
     const fallbackDeps: FallbackDeps = {
       pool,
       replenish(aliveProviders, emptySlots, respondedModels) {
-        const candidates = sortedByScore.filter(
+        const candidates = allAvailable.filter(
           (m: ModelInfo) => aliveProviders.has(m.provider) && !teamModelIds.has(m.id)
             && !cooldown.isOnCooldown(m.id) && !respondedModels.has(m.id),
         );
@@ -302,7 +310,6 @@ export function createDeliberateFn(
 
         return candidates.slice(0, emptySlots).map((m: ModelInfo) => ({
           model: m.id,
-          role: "worker" as const,
         }));
       },
     };
@@ -310,51 +317,24 @@ export function createDeliberateFn(
     // 8. Run deliberation
     let result = await runDeliberate(team, input, engineDeps, config, fallbackDeps);
 
-    // 9. Auto-save to store (best-effort)
-    if (deps.store) {
+
+    // 9. Scoring hook (best-effort, off the hot path): score R1 with a 3-judge panel and fold the
+    // (model, protocol, topic, axis) medians into ratings.json. Protocol/eval gating (SC/ADV
+    // default-on, eval opt-in) lives inside the hook — it needs input.protocol, which isn't known
+    // yet at the point deps.scoring is constructed. scoreDeliberation never throws by contract; the
+    // try/catch here is defense in depth (matches the old affinity block's own belt-and-suspenders).
+    if (deps.scoring?.enabled) {
       try {
-        await deps.store.save({
-          id: crypto.randomUUID(),
-          task: input.task,
-          timestamp: Date.now(),
-          roundsExecuted: result.roundsExecuted,
-          modelsUsed: [...result.modelsUsed],
-          totalLLMCalls: result.totalLLMCalls,
-          totalTokens: result.totalTokens,
-          workerInstructions: input.workerInstructions,
-          protocol,
-          ...(result.rounds ? { roundsSummary: result.rounds.map(r => ({ number: r.number })) } : {}),
-          ...(result.modelSwaps?.length ? { modelSwaps: result.modelSwaps } : {}),
+        await doScoreDeliberation(input, result, {
+          chat: deps.chat,
+          fileIO: deps.scoring.fileIO,
+          now: deps.scoring.now ?? Date.now,
+          rng: deps.scoring.rng ?? Math.random,
+          ...(input.topicPath?.length ? { hostTopicPath: input.topicPath } : {}),
+          scoreEvalEnabled: deps.scoring.scoreEvalEnabled ?? false,
         });
       } catch {
-        // best-effort save — do not fail the deliberation
-      }
-    }
-
-    // 10. Affinity scoring (best-effort, off the hot path): when the host authored a topic + axes,
-    // score each final-round worker with the neutral judge and append one record per worker.
-    if (deps.judge && deps.recordAffinity && input.topicPath?.length && input.axes?.length) {
-      try {
-        const finalRound = result.rounds?.[result.rounds.length - 1];
-        const axes = input.axes;
-        const topicPath = input.topicPath;
-        for (const resp of finalRound?.responses ?? []) {
-          // Don't let the judge score its own output — self-evaluation would bias the learned signal.
-          if (resp.model === deps.judge.model) continue;
-          const scores = await scoreResponse(deps.judge.chat, deps.judge.model, input.task, axes, resp.content);
-          if (Object.keys(scores).length > 0) {
-            await deps.recordAffinity({
-              v: 1,
-              ts: Date.now(),
-              protocol,
-              path: [...topicPath],
-              model: resp.model,
-              axes: scores,
-            });
-          }
-        }
-      } catch {
-        // best-effort — affinity scoring must never fail the deliberation
+        // best-effort — scoring must never fail the deliberation
       }
     }
 

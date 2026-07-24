@@ -67,106 +67,22 @@ describe("GeminiCliProvider", () => {
 
   // -- Happy path: valid JSON response --
 
-  it("should parse valid JSON response with stats", async () => {
-    const output = JSON.stringify({
-      response: "Hello from Gemini",
-      stats: {
-        models: {
-          "gemini-3.1-pro": { tokens: { input: 100, candidates: 50 } },
-        },
-      },
-    });
-    setSpawnResult(output);
-    const provider = new GeminiCliProvider();
-    const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
-    expect(res.choices[0]!.message.content).toBe("Hello from Gemini");
-    expect(res.usage!.prompt_tokens).toBe(100);
-    expect(res.usage!.completion_tokens).toBe(50);
-    expect(res.model).toBe("google/gemini-3.1-pro-preview");
-  });
-
-  it("should expose tokens.cached as cached_tokens", async () => {
-    const output = JSON.stringify({
-      response: "ok",
-      stats: {
-        models: {
-          "gemini-3.1-pro": { tokens: { input: 3203, candidates: 43, cached: 2847 } },
-        },
-      },
-    });
-    setSpawnResult(output);
-    const provider = new GeminiCliProvider();
-    const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
-    expect(res.usage!.prompt_tokens).toBe(3203);
-    expect(res.usage!.completion_tokens).toBe(43);
-    expect(res.usage!.cached_tokens).toBe(2847);
-  });
-
-  it("should sum cached tokens across multiple models", async () => {
-    const output = JSON.stringify({
-      response: "ok",
-      stats: {
-        models: {
-          "a": { tokens: { input: 100, candidates: 50, cached: 80 } },
-          "b": { tokens: { input: 200, candidates: 75, cached: 150 } },
-        },
-      },
-    });
-    setSpawnResult(output);
-    const provider = new GeminiCliProvider();
-    const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
-    expect(res.usage!.cached_tokens).toBe(230);
-  });
-
-  it("should sum tokens across multiple models in stats", async () => {
-    const output = JSON.stringify({
-      response: "ok",
-      stats: {
-        models: {
-          "model-a": { tokens: { input: 100, candidates: 50 } },
-          "model-b": { tokens: { input: 200, candidates: 75 } },
-        },
-      },
-    });
-    setSpawnResult(output);
-    const provider = new GeminiCliProvider();
-    const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
-    expect(res.usage!.prompt_tokens).toBe(300);
-    expect(res.usage!.completion_tokens).toBe(125);
-  });
-
-  it("should handle JSON response without stats", async () => {
+  it("should handle a JSON response", async () => {
     setSpawnResult(JSON.stringify({ response: "no stats" }));
     const provider = new GeminiCliProvider();
     const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
-    expect(res.choices[0]!.message.content).toBe("no stats");
-    expect(res.usage).toBeUndefined();
+    expect(res.content).toBe("no stats");
   });
 
   it("should use empty string when response field is missing from JSON", async () => {
-    setSpawnResult(JSON.stringify({ stats: {} }));
+    setSpawnResult(JSON.stringify({}));
     const provider = new GeminiCliProvider();
     const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
-    expect(res.choices[0]!.message.content).toBe("");
+    expect(res.content).toBe("");
   });
 
-  it("should omit usage when both tokens are 0", async () => {
-    setSpawnResult(JSON.stringify({ response: "ok" }));
-    const provider = new GeminiCliProvider();
-    const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
-    expect(res.usage).toBeUndefined();
-  });
 
   // -- Happy path: invalid JSON fallback --
-
-  it("should use raw stdout when JSON parsing fails", async () => {
-    setSpawnResult("plain text response");
-    const provider = new GeminiCliProvider();
-    const res = await provider.chat({ model: "google/gemini-3.1-pro-preview", messages: [{ role: "user", content: "Hi" }] });
-    expect(res.choices[0]!.message.content).toBe("plain text response");
-    expect(res.usage).toBeUndefined();
-  });
-
   // -- Error: exitCode !== 0 --
 
   it("should throw 429 timeout for stderr containing '429'", async () => {

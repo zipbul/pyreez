@@ -56,7 +56,7 @@ describe("ClaudeAgentProvider.chat", () => {
 
     const response = await provider.chat(baseRequest());
 
-    expect(response.choices[0]!.message.content).toBe("Hello world");
+    expect(response.content).toBe("Hello world");
   });
 
   it("ignores non-text content blocks", async () => {
@@ -67,7 +67,7 @@ describe("ClaudeAgentProvider.chat", () => {
 
     const response = await provider.chat(baseRequest());
 
-    expect(response.choices[0]!.message.content).toBe("ok");
+    expect(response.content).toBe("ok");
   });
 
   it("captures the last session_id seen across streamed messages", async () => {

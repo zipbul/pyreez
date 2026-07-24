@@ -11,30 +11,13 @@ import { z } from "zod/v4";
 
 // -- Acceptance Workers (CLI --workers) --
 
-export const AcceptanceWorkerSchema = z.object({
+const AcceptanceWorkerSchema = z.object({
   model: z.string().min(1),
   original_position: z.string().min(1),
   alignment: z.enum(["on-task", "meta-critique"]).optional(),
 });
 
 export const AcceptanceWorkersArraySchema = z.array(AcceptanceWorkerSchema).min(1);
-
-// -- Cooldown State (cooldown.json) --
-
-const CooldownErrorTypeSchema = z.enum([
-  "rate_limit", "server_error", "timeout", "auth_error", "degenerate", "unknown",
-]);
-
-export const CooldownStateSchema = z.object({
-  entries: z.array(z.object({
-    modelId: z.string().min(1),
-    reason: z.string(),
-    errorType: CooldownErrorTypeSchema,
-    failCount: z.number().int().min(0),
-  })),
-  providers: z.array(z.string()),
-  savedAt: z.number(),
-});
 
 // -- Utility --
 

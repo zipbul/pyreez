@@ -75,37 +75,14 @@ export type ConvergenceStatus = "converged" | "refining" | "diverging";
  * signals together; treat single-judge convergence level as one input,
  * not ground truth.
  *
- * Re-tune as the corpus grows. Override via ClassifyOptions.
+ * Re-tune as the corpus grows.
  */
-export const DEFAULT_CONVERGED_THRESHOLD = 0.53;
-export const DEFAULT_DIVERGING_THRESHOLD = 0.33;
+const DEFAULT_CONVERGED_THRESHOLD = 0.53;
+const DEFAULT_DIVERGING_THRESHOLD = 0.33;
 
-export interface ClassifyOptions {
-  convergedThreshold?: number;
-  divergingThreshold?: number;
-  consecutiveRoundsNeeded?: number;
-}
-
-/**
- * Classify into 3-state status with consecutive-stable-rounds requirement.
- * Status logic source: synaptent/aragora CONVERGENCE.md — converged requires
- * both score threshold AND consecutive_stable_rounds >= consecutive_rounds_needed.
- * The 3-state taxonomy (converged/refining/diverging) is from the same source.
- */
-export function classifyStatus(
-  score: number,
-  consecutiveStableRounds: number,
-  consecutiveRoundsNeededOrOptions: number | ClassifyOptions = 1,
-): ConvergenceStatus {
-  const opts: ClassifyOptions = typeof consecutiveRoundsNeededOrOptions === "number"
-    ? { consecutiveRoundsNeeded: consecutiveRoundsNeededOrOptions }
-    : consecutiveRoundsNeededOrOptions;
-  const conv = opts.convergedThreshold ?? DEFAULT_CONVERGED_THRESHOLD;
-  const div = opts.divergingThreshold ?? DEFAULT_DIVERGING_THRESHOLD;
-  const need = opts.consecutiveRoundsNeeded ?? 1;
-  if (score >= conv && consecutiveStableRounds >= need) {
-    return "converged";
-  }
-  if (score < div) return "diverging";
+/** Bucket an overall convergence score into converged / refining / diverging. */
+export function classifyStatus(score: number): ConvergenceStatus {
+  if (score >= DEFAULT_CONVERGED_THRESHOLD) return "converged";
+  if (score < DEFAULT_DIVERGING_THRESHOLD) return "diverging";
   return "refining";
 }

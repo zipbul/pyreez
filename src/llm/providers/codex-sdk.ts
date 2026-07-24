@@ -57,7 +57,7 @@ export class CodexSdkProvider implements LLMProvider {
       const turn: any = await thread.run(input);
       // thread.id is populated after the first turn — capture it so the thread can be resumed.
       const sessionId: string | undefined = thread.id ?? undefined;
-      return buildSdkResponse(turn.finalResponse ?? "", request.model, turn.usage ?? undefined, sessionId);
+      return buildSdkResponse(turn.finalResponse ?? "", sessionId);
     } catch (error) {
       throw toSdkError(error, "codex");
     }

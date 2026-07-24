@@ -8,7 +8,7 @@ import type { RunLogger } from "./report/run-logger";
 import type { DeliberateInput, DeliberateOutput } from "./deliberation/types";
 import type { FileAccess, ChatMessage } from "./llm/types";
 import { NoModelsAvailableError } from "./deliberation/team-composer";
-import { TeamDegradedError } from "./deliberation/engine";
+import { TeamDegradedError, RoundExecutionError } from "./deliberation/engine";
 import { buildAcceptanceMessages } from "./deliberation/prompts";
 import { classifyAlignment } from "./quality/alignment-classifier";
 import type { GenerationParams } from "./deliberation/types";
@@ -18,13 +18,12 @@ import type { ModelInfo } from "./model/types";
 
 export interface HandlersConfig {
   filteredRegistry?: {
-    getAll(): ModelInfo[];
     getAvailable(): ModelInfo[];
     getById(id: string): ModelInfo | undefined;
   };
   deliberateFn?: (input: DeliberateInput) => Promise<DeliberateOutput>;
   runLogger?: RunLogger;
-  chatFn?: (model: string, messages: ChatMessage[], params?: GenerationParams, opts?: { resumeSessionId?: string }) => Promise<{ content: string; inputTokens: number; outputTokens: number; sessionId?: string }>;
+  chatFn?: (model: string, messages: ChatMessage[], params?: GenerationParams, opts?: { resumeSessionId?: string }) => Promise<{ content: string; sessionId?: string }>;
 }
 
 /** Max characters for error messages. */
@@ -104,12 +103,11 @@ export async function handleDeliberate(
     if (!args.task) {
       return { error: "Error: task is required" };
     }
-    if (!args.models?.length) {
-      return { error: "Error: models is required (min 1)" };
-    }
     if (!config.deliberateFn) {
       return { error: "Error: deliberation not available" };
     }
+    // An empty model list is rejected by the deliberate fn itself, inside the try below, so the
+    // caller gets NoModelsAvailableError's code + remediation rather than a bare message.
 
     try {
       const VALID_PROTOCOLS = new Set(["shared_convergence", "adversarial_debate", "host_interrogation", "sequential_refinement", "evaluation_scoring", "red_team"]);
@@ -167,13 +165,23 @@ export async function handleDeliberate(
           }),
         };
       }
+      // A round that fails outright still burned tokens getting there, and may have swapped
+      // models trying to recover. Report both, the same way a degraded team does — otherwise the
+      // spend simply vanishes from the caller's view.
+      if (error instanceof RoundExecutionError) {
+        return {
+          error: JSON.stringify({
+            error: error.message,
+            ...(error.modelSwaps?.length ? { modelSwaps: error.modelSwaps } : {}),
+          }),
+        };
+      }
       if (error instanceof TeamDegradedError) {
         return {
           error: JSON.stringify({
             error: error.message,
             lostSlots: error.lostSlots,
             ...(error.modelSwaps ? { modelSwaps: error.modelSwaps } : {}),
-            tokensConsumed: error.tokensConsumed,
           }),
         };
       }
@@ -209,8 +217,6 @@ export async function handleAcceptance(
     }
 
     try {
-      let totalInput = 0;
-      let totalOutput = 0;
 
       // Auto-classify alignment for workers that didn't specify one.
       // Defaults to on-task if classification fails (preserves verdict participation).
@@ -241,8 +247,6 @@ export async function handleAcceptance(
       const judgeWorker = async (w: typeof args.workers[number]) => {
         const messages = buildAcceptanceMessages(args.synthesis, w.original_position, args.task);
         const result = await config.chatFn!(w.model, messages);
-        totalInput += result.inputTokens;
-        totalOutput += result.outputTokens;
 
         const verdictRaw = result.content.match(/<verdict>([\s\S]*?)<\/verdict>/)?.[1]?.trim()?.toLowerCase();
         const verdict = verdictRaw ?? "reject"; // default to reject if format not followed — fail-safe
@@ -282,7 +286,6 @@ export async function handleAcceptance(
       return {
         data: {
           workers,
-          totalTokens: { input: totalInput, output: totalOutput },
           ...(metaCritiqueWorkers.length > 0 ? {
             metaCritiques: metaCritiqueWorkers.map((w) => ({
               model: w.model,

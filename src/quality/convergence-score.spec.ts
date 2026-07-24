@@ -49,22 +49,18 @@ describe("computeConvergenceScore", () => {
 });
 
 describe("classifyStatus", () => {
-  it("returns 'converged' when score >= 0.85 and consecutive stable rounds >= required", () => {
-    expect(classifyStatus(0.90, 1, 1)).toBe("converged");
-    expect(classifyStatus(0.85, 1, 1)).toBe("converged");
+  it("returns 'converged' at or above the converged threshold (0.53)", () => {
+    expect(classifyStatus(0.90)).toBe("converged");
+    expect(classifyStatus(0.53)).toBe("converged");
   });
 
-  it("returns 'refining' when score is between thresholds", () => {
-    expect(classifyStatus(0.60, 0, 1)).toBe("refining");
-    expect(classifyStatus(0.84, 0, 1)).toBe("refining");
+  it("returns 'refining' between the diverging and converged thresholds", () => {
+    expect(classifyStatus(0.52)).toBe("refining");
+    expect(classifyStatus(0.33)).toBe("refining");
   });
 
-  it("returns 'diverging' when score < 0.40", () => {
-    expect(classifyStatus(0.30, 0, 1)).toBe("diverging");
-    expect(classifyStatus(0.10, 0, 1)).toBe("diverging");
-  });
-
-  it("returns 'refining' when score is converged-eligible but consecutive_stable < required", () => {
-    expect(classifyStatus(0.90, 0, 2)).toBe("refining");
+  it("returns 'diverging' below the diverging threshold (0.33)", () => {
+    expect(classifyStatus(0.32)).toBe("diverging");
+    expect(classifyStatus(0.0)).toBe("diverging");
   });
 });

@@ -16,14 +16,14 @@ describe("parseCodexModels", () => {
   it("maps codex debug-models JSON to provider-prefixed ids", () => {
     const json = JSON.stringify({
       models: [
-        { slug: "gpt-5.5", display_name: "GPT-5.5", description: "Frontier model." },
-        { slug: "gpt-5.4-mini", display_name: "GPT-5.4 mini", description: "Fast." },
+        { slug: "gpt-5.5", display_name: "GPT-5.5" },
+        { slug: "gpt-5.4-mini", display_name: "GPT-5.4 mini" },
       ],
     });
     const models = parseCodexModels(json);
     expect(models).toEqual([
-      { id: "openai/gpt-5.5", provider: "openai", displayName: "GPT-5.5", description: "Frontier model." },
-      { id: "openai/gpt-5.4-mini", provider: "openai", displayName: "GPT-5.4 mini", description: "Fast." },
+      { id: "openai/gpt-5.5", provider: "openai" },
+      { id: "openai/gpt-5.4-mini", provider: "openai" },
     ] satisfies DiscoveredModel[]);
   });
 

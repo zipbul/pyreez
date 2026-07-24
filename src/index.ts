@@ -8,7 +8,6 @@ import type { LLMProvider } from "./llm/types";
 
 /**
  * Filter registry models to only those from configured providers.
- * Accepts any registry-shaped source (curated ModelRegistry or the discovery-backed adapter).
  * Exported for use by CLI and tests.
  */
 export function filterModelsByProviders(

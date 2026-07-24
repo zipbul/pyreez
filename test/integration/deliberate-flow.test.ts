@@ -19,7 +19,7 @@ import { createChatAdapter, createDeliberateFn } from "../../src/deliberation/wi
 import type { ChatCompletionRequest, ChatCompletionResponse } from "../../src/llm/types";
 import type { ModelInfo } from "../../src/model/types";
 import { NoModelsAvailableError } from "../../src/deliberation/team-composer";
-import { TeamDegradedError } from "../../src/deliberation/engine";
+import { TeamDegradedError, RoundExecutionError } from "../../src/deliberation/engine";
 
 // ============================================================
 // Fixtures — 3 providers x 1 model each
@@ -27,29 +27,17 @@ import { TeamDegradedError } from "../../src/deliberation/engine";
 
 const MODEL_A: ModelInfo = {
   id: "openai/gpt-4.1",
-  name: "GPT-4.1",
   provider: "openai",
-  contextWindow: 128000,
-  cost: { inputPer1M: 2, outputPer1M: 8 },
-  supportsToolCalling: true,
 };
 
 const MODEL_B: ModelInfo = {
   id: "google/gemini-pro",
-  name: "Gemini Pro",
   provider: "google",
-  contextWindow: 512000,
-  cost: { inputPer1M: 0.5, outputPer1M: 1 },
-  supportsToolCalling: true,
 };
 
 const MODEL_C: ModelInfo = {
   id: "xai/grok-4",
-  name: "Grok 4",
   provider: "xai",
-  contextWindow: 128000,
-  cost: { inputPer1M: 2, outputPer1M: 6 },
-  supportsToolCalling: true,
 };
 
 const FIXTURE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
@@ -57,7 +45,6 @@ const FIXTURE_MODEL_IDS = FIXTURE_MODELS.map((m) => m.id);
 
 function fixtureRegistry() {
   return {
-    getAll: () => [...FIXTURE_MODELS],
     getAvailable: () => [...FIXTURE_MODELS],
     getById: (id: string) => FIXTURE_MODELS.find((m) => m.id === id),
   };
@@ -67,15 +54,8 @@ function fixtureRegistry() {
 // Raw chat completion helper — the test-doubled boundary
 // ============================================================
 
-function completion(content: string, input = 10, output = 10): ChatCompletionResponse {
-  return {
-    id: "cmpl-test",
-    object: "chat.completion",
-    created: Date.now(),
-    model: "test",
-    choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
-    usage: { prompt_tokens: input, completion_tokens: output, total_tokens: input + output },
-  };
+function completion(content: string): ChatCompletionResponse {
+  return { content };
 }
 
 /**
@@ -142,28 +122,6 @@ describe("Deliberation flow — handleDeliberate through the full stack", () => 
       expect(result.error).toBeUndefined();
       expect((result.data as any).roundsExecuted).toBe(3);
     });
-
-    it("accumulates tokens and LLM call counts across rounds", async () => {
-      let callNum = 0;
-      const rawChat = mock(async (_req: ChatCompletionRequest) =>
-        completion(`Worker response ${++callNum} ${"t".repeat(callNum * 40)}`, 30, 60),
-      );
-      const config = buildConfig(rawChat);
-
-      const result = await handleDeliberate(config, {
-        task: "Token accumulation test",
-        models: [...FIXTURE_MODEL_IDS],
-        protocol: "shared_convergence",
-        max_rounds: 3,
-      });
-
-      const data = result.data as any;
-      expect(data.roundsExecuted).toBe(3);
-      expect(data.totalTokens.input).toBeGreaterThan(50);
-      expect(data.totalTokens.output).toBeGreaterThan(50);
-      expect(data.totalLLMCalls).toBeGreaterThanOrEqual(data.roundsExecuted * 2);
-    });
-
     it("produces independent results on consecutive calls", async () => {
       let globalCallCount = 0;
       const rawChat = mock(async (_req: ChatCompletionRequest) => {
@@ -236,7 +194,7 @@ describe("Deliberation flow — handleDeliberate through the full stack", () => 
     });
 
     it("populates every DeliberateOutput field plus handler-added fields", async () => {
-      const rawChat = mock(async (_req: ChatCompletionRequest) => completion("Worker output", 30, 60));
+      const rawChat = mock(async (_req: ChatCompletionRequest) => completion("Worker output"));
       const config = buildConfig(rawChat);
 
       const result = await handleDeliberate(config, {
@@ -249,8 +207,6 @@ describe("Deliberation flow — handleDeliberate through the full stack", () => 
       expect(result.error).toBeUndefined();
       const data = result.data as any;
       expect(data.roundsExecuted).toBe(1);
-      expect(data.totalTokens.input).toBeGreaterThan(0);
-      expect(data.totalTokens.output).toBeGreaterThan(0);
       expect(data.totalLLMCalls).toBeGreaterThanOrEqual(2);
       expect(data.modelsUsed.length).toBeGreaterThanOrEqual(1);
       for (const modelId of data.modelsUsed) {
@@ -626,13 +582,18 @@ describe("Deliberation flow — handleDeliberate through the full stack", () => 
   // Input validation and error mapping
   // ----------------------------------------------------------
   describe("input validation and error mapping", () => {
-    it("rejects an empty models array (boundary)", async () => {
+    it("rejects an empty models array with the structured no-models error, not a bare string", async () => {
+      // NoModelsAvailableError carries a code and remediation steps a host can act on. It used to be
+      // thrown only from a branch wire could never reach, so the path a caller actually hits — an
+      // empty models array — degraded to a plain message and the remediation never shipped.
       const rawChat = mock(async () => completion("unreachable"));
       const config = buildConfig(rawChat);
 
       const result = await handleDeliberate(config, { task: "t", models: [], protocol: "shared_convergence" });
 
-      expect(result.error).toBe("Error: models is required (min 1)");
+      const parsed = JSON.parse(result.error!);
+      expect(parsed.code).toBe("NO_MODELS_AVAILABLE");
+      expect(parsed.remediation.length).toBeGreaterThan(0);
       expect(rawChat).not.toHaveBeenCalled();
     });
 
@@ -684,7 +645,7 @@ describe("Deliberation flow — handleDeliberate through the full stack", () => 
     it("maps a TeamDegradedError thrown by deliberateFn into a structured error", async () => {
       const config: HandlersConfig = {
         deliberateFn: async () => {
-          throw new TeamDegradedError(3, 1, [{ model: "m/a", reason: "timeout" }], { input: 10, output: 20 });
+          throw new TeamDegradedError(3, 1, [{ model: "m/a", reason: "timeout" }]);
         },
       };
 
@@ -693,7 +654,28 @@ describe("Deliberation flow — handleDeliberate through the full stack", () => 
       expect(result.error).toBeDefined();
       const parsed = JSON.parse(result.error!);
       expect(parsed.lostSlots).toEqual([{ model: "m/a", reason: "timeout" }]);
-      expect(parsed.tokensConsumed).toEqual({ input: 10, output: 20 });
+    });
+
+    it("maps a RoundExecutionError into a structured error carrying the swap history", async () => {
+      // A round that fails outright may have swapped models trying to recover. Without this
+      // mapping the error fell through to the generic sanitizer, which keeps only the message —
+      // so the swap history vanished, while the sibling TeamDegradedError reported it.
+      const config: HandlersConfig = {
+        deliberateFn: async () => {
+          throw new RoundExecutionError(
+            "m/a",
+            new Error("upstream 500"),
+            [{ original: "m/a", replacement: "m/b", round: 1, error: "upstream 500" }],
+          );
+        },
+      };
+
+      const result = await handleDeliberate(config, { task: "t", models: ["m/a"], protocol: "shared_convergence" });
+
+      expect(result.error).toBeDefined();
+      const parsed = JSON.parse(result.error!);
+      expect(parsed.modelSwaps).toHaveLength(1);
+      expect(parsed.error).toContain("m/a");
     });
 
     it("sanitizes an overly long generic error message with a trailing ellipsis", async () => {
@@ -735,7 +717,6 @@ describe("Deliberation flow — handleDeliberate through the full stack", () => 
             if (logCallCount === 1) throw new Error("disk full");
             return Promise.resolve();
           },
-          query: async () => [],
         },
       };
 

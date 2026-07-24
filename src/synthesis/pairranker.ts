@@ -16,13 +16,13 @@ export interface Candidate {
   readonly content: string;
 }
 
-export interface RankedCandidate {
+interface RankedCandidate {
   readonly id: string;
   readonly wins: number;
   readonly losses: number;
 }
 
-export interface RankResult {
+interface RankResult {
   readonly ranking: readonly RankedCandidate[];
 }
 

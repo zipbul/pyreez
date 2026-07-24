@@ -9,7 +9,6 @@
  * @module Deliberation Types
  */
 
-import type { TaskNature } from "./task-nature";
 import type { Capabilities, FileAccess } from "../llm/types";
 
 // -- Protocol --
@@ -47,7 +46,6 @@ export type GenerationParams = Capabilities;
  * Role within a deliberation team.
  * "worker" is standard. "generator"/"attacker" are used in red_team protocol.
  */
-export type TeamRole = "worker" | "generator" | "attacker";
 
 /**
  * A single team member assignment.
@@ -55,8 +53,6 @@ export type TeamRole = "worker" | "generator" | "attacker";
 export interface TeamMember {
   /** Model ID (e.g., "openai/gpt-5"). */
   readonly model: string;
-  /** Assigned role. */
-  readonly role: TeamRole;
 }
 
 /**
@@ -78,8 +74,6 @@ export interface WorkerResponse {
   readonly workerIndex: number;
   /** Self-reported confidence from explicit markers. undefined = no marker found. */
   readonly confidence?: "high" | "medium" | "low";
-  /** True when the response was cut off by max_tokens (finish_reason === "length"). */
-  readonly truncated?: boolean;
 }
 
 /**
@@ -103,8 +97,6 @@ export interface Round {
   readonly responses: readonly WorkerResponse[];
   /** Workers that failed during this round (partial failure tracking). */
   readonly failedWorkers?: readonly FailedWorker[];
-  /** Protocol used for this round. */
-  readonly protocol?: Protocol;
 }
 
 // -- SharedContext --
@@ -117,17 +109,6 @@ export interface SharedContext {
   readonly task: string;
   readonly team: TeamComposition;
   readonly rounds: readonly Round[];
-  readonly taskNature?: TaskNature;
-}
-
-// -- Token Usage --
-
-/**
- * Accumulated token usage across a deliberation session.
- */
-export interface TokenUsage {
-  readonly input: number;
-  readonly output: number;
 }
 
 // -- Model Swap --
@@ -151,14 +132,6 @@ export interface ModelSwap {
 }
 
 // -- Host Interrogation --
-
-/**
- * A single question-answer exchange in host interrogation.
- */
-export interface InterrogationExchange {
-  readonly question: string;
-  readonly answer: string;
-}
 
 // -- Evaluation Scoring --
 
@@ -184,7 +157,6 @@ export interface DeliberateInput {
   /** Number of workers. Default = models.length. Upper bound 7, lower bound 1. */
   readonly count?: number;
   /** Task nature for prompt selection. Artifact = deliverable output, Critique = analysis. */
-  readonly taskNature?: TaskNature;
 
   // -- Affinity (learned routing) — host-authored; when both present, the run is scored + logged --
   /** Topic path (arbitrary depth) this task belongs to, e.g. ["인증-보안","토큰-캐싱"]. */
@@ -196,8 +168,6 @@ export interface DeliberateInput {
 
   /** Host interrogation: questions to ask each worker. */
   readonly questions?: readonly string[];
-  /** Host interrogation: previous exchanges for session continuation. Keyed by workerIndex. */
-  readonly previousExchanges?: Readonly<Record<number, readonly InterrogationExchange[]>>;
 
   /** Evaluation scoring: criteria for evaluation. */
   readonly criteria?: string;
@@ -206,18 +176,12 @@ export interface DeliberateInput {
   /** Evaluation scoring: aggregation method. Default: "voting". */
   readonly aggregation?: AggregationMethod;
 
-  /** Red team: role assignments per worker index. */
-  readonly roles?: Readonly<Record<number, "generator" | "attacker">>;
-
-  /** Sequential refinement: order of worker indices. */
-  readonly workerOrder?: readonly number[];
-
   /** Enable read-only file access for workers during deliberation.
    * "read" (review files, no writes) or "write" (also edit). Provider maps to its own mechanism. */
   readonly fileAccess?: FileAccess;
 
   /** Enable web lookup tools so workers VERIFY citations instead of recalling them.
-   * Claude CLI only. Significant cost/latency — opt-in. */
+   * Significant cost/latency — opt-in. */
   readonly webAccess?: boolean;
 
   /** Vendor reasoning-effort hint forwarded to each worker LLM. */
@@ -231,7 +195,6 @@ export interface DeliberateInput {
     number: number;
     responses: readonly { model: string; content: string; confidence?: "high" | "medium" | "low" }[];
     failedWorkers?: readonly FailedWorker[];
-    protocol: Protocol;
   }) => void;
 }
 
@@ -247,7 +210,6 @@ export interface Degradation {
 
 export interface DeliberateOutput {
   readonly roundsExecuted: number;
-  readonly totalTokens: TokenUsage;
   readonly totalLLMCalls: number;
   readonly modelsUsed: readonly string[];
   /** Protocol used. */
@@ -256,7 +218,7 @@ export interface DeliberateOutput {
   readonly rounds?: readonly {
     number: number;
     protocol: Protocol;
-    responses?: readonly { model: string; content: string; confidence?: "high" | "medium" | "low"; truncated?: boolean }[];
+    responses?: readonly { model: string; content: string; workerIndex: number; confidence?: "high" | "medium" | "low" }[];
     failedWorkers?: readonly FailedWorker[];
   }[];
   /** Warnings about deliberation quality (e.g., low provider diversity). */

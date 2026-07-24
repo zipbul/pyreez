@@ -23,13 +23,13 @@ export interface JudgeResult {
   readonly contradictedClaims: readonly string[];
 }
 
-export interface ResponseFinding {
+interface ResponseFinding {
   readonly id: string;
   readonly unsupported: readonly string[];
   readonly contradicted: readonly string[];
 }
 
-export interface CrossValidateResult {
+interface CrossValidateResult {
   readonly findings: readonly ResponseFinding[];
 }
 

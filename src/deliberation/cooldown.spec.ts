@@ -7,125 +7,66 @@ import { createCooldownManager, classifyError, normalizeErrorMessage, isRetryabl
 import { LLMClientError } from "../llm/errors";
 
 describe("createCooldownManager", () => {
-  // -- HP: basic cooldown --
-
-  it("should return true for model on cooldown when checked immediately", () => {
-    const cm = createCooldownManager();
-    cm.add("openai/gpt-4.1", "rate limit");
-    expect(cm.isOnCooldown("openai/gpt-4.1")).toBe(true);
+  it("excludes a model once it is added", () => {
+    const cd = createCooldownManager();
+    cd.add("openai/gpt-5", "500 error");
+    expect(cd.isOnCooldown("openai/gpt-5")).toBe(true);
   });
 
-  it("should remain on cooldown permanently within session (no TTL expiry)", () => {
-    const cm = createCooldownManager();
-    cm.add("openai/gpt-4.1", "error");
-    // Session-level: stays on cooldown regardless of time
-    expect(cm.isOnCooldown("openai/gpt-4.1")).toBe(true);
+  it("does not exclude a model that was never added", () => {
+    const cd = createCooldownManager();
+    cd.add("openai/gpt-5", "500 error");
+    expect(cd.isOnCooldown("anthropic/opus")).toBe(false);
   });
 
-  it("should return active model IDs from getCooledDownIds", () => {
-    const cm = createCooldownManager();
-    cm.add("openai/gpt-4.1", "error");
-    cm.add("anthropic/claude-opus-4.6", "timeout");
-    const ids = cm.getCooledDownIds();
-    expect(ids.has("openai/gpt-4.1")).toBe(true);
-    expect(ids.has("anthropic/claude-opus-4.6")).toBe(true);
-    expect(ids.size).toBe(2);
+  it("stays excluded for the rest of the run — exclusion never expires", () => {
+    const cd = createCooldownManager();
+    cd.add("openai/gpt-5", "500 error");
+    expect(cd.isOnCooldown("openai/gpt-5")).toBe(true);
+    expect(cd.isOnCooldown("openai/gpt-5")).toBe(true);
   });
 
-  // -- NE: model not present --
-
-  it("should return false for model never added", () => {
-    const cm = createCooldownManager();
-    expect(cm.isOnCooldown("nonexistent/model")).toBe(false);
+  it("tracks models independently", () => {
+    const cd = createCooldownManager();
+    cd.add("openai/gpt-5", "500");
+    cd.add("xai/grok-4.5", "429");
+    expect(cd.isOnCooldown("openai/gpt-5")).toBe(true);
+    expect(cd.isOnCooldown("xai/grok-4.5")).toBe(true);
+    expect(cd.isOnCooldown("anthropic/opus")).toBe(false);
   });
 
-  it("should return empty set when no models on cooldown", () => {
-    const cm = createCooldownManager();
-    expect(cm.getCooledDownIds().size).toBe(0);
+  it("addProvider takes down every model of that provider, not just the one that failed", () => {
+    const cd = createCooldownManager();
+    cd.addProvider("openai/gpt-5", "rate limited");
+    expect(cd.isOnCooldown("openai/gpt-5")).toBe(true);
+    expect(cd.isOnCooldown("openai/gpt-5-mini")).toBe(true);
+    expect(cd.isOnCooldown("anthropic/opus")).toBe(false);
   });
 
-  // -- ED: boundary --
-
-  it("should increment failCount when adding same model twice", () => {
-    const cm = createCooldownManager();
-    cm.add("openai/gpt-4.1", "first error");
-    expect(cm.getEntry("openai/gpt-4.1")?.failCount).toBe(1);
-
-    cm.add("openai/gpt-4.1", "second error");
-    expect(cm.getEntry("openai/gpt-4.1")?.failCount).toBe(2);
+  it("records the reason and error type on the entry", () => {
+    const cd = createCooldownManager();
+    cd.add("openai/gpt-5", "boom", "server_error");
+    const entry = cd.getEntry("openai/gpt-5");
+    expect(entry).toEqual({ modelId: "openai/gpt-5", reason: "boom", errorType: "server_error" });
   });
 
-  // -- CO: multiple models --
-
-  it("should track multiple models independently", () => {
-    const cm = createCooldownManager();
-    cm.add("openai/gpt-4.1", "error");
-    expect(cm.isOnCooldown("openai/gpt-4.1")).toBe(true);
-    expect(cm.isOnCooldown("anthropic/claude-opus-4.6")).toBe(false);
+  it("defaults the error type to unknown when none is given", () => {
+    const cd = createCooldownManager();
+    cd.add("openai/gpt-5", "boom");
+    expect(cd.getEntry("openai/gpt-5")?.errorType).toBe("unknown");
   });
 
-  // -- ST: state transition --
-
-  it("should transition from active to empty after clear", () => {
-    const cm = createCooldownManager();
-    cm.add("openai/gpt-4.1", "error");
-    expect(cm.isOnCooldown("openai/gpt-4.1")).toBe(true);
-    cm.clear();
-    expect(cm.isOnCooldown("openai/gpt-4.1")).toBe(false);
-    expect(cm.getCooledDownIds().size).toBe(0);
+  it("returns no entry for a model that is not excluded", () => {
+    const cd = createCooldownManager();
+    expect(cd.getEntry("openai/gpt-5")).toBeUndefined();
   });
 
-  // -- Error-type tracking --
-
-  it("should store error type in entry", () => {
-    const cm = createCooldownManager();
-    cm.add("model-a", "rate limit hit", "rate_limit");
-    cm.add("model-b", "internal server error", "server_error");
-    const entryA = cm.getEntry("model-a");
-    const entryB = cm.getEntry("model-b");
-    expect(entryA?.errorType).toBe("rate_limit");
-    expect(entryB?.errorType).toBe("server_error");
-  });
-
-  // -- Provider-level cooldown --
-
-  it("should cool down all models from same provider via addProvider", () => {
-    const cm = createCooldownManager();
-    // Provider-level cooldown triggered by a rate limit
-    cm.addProvider("openai/gpt-4.1", "429 spending cap");
-
-    expect(cm.isOnCooldown("openai/gpt-4.1")).toBe(true);
-    // Untracked model from same provider should also be cooled
-    expect(cm.isOnCooldown("openai/o3")).toBe(true);
-    // Different provider should not be affected
-    expect(cm.isOnCooldown("anthropic/claude-opus-4.6")).toBe(false);
-  });
-
-  // -- getEntry --
-
-  it("should return undefined for non-existent entries", () => {
-    const cm = createCooldownManager();
-    expect(cm.getEntry("nonexistent")).toBeUndefined();
-  });
-
-  it("should return entry with correct fields", () => {
-    const cm = createCooldownManager();
-    cm.add("model-a", "auth failure", "auth_error");
-    const entry = cm.getEntry("model-a");
-    expect(entry).toBeDefined();
-    expect(entry!.modelId).toBe("model-a");
-    expect(entry!.reason).toBe("auth failure");
-    expect(entry!.errorType).toBe("auth_error");
-    expect(entry!.failCount).toBe(1);
-  });
-
-  it("should synthesize entry for provider-level cooldown on untracked model", () => {
-    const cm = createCooldownManager();
-    cm.addProvider("openai/gpt-4.1", "spending cap");
-    const entry = cm.getEntry("openai/o3");
-    expect(entry).toBeDefined();
-    expect(entry!.errorType).toBe("rate_limit");
-    expect(entry!.reason).toContain("provider cooldown");
+  it("synthesizes an entry for a model caught by its provider's cooldown", () => {
+    const cd = createCooldownManager();
+    cd.addProvider("openai/gpt-5", "rate limited");
+    const entry = cd.getEntry("openai/gpt-5-mini");
+    expect(entry?.errorType).toBe("rate_limit");
+    expect(entry?.reason).toContain("openai");
   });
 });
 
@@ -167,79 +108,6 @@ describe("classifyError", () => {
     expect(classifyError("string error")).toBe("unknown");
   });
 });
-
-describe("cooldown persistence (serialize/restore)", () => {
-  it("should serialize and restore model cooldowns", () => {
-    const cm1 = createCooldownManager();
-    cm1.add("openai/gpt-4.1", "rate limit", "rate_limit");
-    cm1.add("anthropic/claude-opus-4.6", "timeout", "timeout");
-
-    const state = cm1.serialize();
-
-    const cm2 = createCooldownManager();
-    cm2.restore(state);
-
-    expect(cm2.isOnCooldown("openai/gpt-4.1")).toBe(true);
-    expect(cm2.isOnCooldown("anthropic/claude-opus-4.6")).toBe(true);
-    expect(cm2.getEntry("openai/gpt-4.1")?.errorType).toBe("rate_limit");
-    expect(cm2.getEntry("anthropic/claude-opus-4.6")?.errorType).toBe("timeout");
-  });
-
-  it("should serialize and restore provider cooldowns", () => {
-    const cm1 = createCooldownManager();
-    cm1.addProvider("google/gemini-2.5-pro", "spending cap");
-
-    const state = cm1.serialize();
-
-    const cm2 = createCooldownManager();
-    cm2.restore(state);
-
-    expect(cm2.isOnCooldown("google/gemini-2.5-pro")).toBe(true);
-    expect(cm2.isOnCooldown("google/other-model")).toBe(true); // provider-level
-  });
-
-  it("should ignore expired state (older than maxAgeMs)", () => {
-    const cm1 = createCooldownManager();
-    cm1.add("openai/gpt-4.1", "rate limit", "rate_limit");
-    const state = cm1.serialize();
-    // Artificially age the state
-    (state as any).savedAt = Date.now() - 7_200_000; // 2 hours ago
-
-    const cm2 = createCooldownManager();
-    cm2.restore(state, 3_600_000); // 1 hour max age
-
-    expect(cm2.isOnCooldown("openai/gpt-4.1")).toBe(false);
-  });
-
-  it("should allow addProvider to work correctly after restore", () => {
-    const cm1 = createCooldownManager();
-    cm1.addProvider("openai/gpt-4.1", "spending cap");
-    const state = cm1.serialize();
-
-    const cm2 = createCooldownManager();
-    cm2.restore(state);
-    cm2.addProvider("google/gemini-2.5-pro", "new error");
-
-    expect(cm2.isOnCooldown("openai/gpt-4.1")).toBe(true);
-    expect(cm2.isOnCooldown("openai/other")).toBe(true); // restored provider
-    expect(cm2.isOnCooldown("google/gemini-2.5-pro")).toBe(true);
-    expect(cm2.isOnCooldown("google/other")).toBe(true); // new provider
-  });
-
-  it("should preserve failCount across sessions", () => {
-    const cm1 = createCooldownManager();
-    cm1.add("model-a", "first", "unknown");
-    cm1.add("model-a", "second", "unknown");
-    expect(cm1.getEntry("model-a")?.failCount).toBe(2);
-
-    const state = cm1.serialize();
-    const cm2 = createCooldownManager();
-    cm2.restore(state);
-
-    expect(cm2.getEntry("model-a")?.failCount).toBe(2);
-  });
-});
-
 describe("normalizeErrorMessage", () => {
   it("should extract message from OpenAI-style JSON error body", () => {
     const raw = '{"error":{"code":429,"message":"Your project has exceeded its spending cap.","status":"RESOURCE_EXHAUSTED"}}';

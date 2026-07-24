@@ -12,12 +12,12 @@ export class IdleTimeoutError extends Error {
   }
 }
 
-export interface SpawnIdleOptions {
+interface SpawnIdleOptions {
   /** Kill process after this many ms of no stdout/stderr activity. */
   idleMs: number;
 }
 
-export interface SpawnResult {
+interface SpawnResult {
   stdout: string;
   stderr: string;
   exitCode: number;

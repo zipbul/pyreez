@@ -3,7 +3,8 @@
  *
  * SUT boundary (real implementations):
  *   cli.ts (main, parseArgs, resolveStdinFlags, usageText) + handlers.ts (handleDeliberate,
- *   handleAcceptance) + validation/schemas.ts (--workers JSON schema).
+ *   handleAcceptance) + validation/schemas.ts (--workers JSON schema) + cli-anonymize.ts (the
+ *   output-boundary relabeling deliberate/interrogate apply before printing).
  *
  * Outside SUT (test-doubled):
  *   deps.config — a stub HandlersConfig (deliberateFn / chatFn / filteredRegistry), bypassing
@@ -18,8 +19,11 @@ import { main, parseArgs } from "../../src/cli";
 import type { CliDeps } from "../../src/cli";
 import type { HandlersConfig } from "../../src/handlers";
 import type { DeliberateOutput } from "../../src/deliberation/types";
+import { TeamDegradedError } from "../../src/deliberation/engine";
 import type { FileIO } from "../../src/report/types";
 import type { TranscriptEntry } from "../../src/deliberation/transcript";
+import { EMPTY_RATINGS, recordObservation, ScoredProtocol } from "../../src/model/ratings";
+import { RATINGS_PATH } from "../../src/quality/scoring";
 
 class CliExitError extends Error {
   constructor(readonly code: number) {
@@ -41,8 +45,8 @@ function harness(config: HandlersConfig = {}) {
 
 /**
  * In-memory FileIO — no real disk access. Mirrors BunFileIO's glob semantics (single '*' per
- * pattern, prefix+suffix match within one directory) closely enough for interrogate/affinity/
- * affinity-compact, whose lookups are all single-directory, single-wildcard.
+ * pattern, prefix+suffix match within one directory) closely enough for interrogate/ratings,
+ * whose lookups are all single-directory, single-wildcard.
  */
 function makeMemoryFileIO(initialFiles: Record<string, string> = {}): FileIO {
   const files = new Map<string, string>(Object.entries(initialFiles));
@@ -73,10 +77,6 @@ function makeMemoryFileIO(initialFiles: Record<string, string> = {}): FileIO {
       }
       return results.sort();
     },
-    async removeGlob(pattern) {
-      const matches = await io.glob(pattern);
-      for (const m of matches) files.delete(m);
-    },
     async rename(from, to) {
       const v = files.get(from);
       if (v !== undefined) { files.set(to, v); files.delete(from); }
@@ -87,7 +87,6 @@ function makeMemoryFileIO(initialFiles: Record<string, string> = {}): FileIO {
 
 const CANNED_OUTPUT: DeliberateOutput = {
   roundsExecuted: 1,
-  totalTokens: { input: 10, output: 20 },
   totalLLMCalls: 2,
   modelsUsed: ["openai/gpt-4.1", "google/gemini-pro"],
   protocol: "shared_convergence",
@@ -169,9 +168,8 @@ describe("CLI commands — main(argv, deps)", () => {
     it("prints available models as JSON", async () => {
       const config: HandlersConfig = {
         filteredRegistry: {
-          getAll: () => [],
           getAvailable: () => [
-            { id: "openai/gpt-4.1", name: "GPT-4.1", provider: "openai", contextWindow: 128000, cost: { inputPer1M: 2, outputPer1M: 8 }, supportsToolCalling: true } as any,
+            { id: "openai/gpt-4.1", name: "GPT-4.1", provider: "openai", supportsToolCalling: true } as any,
           ],
           getById: () => undefined,
         },
@@ -248,6 +246,96 @@ describe("CLI commands — main(argv, deps)", () => {
       expect(printed.protocol).toBe("shared_convergence");
       expect(printed.next_required_action).toBeDefined();
     });
+
+    it("anonymizes real model identity consistently across streaming (onRound) and the final payload", async () => {
+      const config: HandlersConfig = {
+        deliberateFn: async (input) => {
+          // Round 1 streams with the requested team's first member + a fallback that already took
+          // over the second member's slot after it failed.
+          input.onRound?.({
+            number: 1,
+            responses: [
+              { model: "openai/gpt-4.1", content: "a" },
+              { model: "xai/grok-x", content: "b" },
+            ],
+            failedWorkers: [{ model: "google/gemini-pro", error: "timeout", errorCode: "TIMEOUT", retryable: true }],
+          });
+          return {
+            roundsExecuted: 1,
+            totalLLMCalls: 3,
+            modelsUsed: ["openai/gpt-4.1", "xai/grok-x"],
+            protocol: "shared_convergence",
+            rounds: [
+              {
+                number: 1,
+                protocol: "shared_convergence",
+                responses: [
+                  { model: "openai/gpt-4.1", content: "a", workerIndex: 0 },
+                  { model: "xai/grok-x", content: "b", workerIndex: 1 },
+                ],
+                failedWorkers: [{ model: "google/gemini-pro", error: "timeout" }],
+              },
+            ],
+            modelSwaps: [{ original: "google/gemini-pro", replacement: "xai/grok-x", round: 1, error: "timeout" }],
+          } as DeliberateOutput;
+        },
+      };
+      const { deps, stdoutLines, stderrLines } = harness(config);
+
+      await main([
+        "bun", "cli.ts", "deliberate",
+        "--task", "t",
+        "--models", "openai/gpt-4.1,google/gemini-pro",
+        "--no-debug-capture",
+      ], deps);
+
+      const roundLine = stderrLines.find((l) => l.startsWith("[pyreez] round"));
+      expect(roundLine).toContain("worker-0"); // openai/gpt-4.1 -- team position 0
+      expect(roundLine).toContain("fallback-0"); // xai/grok-x -- first non-team model seen
+
+      const printed = JSON.parse(stdoutLines.join(""));
+      expect(printed.modelsUsed).toEqual(["worker-0", "fallback-0"]);
+      expect(printed.rounds[0].responses).toEqual([
+        { model: "worker-0", content: "a", workerIndex: 0 },
+        { model: "fallback-0", content: "b", workerIndex: 1 },
+      ]);
+      expect(printed.rounds[0].failedWorkers[0].model).toBe("worker-1"); // google/gemini-pro -- team position 1
+      expect(printed.modelSwaps[0]).toMatchObject({ original: "worker-1", replacement: "fallback-0" });
+
+      const everything = JSON.stringify({ out: stdoutLines, err: stderrLines });
+      for (const real of ["openai/gpt-4.1", "google/gemini-pro", "xai/grok-x", "openai", "google", "xai"]) {
+        expect(everything).not.toContain(real);
+      }
+    });
+
+    it("anonymizes real model identity in error JSON (TeamDegradedError's modelSwaps + top-level lostSlots)", async () => {
+      const config: HandlersConfig = {
+        deliberateFn: async () => {
+          throw new TeamDegradedError(
+            3,
+            2,
+            [{ model: "xai/grok-x", reason: "cooldown" }],
+            [{ original: "xai/grok-x", replacement: "anthropic/opus", round: 1, error: "down" }],
+          );
+        },
+      };
+      const { deps, stderrLines } = harness(config);
+
+      await expect(main([
+        "bun", "cli.ts", "deliberate",
+        "--task", "t",
+        "--models", "openai/gpt-4.1,google/gemini-pro",
+        "--no-debug-capture",
+      ], deps)).rejects.toThrow(CliExitError);
+
+      const errLine = stderrLines.join("\n");
+      const parsed = JSON.parse(errLine);
+      expect(parsed.lostSlots[0].model).toBe("fallback-0");
+      expect(parsed.modelSwaps[0]).toMatchObject({ original: "fallback-0", replacement: "fallback-1" });
+      for (const real of ["xai/grok-x", "anthropic/opus"]) {
+        expect(errLine).not.toContain(real);
+      }
+    });
   });
 
   // ----------------------------------------------------------
@@ -276,8 +364,6 @@ describe("CLI commands — main(argv, deps)", () => {
       const config: HandlersConfig = {
         chatFn: async (_model, _messages) => ({
           content: "<verdict>accept</verdict><misrepresented>None.</misrepresented><unresolved>None.</unresolved>",
-          inputTokens: 10,
-          outputTokens: 10,
         }),
       };
       const { deps, stdoutLines } = harness(config);
@@ -368,7 +454,7 @@ describe("CLI commands — main(argv, deps)", () => {
     });
 
     it("rejects (propagates) when no transcript entry exists for the given round/worker", async () => {
-      const config: HandlersConfig = { chatFn: async () => ({ content: "unreachable", inputTokens: 0, outputTokens: 0 }) };
+      const config: HandlersConfig = { chatFn: async () => ({ content: "unreachable" }) };
       const { deps } = harness(config);
       deps.fileIO = makeMemoryFileIO(); // empty — no matching file
       await expect(
@@ -381,7 +467,7 @@ describe("CLI commands — main(argv, deps)", () => {
       const config: HandlersConfig = {
         chatFn: async (model, messages, params, opts) => {
           calls.push({ model, messages, params, opts });
-          return { content: "Reconstructed answer", inputTokens: 5, outputTokens: 5 };
+          return { content: "Reconstructed answer" };
         },
       };
       const { deps, stdoutLines } = harness(config);
@@ -401,7 +487,7 @@ describe("CLI commands — main(argv, deps)", () => {
       const config: HandlersConfig = {
         chatFn: async (model, messages, params, opts) => {
           calls.push({ model, messages, params, opts });
-          return { content: "Resumed answer", inputTokens: 5, outputTokens: 5 };
+          return { content: "Resumed answer" };
         },
       };
       const { deps, stdoutLines } = harness(config);
@@ -423,7 +509,7 @@ describe("CLI commands — main(argv, deps)", () => {
         chatFn: async (_model, _messages, _params, opts) => {
           callCount++;
           if (opts?.resumeSessionId) throw new Error("session expired");
-          return { content: "Reconstructed after resume failure", inputTokens: 5, outputTokens: 5 };
+          return { content: "Reconstructed after resume failure" };
         },
       };
       const { deps, stdoutLines } = harness(config);
@@ -436,59 +522,65 @@ describe("CLI commands — main(argv, deps)", () => {
       expect(printed.mode).toBe("reconstructed");
       expect(printed.answer).toBe("Reconstructed after resume failure");
     });
-  });
 
-  // ----------------------------------------------------------
-  // affinity command — read-only, real file IO through the injected FileIO
-  // ----------------------------------------------------------
-  describe("affinity command", () => {
-    it("prints an empty tree when no affinity file exists yet", async () => {
-      const { deps, stdoutLines } = harness({});
-      deps.fileIO = makeMemoryFileIO();
+    it("never includes a model field in the output (host already identified the worker by coordinate)", async () => {
+      const config: HandlersConfig = { chatFn: async () => ({ content: "Reconstructed answer" }) };
+      const { deps, stdoutLines } = harness(config);
+      deps.fileIO = fixtureFileIO(fixtureEntry()); // model: "openai/gpt-4.1"
 
-      await main(["bun", "cli.ts", "affinity"], deps);
-
-      expect(JSON.parse(stdoutLines.join(""))).toEqual({});
-    });
-
-    it("prints the parsed tree when an affinity file exists", async () => {
-      const tree = { adversarial_debate: { children: {}, scores: { "openai/gpt-4.1": { "정확성": { mean: 80, n: 1 } } } } };
-      const { deps, stdoutLines } = harness({});
-      deps.fileIO = makeMemoryFileIO({ ".pyreez/affinity.json": JSON.stringify(tree) });
-
-      await main(["bun", "cli.ts", "affinity"], deps);
-
-      expect(JSON.parse(stdoutLines.join(""))).toEqual(tree);
-    });
-  });
-
-  // ----------------------------------------------------------
-  // affinity-compact command — folds the JSONL log into the tree
-  // ----------------------------------------------------------
-  describe("affinity-compact command", () => {
-    it("compacts an empty (missing) log into an empty tree", async () => {
-      const { deps, stdoutLines } = harness({});
-      deps.fileIO = makeMemoryFileIO();
-
-      await main(["bun", "cli.ts", "affinity-compact"], deps);
-
-      expect(JSON.parse(stdoutLines.join(""))).toEqual({ compacted: true, protocols: [] });
-    });
-
-    it("compacts a populated log into a tree with the recorded protocols", async () => {
-      const records = [
-        { v: 1, ts: 1, protocol: "adversarial_debate", path: ["보안"], model: "openai/gpt-4.1", axes: { "정확성": 80 } },
-        { v: 1, ts: 2, protocol: "shared_convergence", path: ["아키텍처"], model: "google/gemini-pro", axes: { "창의력": 60 } },
-      ];
-      const logText = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
-      const { deps, stdoutLines } = harness({});
-      deps.fileIO = makeMemoryFileIO({ ".pyreez/affinity-log.jsonl": logText });
-
-      await main(["bun", "cli.ts", "affinity-compact"], deps);
+      await main(["bun", "cli.ts", "interrogate", "--transcript", DIR, "--round", "1", "--worker", "0", "--question", "q"], deps);
 
       const printed = JSON.parse(stdoutLines.join(""));
-      expect(printed.compacted).toBe(true);
-      expect(printed.protocols.sort()).toEqual(["adversarial_debate", "shared_convergence"]);
+      expect(printed.model).toBeUndefined();
+      expect("model" in printed).toBe(false);
+      expect(stdoutLines.join("")).not.toContain("openai/gpt-4.1");
+    });
+  });
+
+  // ----------------------------------------------------------
+  // ratings command — read-only internal diagnostic, real file IO through the injected FileIO.
+  // Real model names ARE expected here (v5 §1.5: outside the documented host interface).
+  // ----------------------------------------------------------
+  describe("ratings command", () => {
+    it("prints an empty cell list when no ratings file exists yet", async () => {
+      const { deps, stdoutLines } = harness({});
+      deps.fileIO = makeMemoryFileIO();
+
+      await main(["bun", "cli.ts", "ratings"], deps);
+
+      expect(JSON.parse(stdoutLines.join(""))).toEqual({ updatedAt: 0, cells: [] });
+    });
+
+    it("prints (model, protocol, topicPath, axis) -> mean/n for every recorded cell", async () => {
+      let file = EMPTY_RATINGS;
+      file = recordObservation(file, { model: "openai/gpt-4.1", protocol: ScoredProtocol.SharedConvergence, topicPath: "software/testing", axis: "accuracy" }, 90, 5);
+      file = recordObservation(file, { model: "openai/gpt-4.1", protocol: ScoredProtocol.SharedConvergence, topicPath: "software/testing", axis: "accuracy" }, 80, 6);
+      const { deps, stdoutLines } = harness({});
+      deps.fileIO = makeMemoryFileIO({ [RATINGS_PATH]: JSON.stringify(file) });
+
+      await main(["bun", "cli.ts", "ratings"], deps);
+
+      const printed = JSON.parse(stdoutLines.join(""));
+      expect(printed.cells).toHaveLength(1);
+      expect(printed.cells[0]).toMatchObject({
+        model: "openai/gpt-4.1",
+        protocol: "shared_convergence",
+        topicPath: "software/testing",
+        axis: "accuracy",
+        n: 2,
+      });
+      expect(printed.cells[0].mean).toBeCloseTo(85);
+    });
+
+    it("surfaces a malformed cell key defensively instead of dropping its data", async () => {
+      const file = { v: 1, updatedAt: 1, cells: { "not-a-valid-key": { mean: 50, n: 1, m2: 0 } } };
+      const { deps, stdoutLines } = harness({});
+      deps.fileIO = makeMemoryFileIO({ [RATINGS_PATH]: JSON.stringify(file) });
+
+      await main(["bun", "cli.ts", "ratings"], deps);
+
+      const printed = JSON.parse(stdoutLines.join(""));
+      expect(printed.cells[0]).toEqual({ key: "not-a-valid-key", mean: 50, n: 1 });
     });
   });
 });
